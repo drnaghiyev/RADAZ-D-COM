@@ -1,0 +1,114 @@
+// Synthetic records only; isolated browser and archive, including real Win32 maximization.
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {spawn,spawnSync} from 'node:child_process';
+import {mkdtempSync,mkdirSync,rmSync,readFileSync,createWriteStream} from 'node:fs';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import http from 'node:http';
+import {setTimeout as delay} from 'node:timers/promises';
+import dicomParser from 'dicom-parser';
+const {chromium}=createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE||'playwright');
+const native=process.env.RADAZ_NATIVE_WINDOWS==='1';
+const free=()=>new Promise(resolve=>{const s=http.createServer();s.listen(0,'127.0.0.1',()=>{const port=s.address().port;s.close(()=>resolve(port));});});
+const root=mkdtempSync(path.join(tmpdir(),'radaz-022-browser-'));
+mkdirSync('outputs/release-022',{recursive:true});
+const fixture=spawn(process.env.PYTHON||'python',['tests/media-browser-fixture.py','--root',root],{windowsHide:true,stdio:['ignore','pipe','pipe']});
+let server,browser,fixtureErrors='';fixture.stderr.on('data',d=>fixtureErrors+=String(d));
+try{
+ const archivePort=await new Promise((resolve,reject)=>{let buffer='';const timer=setTimeout(()=>reject(Error(fixtureErrors)),20000);fixture.stdout.on('data',d=>{buffer+=d;if(buffer.includes('\n')){clearTimeout(timer);resolve(JSON.parse(buffer.split('\n')[0]).port);}});});
+ await fetch(`http://127.0.0.1:${archivePort}/_test/archive`,{method:'POST'});
+ const port=await free(),worker=await free(),base=`http://127.0.0.1:${port}`;
+ server=spawn(process.execPath,['scripts/start-release.mjs'],{windowsHide:true,stdio:['ignore','pipe','pipe'],env:{...process.env,RADAZ_PORT:String(port),RADAZ_WORKER_PORT:String(worker),RADAZ_ARCHIVE_PORT:String(archivePort)}});
+ const log=createWriteStream('outputs/release-022/server.log');server.stdout.pipe(log);server.stderr.pipe(log);
+ for(let i=0;i<100;i++){try{if((await fetch(base)).ok)break;}catch{}await delay(200);}
+ browser=await chromium.launch({headless:!native,channel:'msedge',args:native?['--window-position=-2400,0']:[]});
+ const context=await browser.newContext({viewport:{width:1440,height:900}}),errors=[];context.setDefaultTimeout(25000);
+ context.on('page',p=>p.on('pageerror',e=>errors.push(e.message)));
+ await context.route('**/local-archive-api/license',route=>route.fulfill({json:{valid:true,required:true,kind:'owner',message:'Synthetic license',deviceId:'TEST'}}));
+ const file=readFileSync('tests/fixtures/demo/abdomen-1.dcm'),ds=dicomParser.parseDicom(new Uint8Array(file));
+ const tag=id=>ds.string('x'+id.toLowerCase())||'',val=(v,vr='LO')=>({vr,Value:[v]});
+ await context.route('**/synthetic-pacs/**',route=>{
+  const pathname=new URL(route.request().url()).pathname;
+  if(pathname.endsWith('/studies'))return route.fulfill({json:[{'0020000D':val(tag('0020000D'),'UI'),'00100010':val({Alphabetic:'SYNTHETIC^PACS'},'PN'),'00080020':val(tag('00080020'),'DA'),'00080061':val('CT'),'00081030':val('Native popup test'),'00201206':val(1,'IS'),'00201208':val(1,'IS')}]});
+  if(pathname.endsWith('/series'))return route.fulfill({json:[{'0020000E':val(tag('0020000E'),'UI'),'00200011':val(2,'IS'),'00080060':val('CT'),'0008103E':val('Synthetic abdomen'),'00201209':val(1,'IS')}]});
+  if(pathname.endsWith('/instances'))return route.fulfill({json:[{'00080018':val(tag('00080018'),'UI')}]});
+  return route.fulfill({contentType:'application/dicom',body:file});
+ });
+ const viewer=await context.newPage();
+ const registered=native?viewer.waitForResponse(r=>r.url().endsWith('/window/register')):null;await viewer.goto(base);
+ if(native)assert.equal((await (await registered).json()).registered,true);
+ await viewer.waitForFunction(()=>document.querySelector('.statusbar')?.textContent.includes('Cornerstone3D hazırdır'));
+ const control=async action=>{const r=await fetch(`http://127.0.0.1:${archivePort}/_test/${action}`,{method:'POST'});assert.equal(r.status,200);};
+ await control('window-study');
+ let created=context.waitForEvent('page');await viewer.getByRole('button',{name:'Local arxiv',exact:true}).click();const archive=await created;
+ await archive.getByRole('checkbox',{name:'Bu gün',exact:true}).uncheck();
+ await archive.getByRole('cell').filter({hasText:'WINDOW TEST'}).dblclick();
+ const pane=id=>viewer.locator(`[data-panel="${id}"]`),windowText=id=>pane(id).locator('.bottom-left span').first();
+ const expectWindow=async(id,text)=>{await windowText(id).filter({hasText:text}).waitFor();assert.equal(await windowText(id).innerText(),text);};
+ await expectWindow('A','WL 100 · WW 400');
+ const scroll=async(id,direction,index)=>{await pane(id).hover();await viewer.mouse.wheel(0,direction*120);await pane(id).locator('.bottom-right').filter({hasText:`İmage ${index} / 3`}).waitFor();};
+ await viewer.getByRole('button',{name:'Pozitiv, neqativ və window',exact:true}).click();
+ await viewer.getByRole('menuitem',{name:'WL 80 / WW 160',exact:true}).click();await expectWindow('A','WL 80 · WW 160');
+ await scroll('A',1,2);await expectWindow('A','WL 200 · WW 800');
+ await scroll('A',-1,1);await expectWindow('A','WL 80 · WW 160');
+ await viewer.getByRole('button',{name:'WINDOW PRESET menyusu',exact:true}).click();
+ await viewer.getByRole('menuitem').filter({hasText:'Ağciyər'}).click();
+ const preset=await windowText('A').innerText();assert.notEqual(preset,'WL 80 · WW 160');
+ await scroll('A',1,2);await expectWindow('A','WL 200 · WW 800');
+ await viewer.keyboard.press('w');const box=await pane('A').boundingBox();
+ await viewer.mouse.move(box.x+box.width/2,box.y+box.height/2);await viewer.mouse.down();await viewer.mouse.move(box.x+box.width/2+55,box.y+box.height/2+30,{steps:8});await viewer.mouse.up();
+ const dragged=await windowText('A').innerText();assert.notEqual(dragged,'WL 200 · WW 800');
+ await scroll('A',-1,1);await expectWindow('A',preset);
+ await scroll('A',1,2);await expectWindow('A',dragged);
+ await viewer.getByRole('button',{name:'Panel düzülüşü',exact:true}).click();await viewer.getByRole('gridcell',{name:'2 sütun, 1 sətir, 2 panel',exact:true}).click();
+ await pane('B').click();await viewer.locator('.series-card').filter({hasText:'Window isolation'}).click();
+ await expectWindow('B','WL 100 · WW 400');await expectWindow('A',dragged);
+ await viewer.getByRole('button',{name:'Pozitiv, neqativ və window',exact:true}).click();await viewer.getByRole('menuitem',{name:'Xüsusi pəncərə',exact:true}).click();
+ await viewer.getByLabel('Window level (WL)',{exact:true}).fill('75');await viewer.getByLabel('Window width (WW)',{exact:true}).fill('123');await viewer.getByRole('button',{name:'Tətbiq et',exact:true}).click();
+ await expectWindow('B','WL 75 · WW 123');await expectWindow('A',dragged);
+ await scroll('B',1,2);await expectWindow('B','WL 200 · WW 800');await scroll('B',-1,1);await expectWindow('B','WL 75 · WW 123');
+ console.log('PASS: menu, preset, drag and custom WW/WL isolated per slice and panel, restored on return');
+ // Keep an actual CD copy paused after a partial durable import, then change studies.
+ await control('pause-copy');await control('insert');await control('resume');
+ const closes=[];context.on('request',r=>{if(r.url().endsWith('/removable/close'))closes.push(r.url());});
+ await viewer.getByRole('button',{name:'CD/DVD import',exact:true}).click();
+ const cd=viewer.locator('.series-card').filter({hasText:'CD progressive CT'});await cd.waitFor();
+ await viewer.waitForFunction(()=>[...document.querySelectorAll('.series-card')].some(c=>c.textContent.includes('CD progressive CT')&&parseInt(c.querySelector('.series-info span').textContent)>10));
+ await archive.getByRole('cell').filter({hasText:'TEST PATIENT 1'}).dblclick();
+ await pane('A').locator('.top-left').filter({hasText:'TEST PATIENT 1'}).waitFor();
+ assert.equal(await viewer.getByRole('button',{name:'CD/DVD import',exact:true}).getAttribute('aria-pressed'),'true');
+ created=context.waitForEvent('page');await viewer.getByRole('button',{name:'PACS müayinələri',exact:true}).click();const pacs=await created;
+ await pacs.getByRole('button',{name:'PACS konfiqurasiyasını aç',exact:true}).click();
+ await pacs.getByLabel('PACS təsviri',{exact:true}).fill('Synthetic only');
+ await pacs.getByLabel('PACS DICOMweb URL',{exact:true}).fill(base+'/synthetic-pacs');
+ await pacs.getByRole('button',{name:'Yadda saxla və bağla',exact:true}).click();
+ await pacs.getByRole('checkbox',{name:'Bu gün',exact:true}).uncheck();await pacs.getByRole('button',{name:'Axtar',exact:true}).click();
+ await pacs.getByRole('cell',{name:'SYNTHETIC PACS',exact:true}).dblclick();
+ const pacsPatient=tag('00100010').replaceAll('^',' ');
+ await pane('A').locator('.top-left').filter({hasText:pacsPatient}).waitFor();
+ assert.equal(await viewer.getByRole('button',{name:'CD/DVD import',exact:true}).getAttribute('aria-pressed'),'true');
+ await control('resume-copy');
+ await cd.locator('.series-info').filter({hasText:'700 görüntü'}).waitFor({timeout:120000});
+ assert.ok((await pane('A').locator('.top-left').innerText()).includes(pacsPatient));
+ assert.equal(closes.length,0,'Opening another study does not cancel optical import');
+ const status=await(await fetch(`http://127.0.0.1:${archivePort}/status`)).json();assert.equal(status.instanceCount,708);
+ await cd.click();await pane('A').locator('.bottom-right').filter({hasText:'/ 700'}).waitFor();
+ assert.equal(await cd.locator('img').count(),1);
+ await control('eject');await delay(1200);assert.equal(await cd.count(),1);
+ assert.equal((await(await fetch(`http://127.0.0.1:${archivePort}/status`)).json()).instanceCount,708);
+ console.log('PASS: partial CD import survives archive and PACS study changes, all 701 images archive and appear in Viewer without stealing selection');
+ await viewer.screenshot({path:'outputs/release-022/isolated-window-and-cd.png'});
+ assert.deepEqual(errors,[]);
+}catch(error){
+ console.error(error);
+ for(const [i,page] of(browser?.contexts()[0]?.pages()||[]).entries()){
+  console.error('PAGE',i,await page.locator('body').innerText().catch(()=>''));
+  await page.screenshot({path:`outputs/release-022/failure-${i}.png`}).catch(()=>{});
+ }
+ throw error;
+}finally{
+ await browser?.close();
+ for(const child of [server,fixture])if(child?.pid)spawnSync('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});
+ assert.ok(path.resolve(root).startsWith(path.resolve(tmpdir())+path.sep+'radaz-022-browser-'));rmSync(root,{recursive:true,force:true});
+}

@@ -127,7 +127,7 @@ try {
   await page.screenshot({path:'outputs/media/ejected-archived.png'});
   // Reinsert: persistent series and archive instances must not duplicate.
   await control('insert');await control('resume');
-  await page.waitForFunction(()=>document.querySelector('.media-import-progress')?.textContent.includes('701'));
+  await page.waitForFunction(()=>document.querySelector('.statusbar')?.textContent.includes('701 / 701'));
   await delay(1500);await control('eject');await delay(1500);
   assert.equal(await page.locator('.series-card').count(),2);
   assert.match(await page.locator('.series-card').filter({hasText:'CD progressive CT'}).textContent(),/700 görüntü/);
@@ -147,11 +147,11 @@ try {
   }
   for(const i of [1,2])await archivePage.getByRole('checkbox',{name:`TEST PATIENT ${i} müayinəsini seç`,exact:true}).check();
   await archivePage.getByRole('cell').filter({hasText:'TEST PATIENT 1'}).dblclick();
-  await page.waitForFunction(()=>document.querySelectorAll('.series-card').length===2);
+  await page.waitForFunction(count=>document.querySelectorAll('.series-card').length===count,process.env.RADAZ_ARCHIVE_ONLY?2:4);
   assert.equal(context.pages().length,count,'Checkbox selection still reuses Viewer');
   assert.match(await page.locator('.series-rail').textContent(),/TEST PATIENT 1/);
   assert.match(await page.locator('.series-rail').textContent(),/TEST PATIENT 2/);
-  assert.equal(await page.locator('.media-import-progress').count(),0,'Archive never starts CD import');
+  assert.equal(await page.locator('.media-import-progress').count(),process.env.RADAZ_ARCHIVE_ONLY?0:1,'Archive preserves an explicitly started CD import');
   const first=page;await first.bringToFront();
   await first.getByRole('button',{name:'Ölçmə alətləri',exact:true}).click();await first.getByRole('menuitem',{name:/Uzunluq/}).click();
   await first.getByRole('menu').waitFor({state:'hidden'});await delay(150);
@@ -173,7 +173,7 @@ try {
   await first.locator('.brand').hover();await delay(100);
   assert.equal((await points.evaluateAll(lines=>lines.map(l=>l.getAttribute('stroke')))).filter(c=>c==='#56edff').length,0,'Leaving the viewport clears hover');
   await first.screenshot({path:'outputs/media/measurement-theme.png'});
-  console.log('Archive opens and replaces selections in the same Viewer; CD import stays off');
+  console.log('Archive opens and replaces selections in the same Viewer; explicit CD import keeps running');
   assert.deepEqual(errors,[]);
   console.log(process.env.RADAZ_ARCHIVE_ONLY ? 'PASS: Viewer reuse, multi-study selections and per-measurement hover/selection.' : 'PASS: 700 CT slices progressive, raw/extensionless/JPEG import, scroll preserved, MPR/3D/report persist after eject, permanent archive import and reinsert deduplication, no pickers; Viewer reuse and measurements.');
 } catch(error) {

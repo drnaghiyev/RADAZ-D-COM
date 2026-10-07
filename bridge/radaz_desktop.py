@@ -200,7 +200,7 @@ def stage_package(root, archive, target, digest, size):
             if staging.exists() and staging.resolve().parent == (root / 'versions').resolve():
                 shutil.rmtree(staging)
     atomic_json(root / 'pending.json', {'version': target})
-    state(root, 'ready', f'RADAZ {target} yeniləməsi uğurla hazırlandı. Növbəti açılışda avtomatik tətbiq olunacaq.', target,
+    state(root, 'ready', f'RADAZ {target} yeniləməsi uğurla hazırlandı. Tətbiq etmək üçün Proqramı yenidən aç düyməsini basın.', target,
           {'done': 1, 'total': 1, 'unit': 'yeniləmə'})
 
 def check_update(root, approved_version=None):
@@ -226,7 +226,7 @@ def check_update(root, approved_version=None):
         state(root, 'error', f'{target} açıla bilmədi. Əvvəlki işlək versiya saxlanılıb.'); return
     # Discovery never downloads. Approval is single-use and tied to the version shown.
     if approved_version != target:
-        state(root, 'available', f'RADAZ {target} — yeni versiya mövcuddur. Yükləmək üçün Yenilə düyməsini basıb təsdiq edin.', target)
+        state(root, 'available', f'RADAZ {target} — yeni versiya mövcuddur. Avtomatik yükləmək üçün Yenilə düyməsini basın.', target)
         return
     state(root, 'downloading', f'RADAZ {target} arxa planda yüklənir. Proqramdan istifadə edə bilərsiniz.', target)
     downloads = root / 'downloads'; downloads.mkdir(exist_ok=True)
@@ -327,7 +327,7 @@ def initialize(root, shortcuts=True):
     if not (root / 'control-token').exists(): (root / 'control-token').write_text(secrets.token_hex(32))
     if current and current['version'] != target:
         atomic_json(root / 'pending.json', {'version': target})
-        state(root, 'ready', f'RADAZ {target} hazırdır. Növbəti açılışda tətbiq olunacaq.', target)
+        state(root, 'ready', f'RADAZ {target} hazırdır. Tətbiq etmək üçün Proqramı yenidən aç düyməsini basın.', target)
     elif not current:
         atomic_json(root / 'active.json', {'version': target})
         state(root, 'current', 'Yeni versiyalar yoxlanılır. Yükləmə yalnız təsdiqinizlə başlayır.')

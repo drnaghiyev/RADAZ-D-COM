@@ -118,15 +118,15 @@ try {
   await archivePage.waitForLoadState();
   await archivePage.getByRole('checkbox', { name: 'Bu gün', exact: true }).uncheck();
   const existingCount=context.pages().length,archiveViewer=discViewer;
-  await archivePage.getByRole('cell').filter({hasText:archived.patient}).click();
+  await archivePage.getByRole('cell').filter({hasText:archived.patient}).dblclick();
   await archiveViewer.waitForURL('**/#archive-studies=*');
   await archiveViewer.locator('[data-panel="A"][data-has-image="true"]').waitFor();
   assert.equal(context.pages().length,existingCount,'Archive replaces disc in existing Viewer');
-  await noAutoImport(archiveViewer);
-  assert.equal(await archiveViewer.locator('.series-card').count(),1);
+  assert.equal(await button(archiveViewer).getAttribute('aria-pressed'),'true');
+  assert.equal(await archiveViewer.locator('.series-card').count(),2);
   const discReads=mediaRequests.filter(r=>r.url.includes('/removable/file/')).length;
   await archivePage.waitForTimeout(250);assert.ok(maximizeRequests.length>=1);assert.match(maximizeRequests[0].token,/^RADAZ_VIEWER_[a-f0-9]{32}$/);assert.equal(await archivePage.title(),'RADAZ · Local arxiv');
-  console.log('PASS: archive reuses Viewer and stops its explicit disc import.');
+  console.log('PASS: archive reuses Viewer and keeps its explicit disc import running.');
 
   const pacsPage = await context.newPage();
   await pacsPage.goto(base + '/pacs');
@@ -136,11 +136,11 @@ try {
   await pacsPage.getByRole('cell').filter({hasText:archived.patient}).dblclick();
   await pacsViewer.getByRole('progressbar',{name:'PACS yüklənir',exact:true}).waitFor();
   const downloaded=pacsPage.waitForResponse(response=>response.url().includes('/test-pacs/')&&response.url().includes('/instances/'));
-  await noAutoImport(pacsViewer);releasePacs();await downloaded;
+  assert.equal(await button(pacsViewer).getAttribute('aria-pressed'),'true');releasePacs();await downloaded;
   await pacsPage.locator('.records-spinner').waitFor({state:'hidden'});
   await pacsViewer.locator('.statusbar').filter({hasText:'1 DICOM görüntüsü yükləndi'}).waitFor();
   assert.equal(context.pages().length,existingCount+1,'PACS uses the existing Viewer');
-  assert.equal(await pacsViewer.locator('.series-card').count(),1);
+  assert.equal(await pacsViewer.locator('.series-card').count(),2);
   assert.ok(pacsRequests.some(url=>url.includes('/instances/')));
   await archiveViewer.reload();await archiveViewer.locator('[data-panel="A"][data-has-image="true"]').waitFor();
   await noAutoImport(archiveViewer);
@@ -162,7 +162,7 @@ try {
   assert.equal(mediaRequests.filter(r=>r.url.includes('/removable/file/')).length,discReads,'Archive/PACS/reload never restart disc reads');
   assert.equal(pickers, 0);
   assert.deepEqual(errors, []);
-  console.log('PASS: legacy preference ignored; explicit CD import works and stops; archive click, PACS pending/download/open and reload never start disc import; all opens reuse the same Viewer.');
+  console.log('PASS: legacy preference ignored; explicit CD import survives other study opens; archive click, PACS pending/download/open and reload never start disc import; all opens reuse the same Viewer.');
 } catch (error) {
   console.error(error.message);
   mkdirSync('outputs/media-scope', { recursive: true });

@@ -29,7 +29,7 @@ buffer = io.BytesIO(); image.save(buffer, format='JPEG', quality=95)
 ds.PixelData = encapsulate([buffer.getvalue()]); ds['PixelData'].is_undefined_length = True
 ds.file_meta.TransferSyntaxUID = JPEGBaseline8Bit; ds.save_as(disc/'JPEG_NO_EXTENSION', enforce_file_format=True)
 (disc/'README.txt').write_text('Unrelated text file' * 100)
-present = {}; released = Event()
+present = {}; released = Event(); copying = Event(); copying.set()
 media = RemovableMedia(lambda: dict(present), interval=.05, cache_parent=args.root)
 open_file = media.open_file
 
@@ -43,6 +43,12 @@ def gated_file(sid, fid):
 media.open_file = gated_file
 archive = Archive(args.root/'archive', bind='127.0.0.1')
 Base = handler_for(archive, media)
+persist = media.persist
+def gated_persist(path):
+    if int(path.stat().st_size) and archive.status()['instanceCount'] >= 33:
+        copying.wait(120)
+    persist(path)
+media.persist = gated_persist
 
 class Handler(Base):
     def do_GET(self):
@@ -64,6 +70,20 @@ class Handler(Base):
         return super().permitted() or (origin.scheme == 'http' and origin.hostname == '127.0.0.1')
 
     def do_POST(self):
+        if self.path == '/_test/pause-copy':
+            copying.clear(); self.respond({'ok': True}); return
+        if self.path == '/_test/resume-copy':
+            copying.set(); self.respond({'ok': True}); return
+        if self.path == '/_test/window-study':
+            for i in range(1, 4):
+                ds = dcmread(disc/'CT/I0002'); ds.InstanceNumber = i; ds.ImagePositionPatient = [0,0,i]
+                ds.PatientName = 'WINDOW^TEST'; ds.PatientID = 'WINDOW-TEST'
+                ds.StudyInstanceUID = '2.25.301'; ds.SeriesInstanceUID = '2.25.302'
+                ds.SOPInstanceUID = f'2.25.303.{i}'; ds.SeriesDescription = 'Window isolation'
+                ds.WindowCenter = 100 * i; ds.WindowWidth = 400 * i
+                buffer = io.BytesIO(); ds.save_as(buffer, enforce_file_format=True)
+                archive.store(buffer.getvalue(), ds)
+            self.respond({'ok': True}); return
         if self.path == '/_test/insert':
             released.clear(); present[str(disc)] = ('synthetic', 'Synthetic 700 CT'); self.respond({'ok': True}); return
         if self.path == '/_test/eject':
@@ -84,4 +104,4 @@ class Handler(Base):
 http = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
 print(json.dumps({'port': http.server_port}), flush=True)
 try: http.serve_forever()
-finally: released.set(); media.close(); archive.stop(); http.server_close()
+finally: released.set(); copying.set(); media.close(); archive.stop(); http.server_close()

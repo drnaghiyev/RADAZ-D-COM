@@ -6,7 +6,7 @@ Azərbaycan dilində DICOM görüntüləmə və radiologiya iş sahəsi — Wind
 
 ## Quraşdırma
 
-1. Son buraxılışın **Assets** bölməsindən **RADAZ-0.2.21-Setup.exe** endirin.
+1. Son buraxılışın **Assets** bölməsindən **RADAZ-0.2.22-Setup.exe** endirin.
 2. Setup-ı açıb quraşdırın. Node.js, Python və lazım olan komponentlər paketə daxildir.
 3. İş masasındakı **RADAZ** qısayolunu açın. Proqram lokal brauzer pəncərəsində işləyir.
 
@@ -22,9 +22,9 @@ Aylıq lisenziya: **10 AZN**. Demo bitdikdə arxiv və PACS əlçatan qalır, Vi
 
 ## Proqramı yeniləmək
 
-**Yardım → Yeniləmələri yoxla → Yenilə → Təsdiq et və yenilə**.
+**Yardım → Yeniləmələri yoxla → Yenilə → Proqramı yenidən aç**.
 
-Yeni versiya mövcud olduqda bildiriş göstərilir. Yoxlama və yenilənmə pəncərəsinin açılması endirməni başlatmır. Təsdiqdən sonra paket endirilir, yoxlanılır və hazırlanır; gediş progressbar-da görünür. Hazır olduqda təsdiq mesajı çıxır. Yeni versiya növbəti açılışda tətbiq olunur; davam edən müayinə kəsilmir.
+Yeni versiya mövcud olduqda bildiriş göstərilir. Yoxlama və yenilənmə pəncərəsinin açılması endirməni başlatmır. “Yenilə” bir kliklə paketi endirir, yoxlayır və hazırlayır; gediş progressbar-da görünür. Hazır olduqda pəncərə açıq qalır və “Proqramı yenidən aç” düyməsi görünür. Bu düymə yenilənməni tətbiq edib RADAZ-ı yenidən başladır; ayrıca Setup endirmək lazım deyil.
 
 **Digər kompüterdə 0.2.9 qalırsa:** həmin versiyanın köhnə yenilənmə ünvanı artıq əlçatan deyil. Son Setup-ı o kompüterdə **bir dəfə** açın. Sonrakı yenilənmələr yeni açıq kanaldan görünəcək.
 
@@ -32,10 +32,10 @@ Arxiv proqramın versiya qovluqlarından ayrıdır. Standart yer `Documents\RADA
 
 ## İş axını
 
-- **Local arxiv və PACS:** müayinələri checkbox ilə seçin və açın. Mövcud Viewer istifadə olunur. Viewer-dən açılmış ayrıca arxiv/PACS pəncərəsi müayinə açıldıqda Windows-da minimallaşır; adi brauzer tablarında Viewer-ə fokus keçidi istifadə olunur.
-- **CD/DVD:** DICOM faylları ardıcıl köçürülüb daimi Local arxivə yazılır; hər hazır görüntü eyni vaxtda Viewer-də görünür. Piksellər lokal diskdən oxunur. CD çıxarılanda yalnız müvəqqəti köçürmə nüsxəsi silinir; arxiv və açıq görüntülər saxlanılır. Təkrar import eyni SOP faylını çoxaltmır.
+- **Local arxiv və PACS:** müayinələri checkbox ilə seçin və iki kliklə açın. Mövcud Viewer önə gətirilir və maksimum ölçüdə açılır; arxiv/PACS pəncərələri minimallaşmır.
+- **CD/DVD:** DICOM faylları ardıcıl köçürülüb daimi Local arxivə yazılır; hər hazır görüntü eyni vaxtda Viewer-də görünür. Başqa müayinə açıldıqda import arxa planda davam edir və aktiv görüntünü dəyişmir. Piksellər lokal diskdən oxunur. CD çıxarılanda yalnız müvəqqəti köçürmə nüsxəsi silinir; arxiv və açıq görüntülər saxlanılır. Təkrar import eyni SOP faylını çoxaltmır.
 - **Ölçmələr:** xəttin üzərindən tutub daşıyın. Oxun uclarından tutub istiqamətini və uzunluğunu dəyişin. Ox üzərində iki klik və ya sağ klik menyusu şərhi dəyişir. Sağ klik → **Sil**, **Ctrl+D** → cari kəsitdə hamısını sil.
-- **2D mouse:** sol düymə WW/WL, orta düymə daşıma, sağ düyməni sürükləmə zoom, təkər kəsitləri dəyişir. Seçilmiş alət sol düymənin davranışını dəyişir.
+- **2D mouse:** sol düymə WW/WL, orta düymə daşıma, sağ düyməni sürükləmə zoom, təkər kəsitləri dəyişir. WW/WL yalnız aktiv görüntüdə dəyişir; hər kəsit və panel öz ayarını saxlayır. Seçilmiş alət sol düymənin davranışını dəyişir.
 - **Hesabat:** Viewer siyahısında seçilmiş seriya açılır. Hesabat redaktoru, Word/PDF çıxışı və seçilmiş görüntülərin ZIP hazırlanması mövcuddur.
 - **Çap önbaxışı:** **Tək / Hamısı** seçimi ilə zoom, parlaqlıq və kontrastı dəyişin.
 
@@ -71,4 +71,4 @@ Xəta bildirərkən RADAZ versiyasını, Windows versiyasını və xəta mətnin
 
 Şəxsi sahib paneli müştəri Setup-ına daxil deyil. Bank hesabları parolla şifrələnir; AZN/USD qiymət, Mərkəzi Bank məzənnəsi, demo və modul qiymətləri idarə olunur. 0.2.18+ imzalı ümumi ayarları avtomatik qəbul edir. Provayder hələ seçilmədiyi üçün canlı ödəniş bağlıdır. Provayder qoşulduqdan sonra təsdiqlənmiş ödəniş alınmış lisenziyanı və ya modulu avtomatik aktivləşdirir.
 
-Yenilənmə endirildikdən sonra təsdiq pəncərəsi bağlanır. Yenilənməyə yenidən baxıb **Yenidən başlat və tətbiq et** düyməsini seçmək olar. Köhnə hazırlanmış paket daha yeni versiyanı gizlətmir.
+Yenilənmə endirildikdən sonra **Proqramı yenidən aç** düyməsi görünür. Köhnə hazırlanmış paket daha yeni versiyanı gizlətmir.

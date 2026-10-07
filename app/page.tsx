@@ -28,11 +28,12 @@ import { expandSources, filesFromDrop } from '@/lib/import-sources';
 import { parseDicomFile } from '@/lib/dicom-file';
 import { getArchiveFiles, saveArchiveFiles } from '@/lib/local-archive';
 import { watchRemovableMedia, type MediaImage, type MediaProgress } from '@/lib/removable-media';
+import { isolateImageWindowing, type ImageWindowLevels } from '@/lib/image-windowing';
 import type * as Core from '@cornerstonejs/core';
 
 type Tool = 'scroll' | 'arrow' | 'pencil' | 'cursor3d' | 'wl' | 'pan' | 'zoom' | 'length' | 'angle' | 'arch' | 'cobb' | 'ellipse' | 'hu' | 'deviation' | 'erase';
 type Series = { id: string; studyId: string; name: string; modality: string; patient: string; patientId: string; birth: string; date: string; number: string; imageIds: string[]; initialImageId?:string; thumb?: string; mediaSession?: string; archived?: boolean; discovered?: number; loading?: boolean };
-type Preset = { ww: number; wl: number; token: number; panel: string; seriesId: string } | null;
+type Preset = { ww: number; wl: number; token: number; panel: string; seriesId: string; imageId: string } | null;
 type ImportSource = { id: number; label: string; files: File[] };
 type MprData = { sourceId: string; stacks: Record<'SAG' | 'COR' | 'AX', string[]>; planes: Series[]; owned: string[]; orientations: MprOrientations | null; pivot?: Point3 | null };
 type DetachedMode = 'mpr' | '3d';
@@ -92,7 +93,8 @@ function age(birth: string, study: string) {
   return `${+study.slice(0, 4) - +birth.slice(0, 4) - Number(study.slice(4) < birth.slice(4))} yaş`;
 }
 
-function ViewportPane({ cursor, onCursor, hideText, id, series, initialImageId, selected, tool, preset, resetToken, clearToken, ready, marks, selectedMarkId, localizers, otherImages, reconstruction, viewAnchor, expanded, concealed, onImageChange, onMoveSource, onMoveIntersection, loadingProgress, onRotateSource, onRotateStart, onPreviewRotateSource, onAddMark, onUpdateMark, onRemoveMark, onSelectMark, onClearImage, onSelect, onToggleMaximize, onDropSeries }: {
+function ViewportPane({ windowLevels, cursor, onCursor, hideText, id, series, initialImageId, selected, tool, preset, resetToken, clearToken, ready, marks, selectedMarkId, localizers, otherImages, reconstruction, viewAnchor, expanded, concealed, onImageChange, onMoveSource, onMoveIntersection, loadingProgress, onRotateSource, onRotateStart, onPreviewRotateSource, onAddMark, onUpdateMark, onRemoveMark, onSelectMark, onClearImage, onSelect, onToggleMaximize, onDropSeries }: {
+  windowLevels: ImageWindowLevels;
   cursor: CursorPosition | null; onCursor: (position: CursorPosition) => void; hideText: boolean;
   id: string; series?: Series; selected: boolean; tool: Tool; preset: Preset; resetToken: number; ready: boolean;
   initialImageId?: string;
@@ -123,6 +125,7 @@ function ViewportPane({ cursor, onCursor, hideText, id, series, initialImageId, 
   const [imageId, setImageId] = useState('');
   const lastClear = useRef(clearToken);
   const lastReset = useRef(resetToken);
+  const lastPreset = useRef<number | undefined>(undefined);
   useEffect(()=>setEditingArrow(null),[imageId]);
   const [slice, setSlice] = useState(0);
   const [ww, setWW] = useState<number | null>(null);
@@ -158,6 +161,8 @@ function ViewportPane({ cursor, onCursor, hideText, id, series, initialImageId, 
         if (viewer.engine.getViewport(viewportId)) viewer.engine.resize(true, true);
       });
       resizeObserver.observe(element);
+      const stopWindowing = isolateImageWindowing(viewer.engine.getViewport(viewportId) as Core.Types.IStackViewport,
+        id, windowLevels, viewer.core.Enums.Events, getDefaultWindow);
       const sync = () => {
         const vp = viewer.engine.getViewport(viewportId) as Core.Types.IStackViewport;
         setSlice(vp.getCurrentImageIdIndex());
@@ -203,7 +208,7 @@ function ViewportPane({ cursor, onCursor, hideText, id, series, initialImageId, 
       const panel = element.parentElement!;
       panel.addEventListener('wheel', wheel, { passive: false, capture: true });
       (element as any).__cleanup = () => {
-        resizeObserver.disconnect();
+        stopWindowing(); resizeObserver.disconnect();
         element.removeEventListener(viewer.core.Enums.Events.STACK_NEW_IMAGE, sync);
         element.removeEventListener(viewer.core.Enums.Events.VOI_MODIFIED, sync);
         element.removeEventListener(viewer.core.Enums.Events.IMAGE_RENDERED, sync);
@@ -219,7 +224,7 @@ function ViewportPane({ cursor, onCursor, hideText, id, series, initialImageId, 
       if (viewer?.engine.getViewport(viewportId)) viewer.engine.disableElement(viewportId);
       groupRef.current = null; setEnabled(false); setViewport(null); setImageId('');
     };
-  }, [ready, id, viewportId, onImageChange]);
+  }, [ready, id, viewportId, onImageChange, windowLevels]);
 
   useEffect(() => {
     if (!enabled || !series?.imageIds.length) return;
@@ -239,8 +244,10 @@ function ViewportPane({ cursor, onCursor, hideText, id, series, initialImageId, 
       await vp.setStack(series.imageIds, initialIndex >= 0 ? initialIndex : 0);
       if (token !== requestRef.current) return;
       stackSeries.current = series.id;
-      const { wl, ww } = getDefaultWindow(vp.getCurrentImageId() || series.imageIds[0]);
-      vp.setProperties(properties || { voiRange: { lower: wl - ww / 2, upper: wl + ww / 2 } });
+      if (properties) {
+        const { voiRange: _previousImageWindow, ...presentationProperties } = properties;
+        vp.setProperties(presentationProperties);
+      }
       if (camera && presentation) {
         // Keep screen scale/pan while accepting the NEW reconstructed plane's
         // normal and view-up. Restoring the old world camera corrupts oblique MPR.
@@ -285,8 +292,11 @@ function ViewportPane({ cursor, onCursor, hideText, id, series, initialImageId, 
 
   useEffect(() => {
     if (!enabled || !selected || !series || !preset || preset.panel !== id || preset.seriesId !== series.id) return;
+    if (lastPreset.current === preset.token) return;
+    lastPreset.current = preset.token;
     void getViewer().then(({ engine }) => {
       const vp = engine.getViewport(viewportId) as Core.Types.IStackViewport;
+      if (vp?.getCurrentImageId() !== preset.imageId) return;
       vp.setProperties({ voiRange: { lower: preset.wl - preset.ww / 2, upper: preset.wl + preset.ww / 2 } });
       vp.render(); setWW(preset.ww); setWL(preset.wl);
     });
@@ -367,6 +377,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   const [localizers, setLocalizers] = useState(true);
   const [currentImages, setCurrentImages] = useState<Record<string, string>>({});
   const [preset, setPreset] = useState<Preset>(null);
+  const windowLevels = useRef<ImageWindowLevels>(new Map()).current;
   const [resetToken, setResetToken] = useState(0);
   const [clearToken, setClearToken] = useState(0);
   const [marks, setMarks] = useState<LocalMark[]>([]);
@@ -398,7 +409,12 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   const importEpoch = useRef(0);
   const sourceSerial = useRef(0);
   const openedFiles = useRef<File[]>([]);
-  const mediaFiles = useRef(new Map<string, File[]>());
+  const mediaFiles = useRef(new Set<string>());
+  const mediaSeries = useRef(new Map<string, Series>());
+  const mergeMedia = (items: Series[]) => {
+    const copies = [...mediaSeries.current.values()];
+    return [...items.filter(item => !copies.some(copy => copy.id === item.id || copy.id.replace(/^media:[^:]+:/, '') === item.id)), ...copies];
+  };
   const mediaOrder = useRef(new Map<string, { id: string; n: number; sop: string }[]>());
   const preferredMediaSeries = useRef<string | undefined>(undefined);
   // Disc watching belongs to this Viewer; archive/PACS tabs must start with it off.
@@ -456,7 +472,11 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     setCurrentImages(current => current[panel] === imageId ? current : { ...current, [panel]: imageId });
     const source = listRef.current.find(s => s.mediaSession && !s.thumb && s.imageIds.includes(imageId));
     const thumb = source && thumbnailLocalDicom(imageId);
-    if (source && thumb) { const next = listRef.current.map(s => s.id === source.id ? {...s,thumb} : s); listRef.current=next; setSeriesList(next); }
+    if (source && thumb) {
+      const updated = {...source, thumb};
+      if (mediaSeries.current.has(source.id)) mediaSeries.current.set(source.id, updated);
+      const next = listRef.current.map(s => s.id === source.id ? updated : s); listRef.current=next; setSeriesList(next);
+    }
   }, []);
 
   useEffect(() => {
@@ -469,27 +489,31 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
 
   useEffect(() => {
     if (!ready || !mediaEnabled) return;
+    const selectionEpoch = importEpoch.current, initialSelection = selectedIdRef.current;
     return watchRemovableMedia({
       discovered(session, images) {
         const first = !mediaFiles.current.has(session);
-        if (first) {
-          mediaFiles.current.set(session, []);
-          importEpoch.current++; setImportBusy(false);
+        // A slow first disc read must not replace a study opened after import began.
+        const showDisc = first && importEpoch.current === selectionEpoch && selectedIdRef.current === initialSelection;
+        if (first) mediaFiles.current.add(session);
+        if (showDisc) {
           setLayout({ rows: 1, columns: 1 }); setLayoutOpen(false); setMaximizedPane(null); setMaximizedMprPane(null);
           setActive('A'); setCurrentImages({}); setSelectedMarkId(null); setPreset(null);
           setWorkspace(detachedMode || 'viewer'); setDatasetVersion(v => v + 1);
         }
-        let next = [...listRef.current];
+        let next = [...mediaSeries.current.values()];
         for (const item of images) {
           const id = mediaId(session, item), existing = next.find(s => s.id === id);
           if (existing) next = next.map(s => s.id === id ? { ...s, mediaSession: session, discovered: (s.mediaSession === session ? s.discovered || 0 : 0) + 1, loading: true } : s);
           else next.push({ ...item, id, imageIds: [], mediaSession: session, discovered: 1, loading: true });
         }
+        mediaSeries.current = new Map(next.map(s => [s.id, s]));
+        next = mergeMedia(listRef.current);
         listRef.current = next; setSeriesList(next);
         setAssigned(current => {
           const preferred = next.find(s => s.id === preferredMediaSeries.current);
           if (preferred) { preferredMediaSeries.current = undefined; return { A: preferred.id }; }
-          if (first && images.length) return { A: mediaId(session, images[0]) };
+          if (showDisc && images.length) return { A: mediaId(session, images[0]) };
           return next.some(s => s.id === current.A) ? current : next[0] ? { A: next[0].id } : {};
         });
 
@@ -498,13 +522,14 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         const imageId = registerDiskDicom(item.tags, url, item.archived ? new AbortController().signal : signal);
         if (signal.aborted) { releaseLocalDicoms([imageId]); return; }
         const id = mediaId(session, item);
-        if (!listRef.current.some(s => s.id === id)) { releaseLocalDicoms([imageId]); return; }
-        const existing = listRef.current.find(s => s.id === id)!;
+        if (!mediaSeries.current.has(id)) { releaseLocalDicoms([imageId]); return; }
+        const existing = mediaSeries.current.get(id)!;
         const ordered = (mediaOrder.current.get(id) || []).filter(i => existing.imageIds.includes(i.id));
         if (ordered.some(i => i.sop === item.sopUID)) { releaseLocalDicoms([imageId]); return; }
         ordered.push({ id: imageId, n: item.instance, sop: item.sopUID }); ordered.sort((a, b) => a.n - b.n);
         mediaOrder.current.set(id, ordered);
-        const next = listRef.current.map(s => s.id === id ? { ...s, imageIds: ordered.map(i => i.id), thumb: s.thumb || thumbnailLocalDicom(imageId) } : s);
+        mediaSeries.current.set(id, { ...existing, imageIds: ordered.map(i => i.id), thumb: existing.thumb || thumbnailLocalDicom(imageId) });
+        const next = mergeMedia(listRef.current);
         listRef.current = next; setSeriesList(next);
 
       },
@@ -512,6 +537,10 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         const removed = listRef.current.filter(s => s.mediaSession === session && !s.archived);
         const ids = new Set(removed.flatMap(s => s.imageIds));
         const next = listRef.current.filter(s => s.mediaSession !== session || s.archived).map(s => s.mediaSession === session ? {...s, mediaSession: undefined, discovered: s.imageIds.length, loading: false} : s);
+        for (const [id, s] of mediaSeries.current) if (s.mediaSession === session) {
+          if (s.archived) mediaSeries.current.set(id, {...s, mediaSession: undefined, discovered: s.imageIds.length, loading: false});
+          else mediaSeries.current.delete(id);
+        }
         removed.forEach(s => mediaOrder.current.delete(s.id)); mediaFiles.current.delete(session);
         listRef.current = next; setSeriesList(next);
         setStatus('CD/DVD izləməsi bitdi. Köçürülmüş görüntülər Local arxivdə saxlanıldı.');
@@ -534,10 +563,13 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       },
       progress(progress) {
         setMediaProgress(progress);
-        if (progress.sessions) setStatus(`CD/DVD · ${progress.loaded} / ${progress.discovered} görüntü${progress.scanning ? ' · Local arxivə köçürülür…' : progress.loaded + progress.skipped < progress.discovered ? ' · yüklənir…' : ' · Local arxivdən oxunur'}${progress.skipped ? ` · ${progress.skipped} oxunmadı` : ''}`);
+        if (progress.sessions && (!selectedIdRef.current || mediaSeries.current.has(selectedIdRef.current))) setStatus(`CD/DVD · ${progress.loaded} / ${progress.discovered} görüntü${progress.scanning ? ' · Local arxivə köçürülür…' : progress.loaded + progress.skipped < progress.discovered ? ' · yüklənir…' : ' · Local arxivdən oxunur'}${progress.skipped ? ` · ${progress.skipped} oxunmadı` : ''}`);
         if (!progress.scanning && progress.loaded + progress.skipped >= progress.discovered) {
-          const next = listRef.current.map(s => s.mediaSession && s.loading && s.discovered === s.imageIds.length ? { ...s, loading: false } : s);
-          if (next.some((s, i) => s !== listRef.current[i])) { listRef.current = next; setSeriesList(next); }
+          let changed = false;
+          for (const [id, s] of mediaSeries.current) if (s.loading && s.discovered === s.imageIds.length) {
+            mediaSeries.current.set(id, {...s, loading: false}); changed = true;
+          }
+          if (changed) { const next = mergeMedia(listRef.current); listRef.current = next; setSeriesList(next); }
         }
       },
     }, mediaFilter);
@@ -570,11 +602,12 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       if (!imported.length) return;
       if (!published) {
         mprBuildEpoch.current++; setMprProgress(null);
-        const previousIds = listRef.current.flatMap(s => s.imageIds);
+        const previousIds = listRef.current.filter(s => !mediaSeries.current.has(s.id)).flatMap(s => s.imageIds);
         viewer.tools.annotation.state.removeAllAnnotations();
         setMarks([]); setSelectedMarkId(null); setMaximizedPane(null); setMaximizedMprPane(null);
         setLayout({ rows: 1, columns: 1 }); setLayoutOpen(false);
-        const preferred = imported.find(item => item.id === preferredSeriesId) || imported[0];
+        const chosen = imported.find(item => item.id === preferredSeriesId) || imported[0];
+        const preferred = [...mediaSeries.current.values()].find(item => item.id.replace(/^media:[^:]+:/, '') === chosen.id) || chosen;
         setAssigned({ A: preferred.id }); setCurrentImages({}); setActive('A'); setPreset(null);
         const oldMpr = mprDataRef.current;
         if (oldMpr?.owned.length) window.setTimeout(() => releaseLocalDicoms(oldMpr.owned), 100);
@@ -584,7 +617,8 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         if (previousIds.length) window.setTimeout(() => releaseLocalDicoms(previousIds), 100);
         published = true;
       }
-      listRef.current = imported; setSeriesList(imported); openedFiles.current = [...acceptedFiles];
+      const combined = mergeMedia(imported);
+      listRef.current = combined; setSeriesList(combined); openedFiles.current = [...acceptedFiles];
       setLoadProgress({label: 'DICOM yüklənir', done: decoded, total: acceptedFiles.length || files.length});
       if (!detachedMode) document.title = `${imported[0].patient} · RADAZ Viewer`;
       setStatus(`${imported.length} seriya · ${acceptedFiles.length} / ${files.length} görüntü oxunur…`);
@@ -646,7 +680,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       if (decoded % 8 === 0 || decoded === 1) { publish(); await yieldToBrowser(); }
     }
     if (request !== importEpoch.current) { discardUnpublished(); return false; }
-    finished = true; publish(); setLoadProgress(null);
+    finished = true; publish(); discardUnpublished(); setLoadProgress(null);
     if (published) {
       if (!detachedMode) channels.current.forEach((channel, mode) => { if (mode === 'report') return; try { channel.postMessage({ kind: 'SHARED_READY' }); } catch { /* Closed tabs reconnect on demand. */ } });
       setStatus(`${found.size} seriya · ${files.length - rejected - ignored} DICOM görüntüsü yükləndi${rejected ? ` · ${rejected} fayl keçildi` : ''}`);
@@ -743,7 +777,6 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   useEffect(() => {
     if (detachedMode || typeof BroadcastChannel === 'undefined') return;
     const load = async (uids: string[]) => {
-      setMediaEnabled(false);
       const request = ++importEpoch.current;
       setStatus('Local arxivdən müayinə açılır…');
       try {
@@ -854,7 +887,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   }, [seriesList, layout, limited]);
   const place = (seriesId: string, panel: string) => {
     const next = seriesList.find(series => series.id === seriesId);
-    const previous = seriesList.find(series => series.id === assigned[active]);
+    const previous = seriesList.find(series => series.id === assigned[active]) || seriesList.find(series => series.id === assigned.A);
     const changedStudy = !!next && next.studyId !== previous?.studyId;
     const target = changedStudy || workspace !== 'viewer' ? 'A' : panel;
     if (changedStudy) {
@@ -886,7 +919,6 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   };
   const openSources = async (sources: File[]) => {
     if (!sources.length) return;
-    setMediaEnabled(false);
     const request = ++importEpoch.current;
     setImportBusy(true);
     try {
@@ -1134,7 +1166,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         </div>}
         {!limited && detachedMode !== '3d' && <div className="toolbar-group" role="group" aria-label="Pəncərə və lokayzer">
         <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className="header-control" title="Window preset" aria-label="WINDOW PRESET menyusu"><SlidersHorizontal size={17}/><span>Window preset</span><ChevronDown size={14}/></Button></DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="header-menu preset-menu">{presets.map(p => <DropdownMenuItem key={p.label} onSelect={() => { if (workspace === 'mpr' && mprData) { const plane = mprData.planes[{ MS:0, MC:1, MA:2 }[mprActive as 'MS'|'MC'|'MA'] || 0]; setPreset({ ...p, token: Date.now(), panel: mprActive, seriesId: plane.id }); } else if (assigned[active]) setPreset({ ...p, token: Date.now(), panel: active, seriesId: assigned[active] }); }}><span>{p.label}</span><small>WL {p.wl} · WW {p.ww}</small></DropdownMenuItem>)}</DropdownMenuContent>
+          <DropdownMenuContent align="end" className="header-menu preset-menu">{presets.map(p => <DropdownMenuItem key={p.label} onSelect={() => { if (workspace === 'mpr' && mprData) { const plane = mprData.planes[{ MS:0, MC:1, MA:2 }[mprActive as 'MS'|'MC'|'MA'] || 0]; setPreset({ ...p, token: Date.now(), panel: mprActive, seriesId: plane.id, imageId: currentImages[mprActive] || '' }); } else if (assigned[active]) setPreset({ ...p, token: Date.now(), panel: active, seriesId: assigned[active], imageId: currentImages[active] || '' }); }}><span>{p.label}</span><small>WL {p.wl} · WW {p.ww}</small></DropdownMenuItem>)}</DropdownMenuContent>
         </DropdownMenu>
         <Button variant="ghost" className={`header-control localizer-toggle ${localizers ? 'is-on' : ''}`} aria-label="Lokayzer xətləri" aria-pressed={localizers} title="Uyğun müstəvilərdəki seriyalar arasında lokayzer xətlərini göstər" onClick={() => setLocalizers(value => !value)}><Crosshair size={17}/><span>Lokayzer</span></Button></div>}
         {!limited && detachedMode !== '3d' && <div className="toolbar-group" role="group" aria-label="Panel düzülüşü və ölçüsü">
@@ -1199,7 +1231,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       </aside>}
       <section className="main-area">
         {workspace === 'viewer' && <div className="viewport-grid" style={{ gridTemplateColumns: `repeat(${maximizedPane ? 1 : layout.columns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${maximizedPane ? 1 : layout.rows}, minmax(0, 1fr))` }}>
-          {Array.from({ length: layout.rows * layout.columns }, (_, index) => String.fromCharCode(65 + index)).filter(id => !maximizedPane || id === maximizedPane).map(id => { const otherImages = id !== active && assigned[active] && currentImages[active] ? [{ panel: active, imageId: currentImages[active] }] : []; return <ViewportPane key={`${id}-${datasetVersion}-${assigned[id] || "empty"}`} id={id} initialImageId={currentImages[id]} series={seriesList.find(s => s.id === assigned[id])} selected={active === id} tool={limited ? 'scroll' : tool} cursor={cursor} onCursor={onCursor} hideText={hideText} preset={preset} resetToken={resetToken} clearToken={clearToken} ready={ready} marks={marks} selectedMarkId={selectedMarkId} localizers={localizers && id !== active} otherImages={otherImages} onImageChange={onImageChange} onMoveSource={onMoveSource} onAddMark={onAddMark} onUpdateMark={onUpdateMark} onRemoveMark={onRemoveMark} onSelectMark={markId => { setActive(id); setSelectedMarkId(markId); }} onClearImage={onClearImage} onSelect={() => { setActive(id); setSelectedMarkId(null); }} onToggleMaximize={() => { setActive(id); setMaximizedPane(current => current === id ? null : id); }} onDropSeries={sid => place(sid, id)}/>; })}
+          {Array.from({ length: layout.rows * layout.columns }, (_, index) => String.fromCharCode(65 + index)).filter(id => !maximizedPane || id === maximizedPane).map(id => { const otherImages = id !== active && assigned[active] && currentImages[active] ? [{ panel: active, imageId: currentImages[active] }] : []; return <ViewportPane windowLevels={windowLevels} key={`${id}-${datasetVersion}-${assigned[id] || "empty"}`} id={id} initialImageId={currentImages[id]} series={seriesList.find(s => s.id === assigned[id])} selected={active === id} tool={limited ? 'scroll' : tool} cursor={cursor} onCursor={onCursor} hideText={hideText} preset={preset} resetToken={resetToken} clearToken={clearToken} ready={ready} marks={marks} selectedMarkId={selectedMarkId} localizers={localizers && id !== active} otherImages={otherImages} onImageChange={onImageChange} onMoveSource={onMoveSource} onAddMark={onAddMark} onUpdateMark={onUpdateMark} onRemoveMark={onRemoveMark} onSelectMark={markId => { setActive(id); setSelectedMarkId(markId); }} onClearImage={onClearImage} onSelect={() => { setActive(id); setSelectedMarkId(null); }} onToggleMaximize={() => { setActive(id); setMaximizedPane(current => current === id ? null : id); }} onDropSeries={sid => place(sid, id)}/>; })}
         </div>}
         {workspace === 'mpr' && <>
           {mprError && <div className="mpr-error-notice" role="alert">{mprError}</div>}
@@ -1207,7 +1239,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
             {(['SAG','COR','AX'] as const).map((plane,index)=>({plane,index,id:['MS','MC','MA'][index]})).map(({plane,index,id})=>{
               const shown=mprData?.planes[index] || (plane==='AX'?mprPreview:undefined);
               const progress=!shown?.imageIds.length ? mprProgress || sourceLoading : null;
-              return <ViewportPane key={`${id}-${mprData?.sourceId || mprPreview?.id || 'waiting'}`} id={id} initialImageId={currentImages[id]} series={shown} loadingProgress={progress} reconstruction={mprSettings[plane]} viewAnchor={mprData?.pivot} expanded={maximizedMprPane===id} concealed={!!maximizedMprPane&&maximizedMprPane!==id} selected={mprActive===id} tool={limited?'scroll':tool} cursor={cursor} onCursor={onCursor} hideText={hideText} preset={preset} resetToken={resetToken} clearToken={clearToken} ready={ready} marks={marks} selectedMarkId={selectedMarkId} localizers={localizers}
+              return <ViewportPane windowLevels={windowLevels} key={`${id}-${mprData?.sourceId || mprPreview?.id || 'waiting'}`} id={id} initialImageId={currentImages[id]} series={shown} loadingProgress={progress} reconstruction={mprSettings[plane]} viewAnchor={mprData?.pivot} expanded={maximizedMprPane===id} concealed={!!maximizedMprPane&&maximizedMprPane!==id} selected={mprActive===id} tool={limited?'scroll':tool} cursor={cursor} onCursor={onCursor} hideText={hideText} preset={preset} resetToken={resetToken} clearToken={clearToken} ready={ready} marks={marks} selectedMarkId={selectedMarkId} localizers={localizers}
                 otherImages={(['MS','MC','MA']).filter(other=>other!==id).map(other=>({panel:other,imageId:currentImages[other] || ''})).filter(item=>item.imageId)}
                 onImageChange={onImageChange} onMoveSource={moveMprSource} onMoveIntersection={moveMprIntersection} onRotateSource={rotateMprSource} onRotateStart={beginMprRotation} onPreviewRotateSource={(source,target,radians)=>updateMprRotation(source,target,radians)}
                 onAddMark={onAddMark} onUpdateMark={onUpdateMark} onRemoveMark={onRemoveMark} onClearImage={onClearImage} onSelectMark={markId=>{setMprActive(id);setSelectedMarkId(markId);}} onSelect={()=>{setMprActive(id);setSelectedMarkId(null);}} onToggleMaximize={()=>{setMprActive(id);setMaximizedMprPane(current=>current===id?null:id);}} onDropSeries={sid=>place(sid,'A')}/>;

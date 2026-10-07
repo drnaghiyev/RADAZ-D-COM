@@ -85,6 +85,7 @@ export function watchRemovableMedia(callbacks: Callbacks, onlySessions?: string[
           const page = await json<{ items: MediaImage[]; next: number }>(`/entries?session=${session.id}&after=${state.next}`, controller.signal);
           if (controller.signal.aborted || state.controller.signal.aborted || page.next <= state.next) break;
           state.next = page.next;
+          state.session.total = Math.max(state.session.total, state.next);
           callbacks.discovered(session.id, page.items);
           state.queue.push(...page.items);
           void pump(state);
