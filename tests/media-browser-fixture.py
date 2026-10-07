@@ -78,11 +78,26 @@ class Handler(Base):
             for i in range(1, 4):
                 ds = dcmread(disc/'CT/I0002'); ds.InstanceNumber = i; ds.ImagePositionPatient = [0,0,i]
                 ds.PatientName = 'WINDOW^TEST'; ds.PatientID = 'WINDOW-TEST'
+                ds.Modality = 'CR'; ds.SOPClassUID = '1.2.840.10008.5.1.4.1.1.1'
                 ds.StudyInstanceUID = '2.25.301'; ds.SeriesInstanceUID = '2.25.302'
                 ds.SOPInstanceUID = f'2.25.303.{i}'; ds.SeriesDescription = 'Window isolation'
                 ds.WindowCenter = 100 * i; ds.WindowWidth = 400 * i
                 buffer = io.BytesIO(); ds.save_as(buffer, enforce_file_format=True)
                 archive.store(buffer.getvalue(), ds)
+            self.respond({'ok': True}); return
+        if self.path == '/_test/window-modalities':
+            for group, modality in enumerate(('CT', 'MR', 'DX'), 1):
+                for series in (1, 2):
+                    for i in range(1, 13):
+                        ds = dcmread(disc/'CT/I0002'); ds.InstanceNumber = i; ds.ImagePositionPatient = [0,0,i]
+                        ds.PatientName = f'WINDOW^{modality}'; ds.PatientID = f'WINDOW-{modality}'
+                        ds.Modality = modality; ds.SOPClassUID = {'CT':'1.2.840.10008.5.1.4.1.1.2','MR':'1.2.840.10008.5.1.4.1.1.4','DX':'1.2.840.10008.5.1.4.1.1.1.1'}[modality]
+                        ds.StudyInstanceUID = f'2.25.40{group}'; ds.SeriesInstanceUID = f'2.25.40{group}.{series}'
+                        ds.FrameOfReferenceUID = f'2.25.41{group}'
+                        ds.SOPInstanceUID = f'2.25.40{group}.{series}.{i}'; ds.SeriesDescription = f'{modality} window {series}'
+                        ds.WindowCenter = 100 * i; ds.WindowWidth = 400 * i
+                        buffer = io.BytesIO(); ds.save_as(buffer, enforce_file_format=True)
+                        archive.store(buffer.getvalue(), ds)
             self.respond({'ok': True}); return
         if self.path == '/_test/insert':
             released.clear(); present[str(disc)] = ('synthetic', 'Synthetic 700 CT'); self.respond({'ok': True}); return

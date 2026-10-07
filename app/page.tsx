@@ -28,7 +28,7 @@ import { expandSources, filesFromDrop } from '@/lib/import-sources';
 import { parseDicomFile } from '@/lib/dicom-file';
 import { getArchiveFiles, saveArchiveFiles } from '@/lib/local-archive';
 import { watchRemovableMedia, type MediaImage, type MediaProgress } from '@/lib/removable-media';
-import { isolateImageWindowing, type ImageWindowLevels } from '@/lib/image-windowing';
+import { bindWindowing, connectWindowLevels, WindowLevels } from '@/lib/image-windowing';
 import type * as Core from '@cornerstonejs/core';
 
 type Tool = 'scroll' | 'arrow' | 'pencil' | 'cursor3d' | 'wl' | 'pan' | 'zoom' | 'length' | 'angle' | 'arch' | 'cobb' | 'ellipse' | 'hu' | 'deviation' | 'erase';
@@ -93,8 +93,8 @@ function age(birth: string, study: string) {
   return `${+study.slice(0, 4) - +birth.slice(0, 4) - Number(study.slice(4) < birth.slice(4))} yaş`;
 }
 
-function ViewportPane({ windowLevels, cursor, onCursor, hideText, id, series, initialImageId, selected, tool, preset, resetToken, clearToken, ready, marks, selectedMarkId, localizers, otherImages, reconstruction, viewAnchor, expanded, concealed, onImageChange, onMoveSource, onMoveIntersection, loadingProgress, onRotateSource, onRotateStart, onPreviewRotateSource, onAddMark, onUpdateMark, onRemoveMark, onSelectMark, onClearImage, onSelect, onToggleMaximize, onDropSeries }: {
-  windowLevels: ImageWindowLevels;
+function ViewportPane({ windowLevels, windowingSourceId, cursor, onCursor, hideText, id, series, initialImageId, selected, tool, preset, resetToken, clearToken, ready, marks, selectedMarkId, localizers, otherImages, reconstruction, viewAnchor, expanded, concealed, onImageChange, onMoveSource, onMoveIntersection, loadingProgress, onRotateSource, onRotateStart, onPreviewRotateSource, onAddMark, onUpdateMark, onRemoveMark, onSelectMark, onClearImage, onSelect, onToggleMaximize, onDropSeries }: {
+  windowLevels: WindowLevels; windowingSourceId?: string;
   cursor: CursorPosition | null; onCursor: (position: CursorPosition) => void; hideText: boolean;
   id: string; series?: Series; selected: boolean; tool: Tool; preset: Preset; resetToken: number; ready: boolean;
   initialImageId?: string;
@@ -126,6 +126,8 @@ function ViewportPane({ windowLevels, cursor, onCursor, hideText, id, series, in
   const lastClear = useRef(clearToken);
   const lastReset = useRef(resetToken);
   const lastPreset = useRef<number | undefined>(undefined);
+  const windowingScope = useRef({seriesId: windowingSourceId || series?.id, modality: series?.modality, mpr: !!reconstruction});
+  windowingScope.current = {seriesId: windowingSourceId || series?.id, modality: series?.modality, mpr: !!reconstruction};
   useEffect(()=>setEditingArrow(null),[imageId]);
   const [slice, setSlice] = useState(0);
   const [ww, setWW] = useState<number | null>(null);
@@ -161,8 +163,8 @@ function ViewportPane({ windowLevels, cursor, onCursor, hideText, id, series, in
         if (viewer.engine.getViewport(viewportId)) viewer.engine.resize(true, true);
       });
       resizeObserver.observe(element);
-      const stopWindowing = isolateImageWindowing(viewer.engine.getViewport(viewportId) as Core.Types.IStackViewport,
-        id, windowLevels, viewer.core.Enums.Events, getDefaultWindow);
+      const stopWindowing = bindWindowing(viewer.engine.getViewport(viewportId) as Core.Types.IStackViewport,
+        id, windowLevels, viewer.core.Enums.Events, getDefaultWindow, () => windowingScope.current);
       const sync = () => {
         const vp = viewer.engine.getViewport(viewportId) as Core.Types.IStackViewport;
         setSlice(vp.getCurrentImageIdIndex());
@@ -377,7 +379,8 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   const [localizers, setLocalizers] = useState(true);
   const [currentImages, setCurrentImages] = useState<Record<string, string>>({});
   const [preset, setPreset] = useState<Preset>(null);
-  const windowLevels = useRef<ImageWindowLevels>(new Map()).current;
+  const windowLevels = useRef(new WindowLevels()).current;
+  useEffect(() => connectWindowLevels(windowLevels, new BroadcastChannel('radaz-series-windowing')), [windowLevels]);
   const [resetToken, setResetToken] = useState(0);
   const [clearToken, setClearToken] = useState(0);
   const [marks, setMarks] = useState<LocalMark[]>([]);
@@ -1239,7 +1242,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
             {(['SAG','COR','AX'] as const).map((plane,index)=>({plane,index,id:['MS','MC','MA'][index]})).map(({plane,index,id})=>{
               const shown=mprData?.planes[index] || (plane==='AX'?mprPreview:undefined);
               const progress=!shown?.imageIds.length ? mprProgress || sourceLoading : null;
-              return <ViewportPane windowLevels={windowLevels} key={`${id}-${mprData?.sourceId || mprPreview?.id || 'waiting'}`} id={id} initialImageId={currentImages[id]} series={shown} loadingProgress={progress} reconstruction={mprSettings[plane]} viewAnchor={mprData?.pivot} expanded={maximizedMprPane===id} concealed={!!maximizedMprPane&&maximizedMprPane!==id} selected={mprActive===id} tool={limited?'scroll':tool} cursor={cursor} onCursor={onCursor} hideText={hideText} preset={preset} resetToken={resetToken} clearToken={clearToken} ready={ready} marks={marks} selectedMarkId={selectedMarkId} localizers={localizers}
+              return <ViewportPane windowLevels={windowLevels} windowingSourceId={mprData?.sourceId || mprPreview?.id} key={`${id}-${mprData?.sourceId || mprPreview?.id || 'waiting'}`} id={id} initialImageId={currentImages[id]} series={shown} loadingProgress={progress} reconstruction={mprSettings[plane]} viewAnchor={mprData?.pivot} expanded={maximizedMprPane===id} concealed={!!maximizedMprPane&&maximizedMprPane!==id} selected={mprActive===id} tool={limited?'scroll':tool} cursor={cursor} onCursor={onCursor} hideText={hideText} preset={preset} resetToken={resetToken} clearToken={clearToken} ready={ready} marks={marks} selectedMarkId={selectedMarkId} localizers={localizers}
                 otherImages={(['MS','MC','MA']).filter(other=>other!==id).map(other=>({panel:other,imageId:currentImages[other] || ''})).filter(item=>item.imageId)}
                 onImageChange={onImageChange} onMoveSource={moveMprSource} onMoveIntersection={moveMprIntersection} onRotateSource={rotateMprSource} onRotateStart={beginMprRotation} onPreviewRotateSource={(source,target,radians)=>updateMprRotation(source,target,radians)}
                 onAddMark={onAddMark} onUpdateMark={onUpdateMark} onRemoveMark={onRemoveMark} onClearImage={onClearImage} onSelectMark={markId=>{setMprActive(id);setSelectedMarkId(markId);}} onSelect={()=>{setMprActive(id);setSelectedMarkId(null);}} onToggleMaximize={()=>{setMprActive(id);setMaximizedMprPane(current=>current===id?null:id);}} onDropSeries={sid=>place(sid,'A')}/>;

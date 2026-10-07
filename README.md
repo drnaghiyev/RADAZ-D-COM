@@ -6,7 +6,7 @@ Azərbaycan dilində DICOM görüntüləmə və radiologiya iş sahəsi — Wind
 
 ## Quraşdırma
 
-1. Son buraxılışın **Assets** bölməsindən **RADAZ-0.2.22-Setup.exe** endirin.
+1. Son buraxılışın **Assets** bölməsindən **RADAZ-0.2.23-Setup.exe** endirin.
 2. Setup-ı açıb quraşdırın. Node.js, Python və lazım olan komponentlər paketə daxildir.
 3. İş masasındakı **RADAZ** qısayolunu açın. Proqram lokal brauzer pəncərəsində işləyir.
 
@@ -35,7 +35,7 @@ Arxiv proqramın versiya qovluqlarından ayrıdır. Standart yer `Documents\RADA
 - **Local arxiv və PACS:** müayinələri checkbox ilə seçin və iki kliklə açın. Mövcud Viewer önə gətirilir və maksimum ölçüdə açılır; arxiv/PACS pəncərələri minimallaşmır.
 - **CD/DVD:** DICOM faylları ardıcıl köçürülüb daimi Local arxivə yazılır; hər hazır görüntü eyni vaxtda Viewer-də görünür. Başqa müayinə açıldıqda import arxa planda davam edir və aktiv görüntünü dəyişmir. Piksellər lokal diskdən oxunur. CD çıxarılanda yalnız müvəqqəti köçürmə nüsxəsi silinir; arxiv və açıq görüntülər saxlanılır. Təkrar import eyni SOP faylını çoxaltmır.
 - **Ölçmələr:** xəttin üzərindən tutub daşıyın. Oxun uclarından tutub istiqamətini və uzunluğunu dəyişin. Ox üzərində iki klik və ya sağ klik menyusu şərhi dəyişir. Sağ klik → **Sil**, **Ctrl+D** → cari kəsitdə hamısını sil.
-- **2D mouse:** sol düymə WW/WL, orta düymə daşıma, sağ düyməni sürükləmə zoom, təkər kəsitləri dəyişir. WW/WL yalnız aktiv görüntüdə dəyişir; hər kəsit və panel öz ayarını saxlayır. Seçilmiş alət sol düymənin davranışını dəyişir.
+- **2D mouse:** sol düymə WW/WL, orta düymə daşıma, sağ düyməni sürükləmə zoom, təkər kəsitləri dəyişir. KT/MRT-də WW/WL bütün seçilmiş seriyaya, MPR-də bütün müstəvilərə tətbiq olunur; ayrıca Viewer və MPR pəncərələri sinxron qalır. Başqa seriyanın ayarı dəyişmir. Rentgendə yalnız aktiv görüntü dəyişir, digər görüntü və panellər öz ayarını saxlayır. Seçilmiş alət sol düymənin davranışını dəyişir.
 - **Hesabat:** Viewer siyahısında seçilmiş seriya açılır. Hesabat redaktoru, Word/PDF çıxışı və seçilmiş görüntülərin ZIP hazırlanması mövcuddur.
 - **Çap önbaxışı:** **Tək / Hamısı** seçimi ilə zoom, parlaqlıq və kontrastı dəyişin.
 

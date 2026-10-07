@@ -94,6 +94,7 @@ try{
  assert.equal(closes.length,0,'Opening another study does not cancel optical import');
  const status=await(await fetch(`http://127.0.0.1:${archivePort}/status`)).json();assert.equal(status.instanceCount,708);
  await cd.click();await pane('A').locator('.bottom-right').filter({hasText:'/ 700'}).waitFor();
+ await cd.locator('img').waitFor();
  assert.equal(await cd.locator('img').count(),1);
  await control('eject');await delay(1200);assert.equal(await cd.count(),1);
  assert.equal((await(await fetch(`http://127.0.0.1:${archivePort}/status`)).json()).instanceCount,708);
