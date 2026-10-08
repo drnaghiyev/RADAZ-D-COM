@@ -72,7 +72,7 @@ def main():
         data = json.loads(manifest.read_text())
         for asset in data['assets']: asset['browser_download_url'] = asset['browser_download_url'].replace(OLD, NEW)
         if 'html_url' in data: data['html_url'] = data['html_url'].replace(OLD, NEW)
-        manifest.write_text(json.dumps(data, indent=2), encoding='utf-8')
+        manifest.write_bytes(json.dumps(data, indent=2).encode('utf-8'))
     release = api(NEW, '/releases/tags/' + tag, missing=True)
     if not release:
         release = next((r for r in api(NEW, '/releases?per_page=100') if r['tag_name'] == tag), None)
