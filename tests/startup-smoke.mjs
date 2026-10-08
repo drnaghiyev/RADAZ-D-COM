@@ -47,11 +47,14 @@ try {
       const runtime = await fetch(`${base}/radaz-runtime.json`);
       assert.equal(runtime.headers.get('cache-control'), 'no-store');
       assert.equal((await runtime.json()).buildId, JSON.parse(readFileSync('dist/server/radaz-build.json','utf8')).buildId);
+      const health=await fetch(base+'/radaz-health.json');assert.equal(health.status,200);assert.equal((await health.json()).ready,true);
+      assert.equal((await fetch(base+'/_next/static/chunks/old-missing.js')).status,404);
       for (const route of ['/', '/archive', '/pacs', '/mpr', '/3d', '/report']) {
         const response = await fetch(`${base}${route}`);
         assert.equal(response.status, 200, route);
         assert.equal(response.headers.get('cache-control'), 'no-store');
         const html = await response.text(); assert.match(html, /RADAZ/);
+        assert.match(html, /meta name="radaz-build"/);assert.match(html,/radaz-boot.js\?build=/);
         const script = html.match(/src="([^" ]+\.js)"/);
         assert.ok(script, `Built JavaScript missing: ${route}`);
         assert.equal((await fetch(new URL(script[1], base))).status, 200, 'Built asset must load');

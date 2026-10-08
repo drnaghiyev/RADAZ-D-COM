@@ -7,6 +7,14 @@ $url = "http://localhost:$radazPort/"
 $probeUrl = "http://127.0.0.1:$radazPort/"
 $hasSource = (Test-Path -LiteralPath (Join-Path $projectRoot 'app\page.tsx')) -and -not (Test-Path -LiteralPath (Join-Path $projectRoot 'SHA256SUMS.json'))
 $expected = Get-Content -Raw -LiteralPath (Join-Path $projectRoot 'public\product.json') | ConvertFrom-Json
+trap {
+  if ($env:RADAZ_INSTALL_ROOT -and $expected.version) {
+    $diagnostic = @{ phase = 'windows-launcher'; type = $_.Exception.GetType().Name; message = $_.Exception.Message; version = $expected.version; at = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }
+    $diagnostic | ConvertTo-Json -Compress | Set-Content -Encoding UTF8 -LiteralPath (Join-Path $env:RADAZ_INSTALL_ROOT "startup-error-$($expected.version).json")
+  }
+  Write-Error $_ -ErrorAction Continue
+  exit 1
+}
 $buildPath = Join-Path $projectRoot 'dist\server\radaz-build.json'
 $expectedBuild = if (Test-Path -LiteralPath $buildPath) { Get-Content -Raw -LiteralPath $buildPath | ConvertFrom-Json } else { $null }
 Set-Location -LiteralPath $projectRoot

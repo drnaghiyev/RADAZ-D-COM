@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import { usePathname } from 'next/navigation';
 import { licenseAccess } from '@/lib/license-access';
 import { isNewerRelease } from '@/lib/release-version';
+import {activatedBuild,reloadBuild,reportUpdateDiagnostic,type InstallationState} from '@/lib/update-activation';
 import { BookOpen, CircleHelp, ExternalLink, Info, Keyboard, KeyRound, Mail, MessageCircle, RefreshCw, ShieldCheck, ShoppingBag, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
@@ -31,9 +32,10 @@ async function releaseUpdate(force = false): Promise<Update> {
   try {
     const response = await fetch('/radaz-installation.json', {cache:'no-store'});
     if(response.ok) {
-      const desktop = await response.json() as {managed?:boolean;state:string;message:string;version?:string};
+      const desktop = await response.json() as InstallationState;
+      reportUpdateDiagnostic(desktop);
       if(desktop.managed) {
-        if(force && !['checking','downloading','verifying','installing'].includes(desktop.state)) {
+        if(force && !['checking','downloading','verifying','installing','activating','rolling-back'].includes(desktop.state)) {
           const started = await fetch('/radaz-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'check'})});
           return {automatic:true,state:started.ok?'current':'error',message:started.ok?'Yeniləmələr yoxlanılır…':'Yeniləmə xidməti başladılmadı. Yenidən cəhd edin.'};
         }
@@ -91,8 +93,8 @@ export function ProductBoundary({children}:{children:ReactNode}) {
   useEffect(()=>{
     const channel=new BroadcastChannel('radaz-update-applied');let alive=true;
     channel.onmessage=event=>{const version=event.data?.version;if(typeof version!=='string'||!/^\d+\.\d+\.\d+$/.test(version))return;
-      void fetch('/radaz-runtime.json',{cache:'no-store',signal:AbortSignal.timeout(5000)}).then(r=>r.json()).then(runtime=>{
-        if(alive&&(runtime as {version?:string}).version===version)location.reload();
+      void activatedBuild(version).then(buildId=>{
+        if(alive&&buildId)reloadBuild(buildId);
       }).catch(()=>{});
     };
     return()=>{alive=false;channel.close();};

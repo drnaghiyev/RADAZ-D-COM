@@ -115,9 +115,24 @@ def lock(root, name, wait=0):
             file.seek(0); msvcrt.locking(file.fileno(), msvcrt.LK_UNLCK, 1)
         file.close()
 
-def state(root, status, message, target=None, progress=None):
+def state(root, status, message, target=None, progress=None, diagnostic=None):
     atomic_json(root / 'update-state.json', {'state': status, 'message': message, 'version': target,
-        'checkedAt': int(time.time()), 'progress': progress})
+        'checkedAt': int(time.time()), 'progress': progress, 'diagnostic': diagnostic})
+
+def failure(root, error, phase, target=None):
+    detail = {'phase': phase, 'type': type(error).__name__, 'message': str(error),
+              'version': target, 'at': int(time.time() * 1000)}
+    # Preserve startup's specific resource/HTTP/port error instead of only the
+    # launcher's exit code. This file is removed before each fresh launch attempt.
+    startup = root / f'startup-error-{target}.json'
+    if target and phase in ('startup-health', 'rollback') and startup.exists():
+        try: detail['startup'] = read_json(startup)
+        except (ValueError, OSError): pass
+    logs = root / 'logs'; logs.mkdir(exist_ok=True)
+    with (logs / 'update-errors.jsonl').open('a', encoding='utf-8') as log:
+        log.write(json.dumps(detail, ensure_ascii=False) + '\n')
+    print('[RADAZ update] ' + json.dumps(detail, ensure_ascii=True), flush=True)
+    return detail
 
 def get_json(url, timeout=15):
     with urlopen(Request(url, headers={'User-Agent': 'RADAZ-desktop-updater', 'Accept': 'application/vnd.github+json'}), timeout=timeout) as response:
@@ -177,7 +192,19 @@ def stage_package(root, archive, target, digest, size):
         raise ValueError('Downloaded update SHA-256 mismatch')
     destination = version_dir(root, target)
     if destination.exists():
-        validate_directory(destination, target)
+        try: validate_directory(destination, target)
+        except (ValueError, OSError):
+            if read_json(root / 'active.json')['version'] == target:
+                raise ValueError('Cannot replace the active version in place')
+            rejected = root / 'versions' / ('.rejected-' + target + '-' + secrets.token_hex(8))
+            os.replace(destination, rejected)
+            try: stage_package(root, archive, target, digest, size)
+            except Exception:
+                if not destination.exists(): os.replace(rejected, destination)
+                raise
+            finally:
+                if rejected.exists() and rejected.resolve().parent == (root / 'versions').resolve(): shutil.rmtree(rejected)
+            return
     else:
         staging = root / 'versions' / ('.staging-' + secrets.token_hex(10))
         staging.mkdir(parents=True)
@@ -222,11 +249,13 @@ def check_update(root, approved_version=None):
             return
         state(root, 'current', 'Ən yeni versiya quraşdırılıb.'); return
     target, asset = choice
-    if (root / 'failed-update.json').exists() and read_json(root / 'failed-update.json').get('version') == target:
-        state(root, 'error', f'{target} açıla bilmədi. Əvvəlki işlək versiya saxlanılıb.'); return
+    failed = read_json(root / 'failed-update.json') if (root / 'failed-update.json').exists() else {}
     # Discovery never downloads. Approval is single-use and tied to the version shown.
     if approved_version != target:
-        state(root, 'available', f'RADAZ {target} — yeni versiya mövcuddur. Avtomatik yükləmək üçün Yenilə düyməsini basın.', target)
+        retry = failed.get('version') == target
+        message = (f'RADAZ {target} əvvəlki cəhddə açılmadı. Yenidən yoxlayıb hazırlamaq üçün Yenilə düyməsini basın.' if retry
+                   else f'RADAZ {target} — yeni versiya mövcuddur. Avtomatik yükləmək üçün Yenilə düyməsini basın.')
+        state(root, 'available', message, target, diagnostic=failed.get('diagnostic') if retry else None)
         return
     state(root, 'downloading', f'RADAZ {target} arxa planda yüklənir. Proqramdan istifadə edə bilərsiniz.', target)
     downloads = root / 'downloads'; downloads.mkdir(exist_ok=True)
@@ -261,34 +290,46 @@ def powershell(script, *args):
 
 def open_version(root, target):
     folder = version_dir(root, target)
-    build = read_json(folder / 'dist/server/radaz-build.json')['buildId']
+    identity = read_json(folder / 'dist/server/radaz-build.json')
+    build = identity['buildId']
     port = int(os.environ.get('RADAZ_PORT', '5173'))
     base = f'http://127.0.0.1:{port}'
     def healthy():
         served = get_json(base + '/radaz-runtime.json', 2)
         receiver = get_json(f'http://127.0.0.1:{os.environ.get("RADAZ_ARCHIVE_PORT", "8766")}/status', 2)
-        if served.get('buildId') != build or receiver.get('version') != 1:
-            return False
+        if served.get('buildId') != build:
+            raise RuntimeError(f'Runtime build mismatch: expected {build}; received {served.get("buildId")}')
+        if receiver.get('version') != 1:
+            raise RuntimeError('Archive status protocol mismatch')
         if receiver.get('desktopManaged') and receiver.get('appVersion') != target:
-            return False
+            raise RuntimeError(f'Archive version mismatch: expected {target}; received {receiver.get("appVersion")}')
+        if identity.get('healthProtocol') == 1:
+            try: health = get_json(base + '/radaz-health.json', 3)
+            except HTTPError as error:
+                detail = error.read().decode('utf-8', errors='replace')[:3000]
+                raise RuntimeError(f'Client health HTTP {error.code}: {detail}') from error
+            if not health.get('ready') or health.get('buildId') != build:
+                raise RuntimeError('Client resources not healthy for build ' + build)
         with urlopen(base + '/', timeout=3) as response:
             return response.status == 200
     try:
         if healthy(): return build
     except Exception: pass
+    (root / f'startup-error-{target}.json').unlink(missing_ok=True)
     child = run_hidden(powershell(folder / 'scripts/start-radaz.ps1', '-NoBrowser'), root)
-    until = time.monotonic() + 75
+    until = time.monotonic() + 120
+    last_error = 'No health response'
     while time.monotonic() < until:
         if child.poll() == 17: raise ArchiveBusy('Archive is receiving images; apply the update on a later launch')
-        if child.poll() not in (None, 0): raise RuntimeError('RADAZ startup failed; see logs/desktop.log')
+        if child.poll() not in (None, 0): raise RuntimeError(f'RADAZ launcher exited ({child.returncode}); last health failure: {last_error}. See logs/desktop.log')
         try:
             if healthy(): return build
-        except Exception: pass
+        except Exception as error: last_error = f'{type(error).__name__}: {error}'
         time.sleep(.4)
     # Stop only this launcher's gateway, preserving the independently running archive.
     subprocess.run(powershell(folder / 'scripts/stop-web-server.ps1', '-Port', port), creationflags=NO_WINDOW, capture_output=True)
     if child.poll() is None: child.terminate()
-    raise RuntimeError('RADAZ startup timed out')
+    raise RuntimeError('RADAZ startup timed out; last health failure: ' + last_error)
 
 def launch(root, no_browser=False):
     with lock(root, 'launch', 90):
@@ -297,22 +338,35 @@ def launch(root, no_browser=False):
         if (root / 'pending.json').exists():
             candidate = read_json(root / 'pending.json')['version']
             if version(candidate) > version(current): target = candidate
+        phase = 'package-validation'
         try:
+            if target != current: state(root, 'activating', f'RADAZ {target} açılışı və resursları yoxlanılır…', target)
             if target != current: validate_directory(version_dir(root, target), target)
+            phase = 'startup-health'
             build = open_version(root, target)
+            if target != current:
+                phase = 'activation-commit'
+                atomic_json(root / 'active.json', {'version': target, 'previousVersion': current})
         except ArchiveBusy:
             state(root, 'deferred', 'Arxiv hazırda məşğuldur. Yeniləmə növbəti açılışa saxlanıldı.', target)
             target = current; build = open_version(root, current)
-        except Exception:
+        except Exception as error:
+            diagnostic = failure(root, error, phase, target)
             if target == current: raise
-            atomic_json(root / 'failed-update.json', {'version': target})
+            atomic_json(root / 'failed-update.json', {'version': target, 'diagnostic': diagnostic})
             (root / 'pending.json').unlink(missing_ok=True)
-            state(root, 'error', 'Yeni versiya açıla bilmədi. Əvvəlki işlək versiyaya qayıdıldı.')
-            target = current; build = open_version(root, current)
+            state(root, 'rolling-back', 'Yeni versiya açılmadı. Əvvəlki versiya bərpa edilir…', target, diagnostic=diagnostic)
+            target = current
+            try: build = open_version(root, current)
+            except Exception as rollback_error:
+                diagnostic['rollback'] = failure(root, rollback_error, 'rollback', current)
+                state(root, 'error', 'Əvvəlki versiyanın faylları qorunur, açılışı təsdiqlənmədi. RADAZ qısayolundan yenidən başladın.', diagnostic=diagnostic)
+                raise
+            state(root, 'error', 'Yeni versiya açıla bilmədi. Əvvəlki işlək versiya bərpa edildi. Yenilə ilə təkrar cəhd edə bilərsiniz.', diagnostic=diagnostic)
         else:
             if target != current:
-                atomic_json(root / 'active.json', {'version': target, 'previousVersion': current})
                 (root / 'pending.json').unlink(missing_ok=True)
+                (root / 'failed-update.json').unlink(missing_ok=True)
                 state(root, 'current', f'RADAZ {target} avtomatik yeniləndi.')
         folder = version_dir(root, target)
         run_hidden([str(folder / 'runtime/python/python.exe'), str(folder / 'bridge/radaz_desktop.py'), 'watch', '--install-root', str(root)], root)
@@ -387,8 +441,9 @@ def watch(root):
                 retry_delay = 15 * 60
                 try: check_update(root, consume_update_request(root))
                 except Exception as error:
-                    state(root, 'error', update_error_message(error))
-                    print(type(error).__name__, ascii(str(error)), flush=True)
+                    saved = read_json(root / 'update-state.json')
+                    detail = failure(root, error, saved.get('state', 'download'), saved.get('version'))
+                    state(root, 'error', update_error_message(error), diagnostic=detail)
                     retry_delay = 60
                 # A transient outage must not hide a new version for six hours.
                 # Failed downloads lose their consumed approval and only recheck.

@@ -223,13 +223,49 @@ class DesktopUpdates(unittest.TestCase):
         self.assertIn('GitHub', desktop.update_error_message(HTTPError('https://api.github.com',403,'limited',{},None)))
         self.assertIn('İnternet', desktop.update_error_message(URLError('offline')))
 
-    def test_failed_health_check_rolls_back_and_does_not_retry_broken_release(self):
+    def test_failed_health_check_preserves_cause_and_rolls_back(self):
         self.stage()
         with patch.object(desktop,'open_version',side_effect=[RuntimeError('bad runtime'),'old-build']) as start,patch.object(desktop,'run_hidden'):
             desktop.launch(self.root,no_browser=True)
         self.assertEqual([call.args[1] for call in start.call_args_list],['0.2.9','0.2.8'])
         self.assertEqual(desktop.read_json(self.root/'active.json')['version'],'0.2.8')
         self.assertEqual(desktop.read_json(self.root/'failed-update.json')['version'],'0.2.9')
+        detail=desktop.read_json(self.root/'update-state.json')['diagnostic']
+        self.assertEqual(detail['message'],'bad runtime')
+        self.assertEqual(detail['phase'],'startup-health')
+        self.assertIn('bad runtime',(self.root/'logs/update-errors.jsonl').read_text())
+
+    def test_failed_release_is_discoverable_and_explicit_retry_is_allowed(self):
+        release=self.release()
+        desktop.atomic_json(self.root/'failed-update.json',{'version':self.target,'diagnostic':{'message':'old timeout'}})
+        with patch.object(desktop,'get_latest_release',return_value=release),patch.object(desktop,'open_release_download',side_effect=lambda _:self.archive.open('rb')) as download:
+            desktop.check_update(self.root)
+            self.assertEqual(desktop.read_json(self.root/'update-state.json')['state'],'available')
+            self.assertEqual(desktop.read_json(self.root/'update-state.json')['diagnostic']['message'],'old timeout')
+            download.assert_not_called()
+            desktop.check_update(self.root,self.target)
+            self.assertEqual(download.call_count,1)
+            self.assertEqual(desktop.read_json(self.root/'update-state.json')['state'],'ready')
+        with patch.object(desktop,'open_version',return_value='verified-build'),patch.object(desktop,'run_hidden'):
+            desktop.launch(self.root,no_browser=True)
+        self.assertFalse((self.root/'failed-update.json').exists())
+
+    def test_fresh_verified_download_repairs_corrupt_inactive_candidate(self):
+        self.stage()
+        (self.root/'versions'/self.target/'runtime/node/node.exe').write_bytes(b'corrupt')
+        digest,size=self.package()
+        desktop.stage_package(self.root,self.archive,self.target,digest,size)
+        desktop.validate_directory(self.root/'versions'/self.target,self.target)
+        self.assertEqual(desktop.read_json(self.root/'active.json')['version'],'0.2.8')
+
+    def test_rollback_failure_does_not_claim_previous_version_is_running(self):
+        self.stage()
+        with patch.object(desktop,'open_version',side_effect=[RuntimeError('new failed'),RuntimeError('old failed')]),patch.object(desktop,'run_hidden'),self.assertRaisesRegex(RuntimeError,'old failed'):
+            desktop.launch(self.root,no_browser=True)
+        status=desktop.read_json(self.root/'update-state.json')
+        self.assertEqual(status['diagnostic']['message'],'new failed')
+        self.assertEqual(status['diagnostic']['rollback']['message'],'old failed')
+        self.assertEqual(desktop.read_json(self.root/'active.json')['version'],'0.2.8')
 
     def test_receiving_archive_defers_update_instead_of_marking_it_broken(self):
         self.stage()
@@ -238,5 +274,19 @@ class DesktopUpdates(unittest.TestCase):
         self.assertEqual(desktop.read_json(self.root/'active.json')['version'],'0.2.8')
         self.assertTrue((self.root/'pending.json').exists())
         self.assertFalse((self.root/'failed-update.json').exists())
+
+    def test_denied_activation_commit_restores_old_runtime_and_keeps_old_pointer(self):
+        self.stage()
+        write=desktop.atomic_json
+        def denied(file,value):
+            if file.name=='active.json' and value['version']==self.target:raise PermissionError('active pointer locked')
+            return write(file,value)
+        with patch.object(desktop,'atomic_json',side_effect=denied),patch.object(desktop,'open_version',side_effect=['new-build','old-build']) as start,patch.object(desktop,'run_hidden'):
+            desktop.launch(self.root,no_browser=True)
+        self.assertEqual([call.args[1] for call in start.call_args_list],[self.target,'0.2.8'])
+        self.assertEqual(desktop.read_json(self.root/'active.json')['version'],'0.2.8')
+        detail=desktop.read_json(self.root/'update-state.json')['diagnostic']
+        self.assertEqual(detail['phase'],'activation-commit')
+        self.assertEqual(detail['message'],'active pointer locked')
 
 if __name__=='__main__': unittest.main()

@@ -33,9 +33,12 @@ $logDirectory = if ($env:RADAZ_INSTALL_ROOT) { Join-Path $env:RADAZ_INSTALL_ROOT
 New-Item -ItemType Directory -Force -Path $logDirectory | Out-Null
 $archiveArguments = @("`"$scriptPath`"", '--http-port', $archivePort)
 if ($env:RADAZ_ARCHIVE_DATA) { $archiveArguments += @('--data-dir', "`"$env:RADAZ_ARCHIVE_DATA`"") }
-Start-Process -FilePath $pythonPath -WindowStyle Hidden -WorkingDirectory $projectRoot -ArgumentList $archiveArguments -RedirectStandardError (Join-Path $logDirectory 'archive-error.log') -RedirectStandardOutput (Join-Path $logDirectory 'archive.log')
+$logStamp = "$expected-$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
+$errorLog = Join-Path $logDirectory "archive-error-$logStamp.log"
+$archiveProcess = Start-Process -FilePath $pythonPath -WindowStyle Hidden -PassThru -WorkingDirectory $projectRoot -ArgumentList $archiveArguments -RedirectStandardError $errorLog -RedirectStandardOutput (Join-Path $logDirectory "archive-$logStamp.log")
 foreach ($attempt in 1..60) {
   Start-Sleep -Milliseconds 300
-  try { $status = Invoke-RestMethod -Uri $statusUrl -TimeoutSec 1; if ($status.version -eq 1) { exit 0 } } catch {}
+  if ($archiveProcess.HasExited) { throw "RADAZ archive exited ($($archiveProcess.ExitCode)): $(Get-Content -Raw -LiteralPath $errorLog)" }
+  try { $status = Invoke-RestMethod -Uri $statusUrl -TimeoutSec 1; if ($status.version -eq 1 -and $status.appVersion -eq $expected) { exit 0 } } catch {}
 }
-throw "RADAZ archive did not start. Check $logDirectory\archive-error.log"
+throw "RADAZ archive did not start. Check $errorLog"
