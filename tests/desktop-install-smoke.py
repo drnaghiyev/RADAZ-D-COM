@@ -29,6 +29,15 @@ def run(args):
 def ps(script,*args): return run([PS,'-NoProfile','-ExecutionPolicy','Bypass','-File',script,*args])
 def get(path):
     with urlopen(base+path,timeout=5) as response:return json.load(response)
+
+def stop_test_watchers():
+    if os.environ.get('RADAZ_TEST_GATEWAY_UPDATER') != '1':return
+    # Force the real HTTP apply path to create its own updater. Only processes
+    # in this disposable installation are eligible; never touch the user's app.
+    literal=str(install.resolve()).replace("'","''")
+    assert install.resolve().parent==temporary
+    command=f"Get-CimInstance Win32_Process | Where-Object {{ $_.Name -eq 'python.exe' -and $_.ExecutablePath -and $_.ExecutablePath.StartsWith('{literal}\\') -and $_.CommandLine -match 'radaz_desktop\\.py\"?\\s+watch(?:\\s|$)' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}"
+    run([PS,'-NoProfile','-Command',command])
 def variant(value, broken=False, broken_asset=False):
     source=install/'versions'/VERSION; destination=install/'versions'/value; destination.mkdir()
     manifest=json.loads((source/'SHA256SUMS.json').read_text())
@@ -127,6 +136,7 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
         digest=hashlib.sha256(package.read_bytes()).hexdigest()
         script=f"from pathlib import Path;import radaz_desktop;radaz_desktop.stage_package(Path({str(install)!r}),Path({str(package)!r}),{VERSION!r},{digest!r},{package.stat().st_size})"
         run([folder/'runtime/python/python.exe','-c',script])
+        stop_test_watchers()
         with urlopen(Request(base+'/radaz-update',data=json.dumps({'action':'apply','confirmed':True,'version':VERSION}).encode(),headers={'Origin':base,'Content-Type':'application/json'}),timeout=5) as response:assert response.status==202
         for _ in range(180):
             try:
@@ -139,6 +149,7 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
         folder=install/'versions'/VERSION
         print(f'Actual installed {base_version} controller -> {VERSION} activation passed without Setup',flush=True)
     variant('99.0.1')
+    stop_test_watchers()
     with urlopen(Request(base+'/radaz-update',data=json.dumps({'action':'apply','confirmed':True,'version':'99.0.1'}).encode(),headers={'Origin':base,'Content-Type':'application/json'}),timeout=5) as response:
         assert response.status==202
     for _ in range(150):
