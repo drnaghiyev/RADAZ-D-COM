@@ -654,3 +654,18 @@ body .grouped-workstation .topbar .brand>.radaz-logo{display:inline-grid!importa
 body .brand strong,.output-page-brand strong{color:#e6fff9;font-size:22px!important;letter-spacing:.13em}
 body .brand small,.output-page-brand small{display:block!important;color:#bce9e3!important;font-size:10px!important;font-weight:650;letter-spacing:.06em!important;white-space:nowrap;line-height:1.35;margin-top:3px}
 body .output-page-brand strong{display:block!important}
+
+.display-direct-controls{display:flex;align-items:center;gap:2px;flex-wrap:nowrap}
+.display-direct-controls .rotation-half{font-size:13px;line-height:1}
+.display-direct-controls .reset-display{color:#b2e8e2!important}
+.report-assistant{padding:16px;color:#c1dbe6;display:grid;gap:14px;font-size:12px}
+.assistant-heading{display:flex;align-items:center;gap:9px;color:#bcebf6;font-size:16px}
+.assistant-selection{color:#91bfd0}.assistant-image{aspect-ratio:1.2;background:#030b10;display:grid;place-items:center;border:1px solid #315363;border-radius:7px;overflow:hidden}
+.assistant-image img{width:100%;height:100%;object-fit:contain;min-height:0}.assistant-image p{padding:20px;color:#9dbbc8}
+.assistant-navigation{display:flex;align-items:center;gap:10px;margin-top:8px}.assistant-navigation span{flex:1;text-align:center;overflow-wrap:anywhere}
+.assistant-navigation button,.assistant-analyze,.assistant-new-report{border:1px solid #416776;background:#1b3f51;border-radius:6px;padding:8px;color:#cdebf4}
+.assistant-navigation button:disabled,.assistant-analyze:disabled{opacity:.55;cursor:not-allowed}
+.assistant-instruction{display:grid;gap:8px}.assistant-instruction textarea{resize:vertical;width:100%;border:1px solid #426274;border-radius:6px;background:#0a1c28;color:#d6edf6;padding:10px;font:inherit}
+.assistant-analyze{display:flex;justify-content:center;align-items:center;gap:8px;padding:12px}
+.assistant-connection{color:#a6bdc9;font-size:12px;line-height:1.7;padding:12px;border:1px solid #304d60;border-radius:6px;background:#122936}
+.assistant-new-report{display:block;margin-top:16px}

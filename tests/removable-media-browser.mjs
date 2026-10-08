@@ -111,7 +111,7 @@ try {
   for(const child of [mpr,volume])assert.equal((await child.evaluate(()=>window.radazPerformance())).decodeCount,0,'Source pixels must not be decoded again');
   assert.equal(await volume.locator('.volume-cover progress').count(),0);
   console.log('3D opened from media session');
-  const reportPromise=context.waitForEvent('page');await page.getByRole('button',{name:'Radioloji hesabat',exact:true}).click();const report=await reportPromise;
+  const reportPromise=context.waitForEvent('page');await page.getByRole('button',{name:'AI asistent',exact:true}).click();const report=await reportPromise;
   await report.locator('.report-study').first().waitFor({timeout:30000});
   await page.screenshot({path:'outputs/media/loaded-700.png'});
   const archive=await (await fetch(`http://127.0.0.1:${archivePort}/status`)).json();assert.equal(archive.instanceCount,701);assert.equal(imports,0);assert.equal(pickers,0);

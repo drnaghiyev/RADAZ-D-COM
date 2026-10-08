@@ -10,6 +10,7 @@ export type SavedReport = {
   bodyHtml?: string;
   logoData?: string;
   notes: Record<string, string>;
+  aiInstruction?: string;
   updatedAt: number;
 };
 

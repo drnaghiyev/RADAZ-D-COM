@@ -26,6 +26,9 @@ MAX_PACKAGE = 512 * 1024 * 1024
 class ArchiveBusy(RuntimeError):
     pass
 
+class OperationBusy(RuntimeError):
+    pass
+
 def version(value):
     if not isinstance(value, str) or not re.fullmatch(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)', value):
         raise ValueError('Invalid RADAZ version')
@@ -107,7 +110,7 @@ def lock(root, name, wait=0):
             try:
                 file.seek(0); msvcrt.locking(file.fileno(), msvcrt.LK_NBLCK, 1); acquired = True; break
             except OSError:
-                if time.monotonic() >= until: raise RuntimeError('RADAZ operation already running') from None
+                if time.monotonic() >= until: raise OperationBusy('RADAZ operation already running') from None
                 time.sleep(.3)
         yield
     finally:
@@ -288,6 +291,37 @@ def powershell(script, *args):
     system = Path(os.environ.get('SystemRoot', 'C:/Windows')) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
     return [str(system), '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(script), *map(str, args)]
 
+def app_browser():
+    """Use the default Chromium profile, preserving existing localhost storage."""
+    import winreg
+    preferred = 'msedge.exe'
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice') as key:
+            if 'Chrome' in winreg.QueryValueEx(key, 'ProgId')[0]: preferred = 'chrome.exe'
+    except OSError: pass
+    for name in dict.fromkeys((preferred, 'msedge.exe', 'chrome.exe')):
+        for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+            for view in (winreg.KEY_WOW64_64KEY, winreg.KEY_WOW64_32KEY):
+                try:
+                    with winreg.OpenKey(hive, r'Software\Microsoft\Windows\CurrentVersion\App Paths' + '\\' + name, 0, winreg.KEY_READ | view) as key:
+                        candidate = Path(winreg.QueryValueEx(key, '')[0].strip('"'))
+                        if candidate.is_file(): return candidate
+                except OSError: pass
+        suffix = ('Microsoft/Edge/Application/' if name == 'msedge.exe' else 'Google/Chrome/Application/') + name
+        for variable in ('PROGRAMFILES(X86)', 'PROGRAMFILES', 'LOCALAPPDATA'):
+            if os.environ.get(variable):
+                candidate = Path(os.environ[variable]) / suffix
+                if candidate.is_file(): return candidate
+    raise RuntimeError('RADAZ tətbiq pəncərəsi üçün Microsoft Edge və ya Google Chrome tapılmadı.')
+
+def open_app(root, build):
+    port = int(os.environ.get('RADAZ_PORT', '5173'))
+    if not 0 < port < 65536: raise ValueError('Invalid RADAZ port')
+    from urllib.parse import quote
+    command = [str(app_browser()), f'--app=http://localhost:{port}/?radaz-build={quote(build, safe="")}', '--no-first-run']
+    # No alternate user-data directory: existing IndexedDB and user settings stay accessible.
+    return run_hidden(command, root)
+
 def open_version(root, target):
     folder = version_dir(root, target)
     identity = read_json(folder / 'dist/server/radaz-build.json')
@@ -371,7 +405,7 @@ def launch(root, no_browser=False):
         folder = version_dir(root, target)
         run_hidden([str(folder / 'runtime/python/python.exe'), str(folder / 'bridge/radaz_desktop.py'), 'watch', '--install-root', str(root)], root)
         if not no_browser:
-            os.startfile(f'http://localhost:{os.environ.get("RADAZ_PORT", "5173")}/?radaz-build={build}')
+            open_app(root, build)
 
 def initialize(root, shortcuts=True):
     target = read_json(SOURCE / 'public/product.json')['version']
@@ -432,13 +466,37 @@ def consume_update_request(root):
     finally: consumed.unlink(missing_ok=True)
 
 
+def apply_update(root):
+    """An already verified download can be activated with no GitHub connection."""
+    with lock(root, 'apply'):
+        request = root / 'apply-request.json'
+        consumed = root / 'apply-request.consumed.json'
+        try: os.replace(request, consumed)
+        except FileNotFoundError: return False
+        try:
+            apply = read_json(consumed)
+            candidate = read_json(root / 'pending.json').get('version') if (root / 'pending.json').exists() else None
+            if apply.get('confirmed') is not True or not candidate or apply.get('version') != candidate: return False
+            launch(root, no_browser=True)
+            return True
+        finally: consumed.unlink(missing_ok=True)
+
+def recover_server(root):
+    # A failed runtime does not authorize activation of an unrequested staged update.
+    with lock(root, 'launch'):
+        current = read_json(root / 'active.json')['version']
+        return open_version(root, current)
+
 def watch(root):
     handoff = None
+    missed_health = 0
     own_version = read_json(SOURCE / 'public/product.json')['version']
     try:
         with lock(root, 'update'):
             while True:
                 retry_delay = 15 * 60
+                try: apply_update(root)
+                except OperationBusy: pass
                 try: check_update(root, consume_update_request(root))
                 except Exception as error:
                     saved = read_json(root / 'update-state.json')
@@ -449,28 +507,36 @@ def watch(root):
                 # Failed downloads lose their consumed approval and only recheck.
                 for tick in range(retry_delay):
                     time.sleep(1)
-                    apply_path=root/'apply-request.json'
-                    if apply_path.exists():
-                        apply=read_json(apply_path);apply_path.unlink(missing_ok=True)
-                        candidate=read_json(root/'pending.json').get('version') if (root/'pending.json').exists() else None
-                        if apply.get('confirmed') is True and candidate and apply.get('version')==candidate:
-                            launch(root,no_browser=True)
+                    if (root/'apply-request.json').exists():
+                        try: apply_update(root)
+                        except OperationBusy: pass
                     active = read_json(root / 'active.json')['version']
                     if active != own_version:
                         handoff = version_dir(root, active)
                         break
                     if (root / 'update-request.json').exists(): break
-                    if tick % 60: continue
-                    try: get_json(f'http://127.0.0.1:{os.environ.get("RADAZ_PORT", "5173")}/radaz-runtime.json', 3)
-                    except Exception: return
+                    if tick % 10: continue
+                    try:
+                        served = get_json(f'http://127.0.0.1:{os.environ.get("RADAZ_PORT", "5173")}/radaz-runtime.json', 3)
+                        if served.get('name') != 'RADAZ': raise RuntimeError('Port belongs to another application')
+                        missed_health = 0
+                    except Exception:
+                        missed_health += 1
+                        if missed_health < 3: continue
+                        try: recover_server(root); missed_health = 0
+                        except OperationBusy: pass  # A deliberate restart already owns the launcher.
+                        except Exception as error:
+                            failure(root, error, 'server-recovery', active)
+                            # Keep the watcher alive, but back off repeated startup failures.
+                            missed_health = -27
                 if handoff: break
-    except RuntimeError: return  # An existing background updater owns the lock.
+    except OperationBusy: return  # An existing background updater owns the lock.
     if handoff:
         run_hidden([str(handoff/'runtime/python/python.exe'),str(handoff/'bridge/radaz_desktop.py'),'watch','--install-root',str(root)],root)
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['initialize', 'install', 'launch', 'watch', 'check'])
+    parser.add_argument('command', choices=['initialize', 'install', 'launch', 'watch', 'check', 'apply'])
     parser.add_argument('--install-root', type=Path, default=Path(os.environ.get('LOCALAPPDATA', Path.home())) / 'Programs/RADAZ')
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--no-shortcuts', action='store_true')
@@ -481,6 +547,13 @@ def main():
     elif args.command == 'launch': launch(root, args.no_browser)
     elif args.command == 'check':
         with lock(root, 'update'): check_update(root)
+    elif args.command == 'apply':
+        try: apply_update(root)
+        except OperationBusy: pass
+        except Exception as error:
+            diagnostic = failure(root, error, 'apply')
+            state(root, 'error', 'RADAZ açılışı tamamlanmadı. Xəta məlumatı açılış jurnalında saxlanılıb.', diagnostic=diagnostic)
+            raise
     else: watch(root)
 
 if __name__ == '__main__': main()

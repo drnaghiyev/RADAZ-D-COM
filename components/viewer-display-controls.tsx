@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { getViewer, getDefaultWindow } from '@/lib/cornerstone';
 import type { Types } from '@cornerstonejs/core';
 
-export function ViewerDisplayControls({ panel, imageId, onStatus }: { panel: string; imageId?: string; onStatus: (text: string) => void }) {
+export function ViewerDisplayControls({ panel, imageId, defaultImageId, onStatus, onReset }: { panel: string; imageId?: string; defaultImageId?: string; onStatus: (text: string) => void; onReset?: () => void }) {
   const [custom, setCustom] = useState(false);
   const [level, setLevel] = useState('50'), [width, setWidth] = useState('400');
   const [negative, setNegative] = useState(false);
@@ -21,7 +21,17 @@ export function ViewerDisplayControls({ panel, imageId, onStatus }: { panel: str
       if (kind === 'left' || kind === 'right' || kind === 'half') vp.setViewPresentation({ ...vp.getViewPresentation(), rotation: (vp.getRotation() + (kind === 'left' ? 270 : kind === 'right' ? 90 : 180)) % 360 });
       if (kind === 'horizontal') vp.setCamera({ flipHorizontal: !camera.flipHorizontal });
       if (kind === 'vertical') vp.setCamera({ flipVertical: !camera.flipVertical });
-      if (kind === 'reset') { vp.setCamera({ flipHorizontal: false, flipVertical: false }); vp.resetCamera(); vp.setViewPresentation({ ...vp.getViewPresentation(), rotation: 0 }); }
+      if (kind === 'reset') {
+        const original = await core.imageLoader.loadAndCacheImage(vp.getCurrentImageId()!);
+        // Reset presentation without moving to another slice or deleting measurements.
+        vp.resetProperties();
+        vp.setProperties({ invert: !!original.invert });
+        vp.setViewPresentation({ ...vp.getViewPresentation(), rotation: 0 });
+        vp.setCamera({ flipHorizontal: false, flipVertical: false });
+        vp.resetCamera();
+        ({ wl, ww } = getDefaultWindow(defaultImageId || vp.getCurrentImageId()!));
+        setNegative(false);
+      }
       if (kind === 'negative') {
         const original = await core.imageLoader.loadAndCacheImage(vp.getCurrentImageId()!);
         const invert = !vp.getProperties().invert; vp.setProperties({ invert }); setNegative(invert !== !!original.invert);
@@ -41,6 +51,7 @@ export function ViewerDisplayControls({ panel, imageId, onStatus }: { panel: str
         vp.setProperties({ voiRange: { lower: wl - ww / 2, upper: wl + ww / 2 } });
       }
       vp.render();
+      if (kind === 'reset') { onReset?.(); onStatus('Görüntünün parlaqlıq, kontrast, zoom, mövqe və çevirmə ayarları sıfırlandı'); }
     } catch (error) { onStatus(String(error instanceof Error ? error.message : error)); }
   };
   useEffect(() => {
@@ -67,14 +78,14 @@ export function ViewerDisplayControls({ panel, imageId, onStatus }: { panel: str
     return () => window.removeEventListener('keydown', key);
   });
   return <>
-    <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className="header-control" aria-label="Fırlat və çevir"><RotateCw size={18}/><span>Fırlat</span><ChevronDown size={13}/></Button></DropdownMenuTrigger><DropdownMenuContent className="header-menu" align="end">
-      <DropdownMenuItem onSelect={() => void action('left')}><RotateCcw size={17}/>90° sola fırlat <kbd>Ctrl+[</kbd></DropdownMenuItem>
-      <DropdownMenuItem onSelect={() => void action('right')}><RotateCw size={17}/>90° sağa fırlat <kbd>Ctrl+]</kbd></DropdownMenuItem>
-      <DropdownMenuItem onSelect={() => void action('half')}><RotateCw size={17}/>180° fırlat</DropdownMenuItem><div className="menu-separator"/>
-      <DropdownMenuItem onSelect={() => void action('horizontal')}><FlipHorizontal2 size={17}/>Üfüqi çevir <kbd>Ctrl+Shift+[</kbd></DropdownMenuItem>
-      <DropdownMenuItem onSelect={() => void action('vertical')}><FlipVertical2 size={17}/>Şaquli çevir <kbd>Ctrl+Shift+]</kbd></DropdownMenuItem><div className="menu-separator"/>
-      <DropdownMenuItem onSelect={() => void action('reset')}><Undo2 size={17}/>Çevirmələri sıfırla <kbd>Ctrl+Shift+\</kbd></DropdownMenuItem>
-    </DropdownMenuContent></DropdownMenu>
+    <div className="display-direct-controls" role="group" aria-label="Fırlatma və sıfırlama">
+      <Button variant="ghost" className="header-control reset-display" aria-label="Görüntünü sıfırla" title="Sıfırla: parlaqlıq, kontrast, zoom, mövqe, fırlatma və neqativ · Ctrl+Shift+\\" onClick={() => void action('reset')}><Undo2 size={18}/><span>Sıfırla</span></Button>
+      <Button variant="ghost" className="header-control" aria-label="90° sola fırlat" title="90° sola fırlat · Ctrl+[" onClick={() => void action('left')}><RotateCcw size={18}/></Button>
+      <Button variant="ghost" className="header-control" aria-label="90° sağa fırlat" title="90° sağa fırlat · Ctrl+]" onClick={() => void action('right')}><RotateCw size={18}/></Button>
+      <Button variant="ghost" className="header-control" aria-label="180° fırlat" title="180° fırlat" onClick={() => void action('half')}><b className="rotation-half">180°</b></Button>
+      <Button variant="ghost" className="header-control" aria-label="Üfüqi çevir" title="Üfüqi çevir · Ctrl+Shift+[" onClick={() => void action('horizontal')}><FlipHorizontal2 size={18}/></Button>
+      <Button variant="ghost" className="header-control" aria-label="Şaquli çevir" title="Şaquli çevir · Ctrl+Shift+]" onClick={() => void action('vertical')}><FlipVertical2 size={18}/></Button>
+    </div>
     <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className="header-control" aria-label="Pozitiv, neqativ və window"><Contrast size={18}/><span>Pozitiv / neqativ</span><ChevronDown size={13}/></Button></DropdownMenuTrigger><DropdownMenuContent className="header-menu" align="end">
       <DropdownMenuItem onSelect={() => void action('default')}>DICOM standart pəncərə</DropdownMenuItem>
       <DropdownMenuItem onSelect={() => void action('full')}>Tam dinamik diapazon</DropdownMenuItem><div className="menu-separator"/>

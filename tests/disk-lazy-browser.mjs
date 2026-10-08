@@ -33,9 +33,9 @@ try {
  assert.ok(!(await page.locator('body').innerText()).includes('Müvəqqəti yaddaş həddi doldu'));
  const initial=transfers;await page.mouse.move(650,480);await page.mouse.wheel(0,120);await page.waitForTimeout(400);assert.ok(transfers>initial,'Scroll reads the next image lazily');
  await fetch(backend+'/_test/resume',{method:'POST'});
- const beforeReport=transfers,pending=context.waitForEvent('page');await page.getByRole('button',{name:'Radioloji hesabat',exact:true}).click();const report=await pending;
- await report.locator('.report-study').waitFor();assert.equal(await report.locator('.report-series-list input').count(),1,'Only selected CT series reaches report');
- assert.match(await report.locator('.report-panel-title').first().innerText(),/700/);assert.equal(transfers,beforeReport,'Report keeps disk metadata, not 700 Files');
+ const beforeReport=transfers,pending=context.waitForEvent('page');await page.getByRole('button',{name:'AI asistent',exact:true}).click();const report=await pending;
+ await report.locator('.report-study').waitFor();assert.equal(await report.locator('.report-series-list input').count(),1,'Every series from this study reaches the assistant');
+ assert.match(await report.locator('.report-panel-title').first().innerText(),/700/);assert.ok(transfers<=beforeReport+1,'Assistant keeps disk metadata and loads only one preview, not 700 Files');
  await fetch(backend+'/_test/eject',{method:'POST'});await report.waitForFunction(()=>document.querySelectorAll('.report-study').length===0);
  await page.waitForFunction(()=>!document.querySelector('[data-panel="A"][data-has-image="true"]'));
  const memory=await page.evaluate(async()=>{

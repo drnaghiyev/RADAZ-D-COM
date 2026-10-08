@@ -29,6 +29,8 @@ import { parseDicomFile } from '@/lib/dicom-file';
 import { getArchiveFiles, saveArchiveFiles } from '@/lib/local-archive';
 import { watchRemovableMedia, type MediaImage, type MediaProgress } from '@/lib/removable-media';
 import { bindWindowing, connectWindowLevels, WindowLevels } from '@/lib/image-windowing';
+import { reportHandoff } from '@/lib/report-handoff';
+import { Sparkles } from 'lucide-react';
 import type * as Core from '@cornerstonejs/core';
 
 type Tool = 'scroll' | 'arrow' | 'pencil' | 'cursor3d' | 'wl' | 'pan' | 'zoom' | 'length' | 'angle' | 'arch' | 'cobb' | 'ellipse' | 'hu' | 'deviation' | 'erase';
@@ -444,25 +446,23 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     }
     channels.current.get(mode)?.close();
     const channel = new BroadcastChannel(`radaz-${token}`);
-    // Capture the selected series at the moment the Report button is pressed.
-    const selected = listRef.current.find(s => s.id === selectedIdRef.current);
-    const reportIds = selected ? [...selected.imageIds] : [];
-    const preferredSeriesId = selected?.id.replace(/^media:[^:]+:/, '');
+    const { imageIds: reportIds, preferredSeriesId, mediaSessions } = reportHandoff(listRef.current, selectedIdRef.current);
     channel.onmessage = event => {
       if (event.data?.kind !== 'READY') return;
       if (mode !== 'report') { channel.postMessage({kind:'SHARED_READY'}); return; }
       void (async () => {
         const diskSources = reportIds.map(getDiskDicomSource);
         if (diskSources.length && diskSources.every(Boolean)) {
-          channel.postMessage({kind:'MEDIA_REPORT', sources:diskSources, preferredSeriesId, mediaSessions:selected?.mediaSession && !selected.archived ? [selected.mediaSession] : []}); return;
+          channel.postMessage({kind:'MEDIA_REPORT', sources:diskSources, preferredSeriesId, mediaSessions}); return;
         }
         const files: File[] = [];
         for (const id of reportIds) {
           const bytes = await getOriginalDicom(id);
-          if (bytes) files.push(new File([bytes as BlobPart], `${id.replace(':','-')}.dcm`, {type:'application/dicom'}));
+          if (!bytes) throw new Error('Müayinənin görüntülərindən biri oxunmadı');
+          files.push(new File([bytes as BlobPart], `${id.replace(':','-')}.dcm`, {type:'application/dicom'}));
         }
-        channel.postMessage({kind:'LOAD', files, preferredSeriesId, mediaSessions:selected?.mediaSession && !selected.archived ? [selected.mediaSession] : []});
-      })().catch(() => setStatus('Hesabat üçün seçilmiş seriya oxunmadı; mənbə diski yoxlayın.'));
+        channel.postMessage({kind:'LOAD', files, preferredSeriesId, mediaSessions});
+      })().catch(() => { const message = 'AI asistent üçün müayinə tam oxunmadı; mənbəni yoxlayıb yenidən açın.'; setStatus(message); channel.postMessage({kind:'LOAD_ERROR', message}); });
     };
     channels.current.set(mode,channel);
     return channel;
@@ -1131,7 +1131,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         <button type="button" aria-label="2D Viewer" onClick={() => setWorkspace('viewer')}><b>2D</b></button>
         <button type="button" disabled={limited} title="MPR rekonstruksiya" aria-label="MPR rekonstruksiya" onClick={() => openDetached('mpr')}><b className="mode-letter-icon">MPR</b></button>
         <button type="button" disabled={limited} title="3D həcm görüntüləmə" aria-label="3D həcm görüntüləmə" onClick={() => openDetached('3d')}><b className="mode-letter-icon">3D</b></button>
-        <button type="button" disabled={limited} title="Radioloji hesabat" aria-label="Radioloji hesabat" onClick={openReport}><FileText size={18}/><span>Hesabat</span></button>
+        <button type="button" disabled={limited} title="AI asistent" aria-label="AI asistent" onClick={openReport}><Sparkles size={18}/><span>AI asistent</span></button>
         <button type="button" title="Local arxiv" aria-label="Local arxiv" onClick={async () => { if (!await openRecordsWindow('archive')) setStatus('Local arxiv vərəqəsi açıla bilmədi'); }}><Database size={18}/><span>Local arxiv</span></button>
         <button type="button" title="PACS müayinələri" aria-label="PACS müayinələri" onClick={async () => { if (!await openRecordsWindow('pacs')) setStatus('PACS vərəqəsi açıla bilmədi'); }}><ServerCog size={18}/><span>PACS</span></button>
       </div>}
@@ -1152,14 +1152,14 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
           <label className="volume-parameter">{ctVolume ? 'HU həddi' : 'İntensivlik'} <input aria-label={ctVolume ? '3D HU həddi' : '3D intensivlik həddi'} type="range" min="-1000" max="1400" step="10" value={volumeThreshold} onChange={event => setVolumeThreshold(+event.currentTarget.value)}/><output>{ctVolume ? volumeThreshold : `${Math.round(volumeThreshold/40.95)}%`}</output></label>
           <label className="volume-parameter">Şəffaflıq <input aria-label="3D şəffaflıq" type="range" min="0.2" max="2" step="0.1" value={volumeOpacity} onChange={event => setVolumeOpacity(+event.currentTarget.value)}/><output>{Math.round(volumeOpacity * 100)}%</output></label>
           <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" className="header-control volume-preset-trigger" title="Professional işıq və keyfiyyət ayarları" aria-label="Professional 3D ayarları"><Settings2 size={18}/></Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="header-menu volume-settings-menu"><div className="volume-menu-heading">İŞIQ VƏ RENDER</div><VolumeRenderControls preset={volumePreset} settings={volumeSettings} onChange={setVolumeSettings}/></DropdownMenuContent></DropdownMenu>
-          <button className="mpr-reset volume-reset" type="button" onClick={() => setVolumeResetToken(value => value+1)} title="3D görünüşün bucaq, zoom və mövqeyini sıfırla" aria-label="3D görünüşü sıfırla"><RotateCcw size={15}/><span>Görünüşü sıfırla</span></button>
+          <button className="mpr-reset volume-reset" type="button" onClick={() => { const style = volumeStyles.find(item => item.key === (ctVolume ? 'bone' : 'mr'))!; setVolumePreset(style.key); setVolumeThreshold(style.threshold); setVolumeOpacity(style.opacity); setVolumeSettings(style.lighting); setVolumeResetToken(value => value+1); }} title="3D görünüş, işıq, şəffaflıq, bucaq, zoom və mövqeyi sıfırla" aria-label="3D görünüşü sıfırla"><RotateCcw size={15}/><span>Sıfırla</span></button>
         </div>
       </>}
       <div className="top-actions">
 
         {!limited && detachedMode !== '3d' && <div className="toolbar-group" role="group" aria-label="Görüntünün görünüşü">
           <Button variant="ghost" className="header-control" aria-label="Yazıları gizlət" aria-pressed={hideText} title={hideText ? 'Yazıları göstər' : 'Yazıları gizlət'} onClick={() => setHideText(value => !value)}>{hideText ? <EyeOff size={18}/> : <Eye size={18}/>}<span>Yazılar</span></Button>
-          <ViewerDisplayControls panel={workspace === 'mpr' ? mprActive : active} imageId={currentImages[workspace === 'mpr' ? mprActive : active]} onStatus={setStatus}/>
+          <ViewerDisplayControls panel={workspace === 'mpr' ? mprActive : active} imageId={currentImages[workspace === 'mpr' ? mprActive : active]} defaultImageId={workspace === 'mpr' ? seriesList.find(item => item.id === mprData?.sourceId)?.imageIds[0] : undefined} onStatus={setStatus}/>
 
         </div>}
         {!limited && detachedMode !== '3d' && <div className="toolbar-group" role="group" aria-label="Naviqasiya və ölçmə">{viewTools.map(t => <Button key={t.id} variant="ghost" className={`header-control view-tool ${tool === t.id ? 'selected-tool' : ''}`} aria-pressed={tool === t.id} title={`${t.label} · ${t.hint}`} onClick={() => setTool(t.id)}><t.icon size={17}/><span>{t.label}</span></Button>)}

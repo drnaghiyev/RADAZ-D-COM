@@ -6,7 +6,7 @@ import { Activity, ArrowLeft, Check, Clipboard, Download, FileText, ImagePlus, L
 import { getArchiveFiles, listArchiveStudies, type ArchiveStudy } from '@/lib/local-archive';
 import { readReportMedia, readReportStudies, renderReportImage, type ReportImage, type ReportStudy } from '@/lib/report-dicom';
 import { exportReportWord, listSavedReports, loadSavedReport, reportPlainText, saveReport, type SavedReport } from '@/lib/report-store';
-import { ChatGPTTransfer } from '@/components/chatgpt-transfer';
+import { ReportAssistant } from '@/components/report-assistant';
 import { AppHelpMenu } from '@/components/app-product';
 import { RadazLogo } from '@/components/radaz-logo';
 import { watchMediaRemoval } from '@/lib/removable-media';
@@ -43,8 +43,7 @@ export default function ReportPage() {
     const epoch = loadEpoch.current;
     setStudy(next);
     const ids = [...new Set(next.images.map(image => image.seriesUID))];
-    const preferred = ids.find(id => preferredSeriesId === id || preferredSeriesId?.endsWith(`/${id}`));
-    setSeries(preferred ? [preferred] : ids);
+    setSeries(ids);
     const existing = await loadSavedReport(next.uid).catch(() => undefined);
     if (epoch !== loadEpoch.current) return;
     const header = localStorage.getItem('radaz-report-clinic-header') || '';
@@ -67,7 +66,7 @@ export default function ReportPage() {
   }, [openStudy]);
 
   useEffect(() => {
-    document.title = 'RADAZ · Hesabat';
+    document.title = 'RADAZ · AI asistent';
     void Promise.resolve().then(refresh);
     const params = new URLSearchParams(window.location.search);
     const token = params.get('handoff');
@@ -81,6 +80,7 @@ export default function ReportPage() {
     setArchive([]);
     const channel = new BroadcastChannel(`radaz-${token}`);
     channel.onmessage = event => {
+      if (event.data?.kind === 'LOAD_ERROR') { setStatus(String(event.data.message)); setParseProgress(''); return; }
       if ((event.data?.kind === 'LOAD' && Array.isArray(event.data.files)) || (event.data?.kind === 'MEDIA_REPORT' && Array.isArray(event.data.sources))) {
         mediaCleanup.current?.(); mediaCleanup.current = null;
         if (Array.isArray(event.data.mediaSessions) && event.data.mediaSessions.length) {
@@ -170,7 +170,7 @@ export default function ReportPage() {
   };
 
   return <main className="report-shell">
-    <header className="report-topbar"><Link href="/" className="report-brand"><RadazLogo size={34}/><span><strong>RADAZ</strong><small>HESABAT</small></span></Link><div className="report-top-actions"><div className="record-action-group"><span className="command-group-title">İş sahəsi</span><div className="toolbar-group"><Link href="/" title="Viewer" aria-label="Viewer"><ArrowLeft size={15}/> Viewer</Link><AppHelpMenu/></div></div><div className="record-action-group"><span className="command-group-title">Hesabat</span><div className="toolbar-group"><button title="Yadda saxla" onClick={() => void save()} disabled={!report}><Save size={15}/> Yadda saxla</button><button title="Kopyala" onClick={() => void copy()} disabled={!report}><Clipboard size={15}/> Kopyala</button></div></div><div className="record-action-group"><span className="command-group-title">İxrac və çap</span><div className="toolbar-group"><button title="PDF" onClick={() => { window.print(); setStatus('Çap dialoqunda “PDF kimi saxla” seçərək PDF çıxarın'); }} disabled={!report}><Download size={15}/> PDF</button><button title="MS Word" onClick={() => { if (!report) return; setStatus('Word faylı hazırlanır…'); void exportReportWord(report).then(() => setStatus('Word faylı hazırdır')).catch(() => setStatus('Word faylı yaradılmadı')); }} disabled={!report}><FileText size={15}/> MS Word</button><button title="Çap et" onClick={() => window.print()} disabled={!report}><Printer size={15}/> Çap et</button></div></div></div></header>
+    <header className="report-topbar"><Link href="/" className="report-brand"><RadazLogo size={34}/><span><strong>RADAZ</strong><small>AI ASİSTENT</small></span></Link><div className="report-top-actions"><div className="record-action-group"><span className="command-group-title">İş sahəsi</span><div className="toolbar-group"><Link href="/" title="Viewer" aria-label="Viewer"><ArrowLeft size={15}/> Viewer</Link><AppHelpMenu/></div></div><div className="record-action-group"><span className="command-group-title">Hesabat</span><div className="toolbar-group"><button title="Yadda saxla" onClick={() => void save()} disabled={!report}><Save size={15}/> Yadda saxla</button><button title="Kopyala" onClick={() => void copy()} disabled={!report}><Clipboard size={15}/> Kopyala</button></div></div><div className="record-action-group"><span className="command-group-title">İxrac və çap</span><div className="toolbar-group"><button title="PDF" onClick={() => { window.print(); setStatus('Çap dialoqunda “PDF kimi saxla” seçərək PDF çıxarın'); }} disabled={!report}><Download size={15}/> PDF</button><button title="MS Word" onClick={() => { if (!report) return; setStatus('Word faylı hazırlanır…'); void exportReportWord(report).then(() => setStatus('Word faylı hazırdır')).catch(() => setStatus('Word faylı yaradılmadı')); }} disabled={!report}><FileText size={15}/> MS Word</button><button title="Çap et" onClick={() => window.print()} disabled={!report}><Printer size={15}/> Çap et</button></div></div></div></header>
     <div className="report-layout">
       <aside className="report-sidebar"><div className="report-side-head"><strong>Müayinələr</strong><span>{parseProgress ? `Oxunur ${parseProgress}` : `${studies.length + archive.length} mənbə`}</span></div>
         {studies.map(item => <button key={item.uid} className={`report-study ${study?.uid === item.uid ? 'active' : ''}`} onClick={() => void openStudy(item)}><strong>{item.patient}</strong><span>{item.modality} · {item.date || 'Tarixsiz'} · {item.images.length} kəsit</span></button>)}
@@ -178,16 +178,16 @@ export default function ReportPage() {
         {archive.filter(item => !studies.some(entry => entry.uid === item.uid)).map(item => <button key={item.uid} className="report-study" onClick={() => void openArchive(item.uid)}><strong>{item.patient}</strong><span>{item.modality} · {item.imageCount} kəsit</span></button>)}
         {!viewerOnly && !!saved.length && <div className="report-list-label">Saxlanmış hesabatlar</div>}
         {!viewerOnly && saved.map(item => <button key={item.studyUID} className="report-study" onClick={() => selectSaved(item)}><strong>{item.patient || 'Adsız pasiyent'}</strong><span>{item.date || 'Tarixsiz'} · {new Date(item.updatedAt).toLocaleDateString('az-AZ')}</span></button>)}
-        {!study && !report && <div className="report-side-empty">Viewer-də müayinəni açıb yuxarıdakı Hesabat düyməsini seçin.</div>}
+        {!study && !report && <div className="report-side-empty">Viewer-də müayinəni açıb yuxarıdakı AI asistent düyməsini seçin.<button className="assistant-new-report" onClick={() => { setReport(emptyReport(undefined, localStorage.getItem('radaz-report-clinic-header') || '', safeReportLogo(localStorage.getItem('radaz-report-clinic-logo') || ''))); setStatus('Yeni hesabat açıldı'); }}>Yeni hesabat</button></div>}
       </aside>
       <section className="report-images"><div className="report-panel-title"><strong>Görüntü analizi</strong><span>{study ? `${eligible.length} uyğun kəsit${excluded ? ` · ${excluded} dəstəklənmir` : ''}` : 'Müayinə seçin'}</span></div>
-        {study && <><div className="report-image-options"><label>Pəncərə <select value={windowMode} onChange={e => { setWindowMode(e.target.value as WindowMode); }}><option value="metadata">DICOM metadatası</option><option value="lung">Ağciyər</option><option value="soft">Yumşaq toxuma</option><option value="bone">Sümük</option></select></label><span>Seçilən seriyaların bütün görüntüləri bir ZIP faylına yığılır.</span></div>
+        {study && <><div className="report-image-options"><label>Pəncərə <select value={windowMode} onChange={e => { setWindowMode(e.target.value as WindowMode); }}><option value="metadata">DICOM metadatası</option><option value="lung">Ağciyər</option><option value="soft">Yumşaq toxuma</option><option value="bone">Sümük</option></select></label><span>Seçilən seriyaların bütün görüntüləri aşağıdakı önbaxışda açılır.</span></div>
           <div className="report-series-list">{[...new Map(study.images.map(image => [image.seriesUID, image.seriesName])).entries()].map(([uid, name]) => <label key={uid}><input type="checkbox" checked={series.includes(uid)} onChange={e => { setSeries(current => e.target.checked ? [...current, uid] : current.filter(item => item !== uid)); }}/><span>{name}</span><em>{study.images.filter(image => image.seriesUID === uid).length}</em></label>)}</div>
-          <ChatGPTTransfer key={study.uid} images={allImages} windowMode={windowMode} modality={study.modality} onPaste={text => { const next = [report?.body || '', text].filter(Boolean).join('\n\n'); update({body:next,bodyHtml:plainReportHtml(next)}); }}/>
         </>}
+        <ReportAssistant key={report?.studyUID || 'empty'} images={allImages} windowMode={windowMode} instruction={report?.aiInstruction || ''} onInstruction={aiInstruction => update({aiInstruction})}/>
       </section>
       <section className="report-editor"><div className="report-panel-title"><strong>Hesabat redaktoru</strong><span>{report ? 'Dəyişiklikləri yadda saxlayın' : 'Müayinə seçin'}</span></div>
-        {report ? <><div className="report-fields"><label className="report-field-full">Klinika şablonunun başlığı<textarea value={report.header} placeholder="Klinikanın adı, ünvanı və əlaqə məlumatları" onChange={e => { update({ header: e.target.value }); localStorage.setItem('radaz-report-clinic-header', e.target.value); }}/></label><div className="report-logo-field"><input ref={logoInput} className="report-logo-input" type="file" accept="image/png,image/jpeg" aria-label="Klinika loqosunu seç" onChange={event => void uploadLogo(event.currentTarget.files?.[0])}/><button type="button" onClick={() => logoInput.current?.click()}><ImagePlus size={15}/> JPEG/PNG loqo əlavə et</button>{safeReportLogo(report.logoData) && <><img src={safeReportLogo(report.logoData)} alt="Klinika loqosu"/><button type="button" onClick={removeLogo}><Trash2 size={15}/> Sil</button></>}</div><label>Pasiyentin adı, soyadı<input value={report.patient} onChange={e => update({ patient: e.target.value })}/></label><label>Təvəllüd<input type="date" value={report.birth} onChange={e => update({ birth: e.target.value })}/></label><label>Müayinə tarixi<input type="date" value={report.date} onChange={e => update({ date: e.target.value })}/></label><label>Müayinə növü<input value={report.modality} onChange={e => update({ modality: e.target.value })}/></label></div><div className="report-body-label"><span>Hesabat mətni</span><ReportRichEditor key={report.studyUID} html={report.bodyHtml || (report.body ? plainReportHtml(report.body) : '')} onChange={(bodyHtml, body) => update({ bodyHtml, body })}/></div></> : <div className="report-editor-empty"><FileText size={35}/><p>Görüntüləri viewer-də açın, sonra Hesabat düyməsinə basın.</p></div>}
+        {report ? <><div className="report-fields"><label className="report-field-full">Klinika şablonunun başlığı<textarea value={report.header} placeholder="Klinikanın adı, ünvanı və əlaqə məlumatları" onChange={e => { update({ header: e.target.value }); localStorage.setItem('radaz-report-clinic-header', e.target.value); }}/></label><div className="report-logo-field"><input ref={logoInput} className="report-logo-input" type="file" accept="image/png,image/jpeg" aria-label="Klinika loqosunu seç" onChange={event => void uploadLogo(event.currentTarget.files?.[0])}/><button type="button" onClick={() => logoInput.current?.click()}><ImagePlus size={15}/> JPEG/PNG loqo əlavə et</button>{safeReportLogo(report.logoData) && <><img src={safeReportLogo(report.logoData)} alt="Klinika loqosu"/><button type="button" onClick={removeLogo}><Trash2 size={15}/> Sil</button></>}</div><label>Pasiyentin adı, soyadı<input value={report.patient} onChange={e => update({ patient: e.target.value })}/></label><label>Təvəllüd<input type="date" value={report.birth} onChange={e => update({ birth: e.target.value })}/></label><label>Müayinə tarixi<input type="date" value={report.date} onChange={e => update({ date: e.target.value })}/></label><label>Müayinə növü<input value={report.modality} onChange={e => update({ modality: e.target.value })}/></label></div><div className="report-body-label"><span>Hesabat mətni</span><ReportRichEditor key={report.studyUID} html={report.bodyHtml || (report.body ? plainReportHtml(report.body) : '')} onChange={(bodyHtml, body) => update({ bodyHtml, body })}/></div></> : <div className="report-editor-empty"><FileText size={35}/><p>Görüntüləri viewer-də açın, sonra AI asistent düyməsinə basın.</p></div>}
         <div className="report-bottom-status" role="status">{status.includes('saxlanıldı') && <Check size={15}/>} {status}</div>
       </section>
     </div>

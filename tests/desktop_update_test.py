@@ -210,6 +210,38 @@ class DesktopUpdates(unittest.TestCase):
         self.assertEqual(desktop.read_json(self.root/'active.json'),{'version':'0.2.9','previousVersion':'0.2.8'})
         self.assertFalse((self.root/'pending.json').exists())
 
+    def test_apply_does_not_wait_for_a_release_check_or_update_lock(self):
+        self.stage()
+        desktop.atomic_json(self.root/'apply-request.json', {'confirmed':True,'version':self.target})
+        with desktop.lock(self.root, 'update'), patch.object(desktop,'get_latest_release',side_effect=AssertionError('Offline apply must not check GitHub')), patch.object(desktop,'open_version',return_value='healthy'), patch.object(desktop,'run_hidden'):
+            self.assertTrue(desktop.apply_update(self.root))
+        self.assertEqual(desktop.read_json(self.root/'active.json')['version'],self.target)
+        self.assertFalse((self.root/'apply-request.json').exists())
+        self.assertFalse((self.root/'apply-request.consumed.json').exists())
+
+    def test_stale_apply_cannot_activate_a_different_download(self):
+        self.stage()
+        desktop.atomic_json(self.root/'apply-request.json', {'confirmed':True,'version':'0.2.99'})
+        with patch.object(desktop,'launch') as launched:
+            self.assertFalse(desktop.apply_update(self.root))
+            launched.assert_not_called()
+        self.assertEqual(desktop.read_json(self.root/'active.json')['version'],'0.2.8')
+
+    def test_runtime_recovery_keeps_unapplied_download_staged(self):
+        self.stage()
+        with patch.object(desktop,'open_version',return_value='old-build') as started:
+            desktop.recover_server(self.root)
+            started.assert_called_once_with(self.root,'0.2.8')
+        self.assertEqual(desktop.read_json(self.root/'pending.json')['version'],self.target)
+
+    def test_app_window_preserves_browser_profile_and_localhost_origin(self):
+        with patch.object(desktop,'app_browser',return_value=Path('C:/test browser/msedge.exe')), patch.object(desktop,'run_hidden') as started, patch.dict(os.environ,{'RADAZ_PORT':'5173'}):
+            desktop.open_app(self.root,'verified-build')
+        command=started.call_args.args[0]
+        self.assertEqual(command[0],'C:\\test browser\\msedge.exe' if os.name=='nt' else 'C:/test browser/msedge.exe')
+        self.assertIn('--app=http://localhost:5173/?radaz-build=verified-build',command)
+        self.assertFalse(any('user-data-dir' in arg or 'incognito' in arg or 'inprivate' in arg for arg in command))
+
     def test_update_feed_is_separate_from_legacy_product_identity(self):
         self.assertNotEqual(desktop.UPDATE_REPOSITORY, desktop.REPOSITORY)
         with patch.object(desktop, 'get_json', return_value={'tag_name':'v0.2.8'}) as request:

@@ -129,6 +129,7 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
     ps(install/'launcher.ps1','-NoBrowser')
     assert get('/radaz-runtime.json')['startedAt']==first['startedAt']
     print('Offline installation, private runtimes, desktop shortcut, five routes, C-ECHO and repeat launch passed',flush=True)
+    if os.environ.get('RADAZ_TEST_INSTALL_ONLY')=='1': raise SystemExit(0)
     # Prove that an already-installed older controller can activate the new
     # gateway, whose root stays 503 until all new resources pass health checks.
     if base_version != VERSION:
@@ -148,6 +149,19 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
         assert get('/radaz-installation.json')['activeVersion']==VERSION
         folder=install/'versions'/VERSION
         print(f'Actual installed {base_version} controller -> {VERSION} activation passed without Setup',flush=True)
+    # The background watcher restores an unexpectedly stopped runtime without
+    # requiring a browser refresh or advancing the active version.
+    before_recovery=get('/radaz-runtime.json')['startedAt']
+    ps(folder/'scripts/stop-web-server.ps1','-Port',str(web))
+    for _ in range(150):
+        try:
+            runtime=get('/radaz-runtime.json')
+            if runtime.get('version')==VERSION and runtime['startedAt']!=before_recovery and get('/radaz-health.json')['ready']:break
+        except (OSError,ValueError):pass
+        time.sleep(.5)
+    assert get('/radaz-runtime.json')['version']==VERSION
+    assert get('/radaz-runtime.json')['startedAt']!=before_recovery
+    print('Background watcher restored stopped server; active version and archive preserved',flush=True)
     variant('99.0.1')
     stop_test_watchers()
     with urlopen(Request(base+'/radaz-update',data=json.dumps({'action':'apply','confirmed':True,'version':'99.0.1'}).encode(),headers={'Origin':base,'Content-Type':'application/json'}),timeout=5) as response:

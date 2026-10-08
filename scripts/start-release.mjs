@@ -1,7 +1,7 @@
 // Built application gateway. DICOM control stays on loopback; the viewer is available on LAN.
 import http from 'node:http';
 import {spawn,spawnSync} from 'node:child_process';
-import {existsSync,readFileSync,writeFileSync,renameSync,unlinkSync} from 'node:fs';
+import {existsSync,readFileSync,writeFileSync,renameSync,unlinkSync,mkdirSync,openSync,closeSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {verifyClientFiles,verifyClientHttp} from './release-health.mjs';
@@ -69,7 +69,11 @@ const server=http.createServer((req,res)=>{
   try{
    const pending=path.join(installRoot,request.action==='apply'?'apply-request.json':'update-request.json');
    const temp=pending+'.tmp';writeFileSync(temp,JSON.stringify({...request,requestedAt:Date.now()}));renameSync(temp,pending);
-   const updater=spawn(path.join(root,'runtime/python/python.exe'),[path.join(root,'bridge/radaz_desktop.py'),'watch','--install-root',installRoot],{cwd:installRoot,windowsHide:true,detached:true,stdio:'ignore'});
+   mkdirSync(path.join(installRoot,'logs'),{recursive:true});
+   const log=openSync(path.join(installRoot,'logs/desktop.log'),'a');
+   let updater;
+   try{updater=spawn(path.join(root,'runtime/python/python.exe'),[path.join(root,'bridge/radaz_desktop.py'),request.action==='apply'?'apply':'watch','--install-root',installRoot],{cwd:installRoot,windowsHide:true,detached:true,stdio:['ignore',log,log]});}
+   finally{closeSync(log);}
    updater.on('error',error=>{
     console.error('Updater start:',error.message);
     try{unlinkSync(pending);}catch{}
