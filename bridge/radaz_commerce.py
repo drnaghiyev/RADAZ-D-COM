@@ -7,7 +7,7 @@ import re
 import time
 from urllib.parse import urlsplit
 
-POLICY_URL = 'https://raw.githubusercontent.com/cesur9872-droid/RADAZ-Releases/main/commerce.json'
+POLICY_URL = 'https://raw.githubusercontent.com/drnaghiyev/RADAZ-D-COM/main/commerce.json'
 
 def verify_policy(envelope, public):
     token = envelope.get('policy') if isinstance(envelope, dict) else None

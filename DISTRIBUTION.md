@@ -91,13 +91,13 @@ Açar avtomatik e-poçt/SMS ilə göndərilmir; bu funksiya qoşulmayıb. Açard
 
 ## Alıcıya hansı GitHub linki verilir?
 
-Quraşdırıcılar üçün açıq buraxılış deposu: [RADAZ-Releases](https://github.com/cesur9872-droid/RADAZ-Releases). `public/product.json` daxilində `updateRepository` yenilənmə ünvanıdır; `repository` köhnə quraşdırmalarla uyğun məhsul kimliyini saxlayır. Desktop updater yalnız sabit `UPDATE_REPOSITORY` ünvanından SHA-256 yoxlanmış paket qəbul edir.
+Mənbə kodu və quraşdırıcılar üçün əsas depo: [RADAZ-D-COM](https://github.com/drnaghiyev/RADAZ-D-COM). `public/product.json` daxilində `updateRepository` yenilənmə ünvanıdır; `repository` köhnə quraşdırmalarla uyğun məhsul kimliyini saxlayır. Desktop updater yalnız sabit `UPDATE_REPOSITORY` ünvanından SHA-256 yoxlanmış paket qəbul edir.
 
-3 oktyabr 2026 yoxlamasında köhnə ünvan 404 qaytardı. 0.2.9 və daha köhnə quraşdırmalar üçün yeni Setup bir dəfə açılmalıdır; 0.2.10-dan sonrakı versiyalar yeni kanaldan gəlir. Yeni repo yalnız buraxılış faylları və istifadə təlimatı üçündür.
+0.2.27-dən başlayaraq yeni yenilənmələr əsas repodan alınır. 0.2.10–0.2.26 versiyalarında köhnə repo ünvanı proqramın daxilində sabitdir; həmin quraşdırmaların Setup olmadan keçidi üçün köhnə ünvanda keçid buraxılışı saxlanmalıdır. Əks halda yeni Setup-ı bir dəfə açmaq tələb olunur; lokal arxiv versiya qovluqlarından ayrıdır.
 
 Buraxılış əvvəl draft kimi yaradılır, Setup, tam Windows-x64 paketi və SHA-256 faylları yüklənib yoxlanır, sonra Latest kimi yayımlanır. Draft və pre-release avtomatik yenilənmədə görünmür. Artıq yayımlanmış versiyanın faylları dəyişdirilmir.
 
-Alıcıya relizin **Assets** bölməsindəki `RADAZ-0.2.10-Setup.exe` verilir. **Code → Download ZIP** və **Source code (zip)** quraşdırma paketləri deyil. Keçid: [son buraxılış](https://github.com/cesur9872-droid/RADAZ-Releases/releases/latest).
+Alıcıya relizin **Assets** bölməsindəki `RADAZ-0.2.27-Setup.exe` verilir. **Code → Download ZIP** və **Source code (zip)** quraşdırma paketləri deyil. Keçid: [son buraxılış](https://github.com/drnaghiyev/RADAZ-D-COM/releases/latest).
 
 Setup ilə quraşdırılmış RADAZ-da **Yardım (?) → Yeniləmələri yoxla → Yenilə** endirmə və quraşdırmanı başladır. Real progressbar və tamamlanma mesajı görünür. Müayinə davam edir; yeni versiya növbəti açılışda sağlamlıq yoxlamasından sonra aktivləşir. Arxiv mövcud `Documents\RADAZ-Archive` qovluğunda qalır. Portable ZIP istifadəçiləri Setup keçidini açır.
 
@@ -107,7 +107,7 @@ Setup ilə quraşdırılmış RADAZ-da **Yardım (?) → Yeniləmələri yoxla �
 
 `.github/workflows/windows-release.yml` hər `main` göndərişində `public/product.json` versiyasını yoxlayır. Bu versiya artıq yayımlanıbsa paket yenidən yazılmır. Yeni buraxılış üçün versiyanı artırın, `releases/X.Y.Z.md` qeydlərini hazırlayın və dəyişiklikləri `main` qoluna göndərin. İstəyə görə Actions → Publish RADAZ Windows release → Run workflow ilə təkrar yoxlama başlatmaq olar.
 
-Windows işçisi asılılıqları kilid faylı ilə quraşdırır, TypeScript/Node/Python yoxlamalarını keçir və paketi yığır. Ayrı yayım işi uzaqdakı fayl cəmlərini təsdiqləyib sonra Latest Release kimi yayımlayır. Mənbə reposunun Actions secret-i `RADAZ_RELEASES_TOKEN` ayrıca `cesur9872-droid/RADAZ-Releases` reposuna Contents: write hüququ verməlidir; bu secret bu lokal yayımda konfiqurasiya edilməyib. Mənbə reposunun adi GITHUB_TOKEN-i başqa repoya yaza bilmir. Lokal yayımda credential helper-dən alınmış token yalnız proses yaddaşında saxlanır. Token müştəri paketinə daxil edilmir.
+Windows işçisi asılılıqları kilid faylı ilə quraşdırır, TypeScript/Node/Python yoxlamalarını keçir və paketi yığır. Ayrı yayım işi uzaqdakı fayl cəmlərini təsdiqləyib sonra Latest Release kimi yayımlayır. Yayım işi eyni repoya yazmaq üçün `contents: write` icazəli `github.token` istifadə edir; başqa hesabın tokeni lazım deyil. Lokal yayımda credential helper-dən alınmış token yalnız proses yaddaşında saxlanır. Token müştəri paketinə daxil edilmir.
 
 Digər kompüterlər proqram açıldıqdan təxminən 15 saniyə sonra, daha sonra hər 6 saatda GitHub Release yoxlayır. Dərhal yoxlama üçün **Yardım (?) → Yeniləmələri yoxla** istifadə edin. Bildiriş üçün yeni versiyanın uğurla yayımlanması və kompüterin internetə çıxışı lazımdır.
 
@@ -137,3 +137,10 @@ Sahibin aktivləşdirmə faylı, `Documents/RADAZ-Archive/product/license.json`,
 
 
 0.2.18 sahib paneli və yeni ödəniş təhlükəsizliyi qaydaları üçün [billing/README.md](billing/README.md) əsas götürülür. Parol yaradıldıqda əvvəlki açıq mətn merchant və issuer faylları şifrələnmiş owner-vault.json yaddaşına köçürülür. Sahib paneli müştəri buraxılışına daxil edilmir.
+
+
+## AI asistentin API açarı
+
+**Yardım → AI ayarları** bölməsində istifadəçi öz OpenAI API açarını saxlayır. `Documents/RADAZ-Archive/product/openai-key.dpapi` Windows DPAPI ilə həmin hesaba bağlı şifrələnir; başqa hesaba/kompüterə köçürəndə açar yenidən daxil edilməlidir. Açar brauzer yaddaşına və API cavabına daxil edilmir; mühitdəki OPENAI_API_KEY avtomatik götürülmür. Paketdə bu fayl yoxdur. Server və development proxy yalnız eyni kompüterdən, eyni origin-dən AI sorğularını qəbul edir.
+
+Açarın saxlanması şəbəkəyə sorğu göndərmir. **Bağlantını yoxla** modelə giriş yoxlamasıdır. Hesabat düyməsi seçilmiş görüntüləri 8-lik qruplarla Responses API-yə göndərir (`store: false`); DICOM teqləri göndərilmir, lakin pikselə yazılmış şəxsi məlumatlar qala bilər. Proqram görüntüləri diaqnostik cəhətdən təsdiqləmir; nəticə radioloqun yoxlaması üçün layihədir. Tamamlanmayan cavab hesabatı dəyişmir. Dayandırma gələcək qrupları dayandırır; artıq OpenAI-a çatan sorğunun hesablanmasını geri almır.

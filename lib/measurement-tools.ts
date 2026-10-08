@@ -1,4 +1,5 @@
 import * as tools from '@cornerstonejs/tools';
+import { getEnabledElement } from '@cornerstonejs/core';
 import { measurementState, measurementTheme } from './measurement-theme';
 const hoverEvents=new WeakMap<HTMLElement,{event:unknown;uid?:string}>();
 const leaveListeners=new WeakSet<HTMLElement>();
@@ -10,8 +11,22 @@ export function themedMeasurement(Base: any) {
       super(...args);
       // Screen-pixel hit targets stay easy to catch regardless of image zoom.
       const near = this.isPointNearTool.bind(this);
-      this.isPointNearTool = (element:any, annotation:any, point:any, proximity:number, ...rest:any[]) =>
-        near(element, annotation, point, Math.max(proximity, 12), ...rest);
+      this.isPointNearTool = (element:any, annotation:any, point:any, proximity:number, ...rest:any[]) => {
+        if (Base.toolName === tools.EllipticalROITool.toolName) {
+          const viewport = getEnabledElement(element)?.viewport;
+          if (!viewport) return false;
+          const [bottom, top, left, right] = annotation.data.handles.points.map((p:any) => viewport.worldToCanvas(p));
+          const rx = Math.hypot(right[0]-left[0], right[1]-left[1])/2;
+          const ry = Math.hypot(top[0]-bottom[0], top[1]-bottom[1])/2;
+          if (rx > 0 && ry > 0) {
+            const dx = point[0]-(left[0]+right[0])/2, dy = point[1]-(left[1]+right[1])/2;
+            const u = (dx*(right[0]-left[0])+dy*(right[1]-left[1]))/(2*rx*rx);
+            const v = (dx*(top[0]-bottom[0])+dy*(top[1]-bottom[1]))/(2*ry*ry);
+            if (u*u+v*v <= 1) return true;
+          }
+        }
+        return near(element, annotation, point, Math.max(proximity, 12), ...rest);
+      };
       const handle = this.getHandleNearImagePoint.bind(this);
       this.getHandleNearImagePoint = (element:any, annotation:any, point:any, proximity:number) =>
         handle(element, annotation, point, Math.max(proximity, 14));

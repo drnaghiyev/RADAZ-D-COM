@@ -28,6 +28,7 @@ from pynetdicom import AE, AllStoragePresentationContexts, ALL_TRANSFER_SYNTAXES
 from pynetdicom.sop_class import Verification
 from radaz_output import OutputService, print_film, test_printer, PRINT_LOCK, BURN_LOCK
 from radaz_product import ProductService
+from radaz_ai import AiService, AiError
 
 MAX_FILE = 512 * 1024 * 1024
 APP_VERSION = json.loads((Path(__file__).resolve().parent.parent / 'public/product.json').read_text(encoding='utf-8-sig'))['version']
@@ -284,6 +285,7 @@ def handler_for(archive, removable=None):
     removable.persist = persist_media
     output = OutputService(archive.root)
     product = ProductService(archive.root)
+    ai = AiService(product.root)
     lifecycle = {'posts': 0, 'stopping': False}
     lifecycle_lock = RLock()
     class Handler(BaseHTTPRequestHandler):
@@ -314,6 +316,8 @@ def handler_for(archive, removable=None):
                 self.respond({'error': 'Origin icazəli deyil'}, 403); return
             parsed = urlsplit(self.path)
             try:
+                if parsed.path == '/ai/settings':
+                    self.respond(ai.status()); return
                 if parsed.path == '/removable/status':
                     self.respond(removable.snapshot()); return
                 if parsed.path == '/removable/entries':
@@ -420,10 +424,24 @@ def handler_for(archive, removable=None):
                 self.respond({'error':'Origin icazəli deyil'},403); return
             try:
                 length = int(self.headers.get('Content-Length','0'))
-                limit = MAX_FILE if self.path in ('/import','/media/prepare','/video') else 192 * 1024 * 1024 if self.path == '/print' else 65536 if self.path == '/studies/delete' else 8192
+                limit = MAX_FILE if self.path in ('/import','/media/prepare','/video') else 192 * 1024 * 1024 if self.path == '/print' else 17 * 1024 * 1024 if self.path == '/ai/report' else 65536 if self.path == '/studies/delete' else 8192
                 if not 0 < length <= limit:
                     self.respond({'error':'Sorğu ölçüsü düzgün deyil'},413); return
                 data = self.rfile.read(length)
+                if self.path.startswith('/ai/'):
+                    origin = urlsplit(self.headers.get('Origin', ''))
+                    if self.client_address[0] not in ('127.0.0.1', '::1') or origin.scheme != 'http' or origin.hostname not in ('localhost', '127.0.0.1', '::1'):
+                        self.respond({'error': 'AI yalnız bu kompüterdəki RADAZ-dan istifadə olunur.'}, 403); return
+                    if self.headers.get_content_type() != 'application/json':
+                        self.respond({'error': 'JSON tələb olunur'}, 415); return
+                    payload = json.loads(data)
+                    if not isinstance(payload, dict): raise AiError('Sorğu düzgün deyil.')
+                    if self.path == '/ai/settings': self.respond(ai.save(payload))
+                    elif not product.allowed(): self.respond({'error': 'Lisenziya aktiv deyil'}, 402)
+                    elif self.path == '/ai/test': self.respond(ai.test())
+                    elif self.path == '/ai/report': self.respond(ai.report(payload))
+                    else: self.respond({'error': 'Ünvan tapılmadı'}, 404)
+                    return
                 if self.path in ('/window/minimize', '/window/maximize', '/window/register', '/window/register-records', '/window/focus-records'):
                     if self.client_address[0] not in ('127.0.0.1', '::1'):
                         self.respond({'minimized': False}); return
@@ -490,6 +508,8 @@ def handler_for(archive, removable=None):
                     self.respond({'ok':True})
                 else:
                     self.respond({'error':'Ünvan tapılmadı'},404)
+            except AiError as error:
+                self.respond({'error': str(error), 'requestId': error.request_id}, error.status)
             except (ValueError, KeyError, AttributeError) as error:
                 self.respond({'error':str(error)},400)
             except Exception:

@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {spawn,spawnSync} from 'node:child_process';
-import {mkdtempSync,mkdirSync,rmSync,createWriteStream} from 'node:fs';
+import {mkdtempSync,mkdirSync,rmSync,createWriteStream,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
@@ -62,8 +62,48 @@ try{
  const again=context.waitForEvent('page');await viewer.getByRole('button',{name:'AI asistent',exact:true}).click();const restored=await again;
  await restored.getByRole('textbox',{name:'Hesabat mətni',exact:true}).filter({hasText:'Sintetik sınaq hesabatı.'}).waitFor();
  assert.equal(await restored.getByRole('textbox',{name:'AI üçün əlavə tapşırıq',exact:true}).inputValue(),'Bronxit raporu yaz — sınaq');
+ // Real local DPAPI settings, simulated OpenAI results. No real API credential or patient data.
+ await restored.getByRole('button',{name:'AI ayarları',exact:true}).click();
+ const settings=restored.getByRole('dialog',{name:'AI ayarları',exact:true});
+ const key='sk-'+'synthetic-browser-test-'.repeat(3);
+ await settings.getByLabel('OpenAI API açarı',{exact:true}).fill(key);
+ const savedSettings=restored.waitForResponse(r=>r.url().endsWith('/ai/settings')&&r.request().method()==='POST');
+ await settings.getByRole('button',{name:'Yadda saxla',exact:true}).click();const savedResponse=await savedSettings;
+ assert.equal(savedResponse.status(),200);assert.equal((await savedResponse.text()).includes(key),false);
+ await settings.getByRole('status').filter({hasText:'API açarı saxlanıldı'}).waitFor();
+ assert.equal(await settings.getByLabel('OpenAI API açarı',{exact:true}).inputValue(),'');
+ const encrypted=readFileSync(path.join(root,'archive/product/openai-key.dpapi'));assert.equal(encrypted.includes(Buffer.from(key)),false);
+ await settings.getByRole('button',{name:'Bağla',exact:true}).first().click();
+ const analyze=restored.getByRole('button',{name:'Dərindən incələ və rapor yaz',exact:true});assert.equal(await analyze.isEnabled(),true);
+ await restored.getByRole('button',{name:'AI ayarları',exact:true}).click();await settings.locator('.ai-key-status').filter({hasText:'saxlanılıb'}).waitFor();
+ assert.equal(await settings.getByLabel('OpenAI API açarı',{exact:true}).inputValue(),'');
+ await settings.getByRole('button',{name:'Bağla',exact:true}).first().click();
+ let calls=[],fail=false,hold=false,release;
+ await context.route('**/local-archive-api/ai/report',async route=>{
+  const body=route.request().postDataJSON();calls.push(body);
+  if(hold)await new Promise(resolve=>release=resolve);
+  if(fail)return route.fulfill({status:502,json:{error:'Sınaq: OpenAI kvotası bitib.'}});
+  return route.fulfill({json:{text:body.images?.length?'Sintetik müşahidələr':'AI hesabat layihəsi — sınaq nəticəsi. <script>alert(1)</script>'}}).catch(()=>{});
+ });
+ await analyze.click();await restored.getByRole('status').filter({hasText:'AI layihəsi redaktora əlavə edildi'}).waitFor();
+ assert.equal(calls.length,4);assert.equal(calls.slice(0,3).flatMap(c=>c.images).length,24,'All images in both series are sent');
+ assert.equal(new Set(calls.slice(0,3).flatMap(c=>c.images).map(i=>i.label)).size,24,'Every image gets a distinct label');
+ assert.equal(JSON.stringify(calls).includes(key),false);
+ const text=await restored.getByRole('textbox',{name:'Hesabat mətni',exact:true}).innerText();assert.match(text,/Sintetik sınaq hesabatı/);assert.match(text,/AI hesabat layihəsi/);
+ assert.equal(await restored.locator('.rich-editor script').count(),0,'AI output is escaped plain text');
+ fail=true;calls=[];await analyze.click();await restored.getByRole('status').filter({hasText:'Sınaq: OpenAI kvotası bitib.'}).waitFor();
+ assert.equal(await restored.getByRole('textbox',{name:'Hesabat mətni',exact:true}).innerText(),text,'Failure preserves the editor');
+ fail=false;hold=true;calls=[];await analyze.click();for(let i=0;i<100&&!release;i++)await delay(50);
+ await restored.getByRole('button',{name:'Dayandır',exact:true}).click();await restored.getByRole('status').filter({hasText:'Analiz dayandırıldı'}).waitFor();release();await delay(200);
+ assert.equal(calls.length,1,'Cancel prevents further batches');assert.equal(await restored.getByRole('textbox',{name:'Hesabat mətni',exact:true}).innerText(),text);
+ // Text-only template request, and key removal revokes assistant availability.
+ hold=false;calls=[];while(await restored.locator('.report-series-list input:checked').count())await restored.locator('.report-series-list input:checked').first().uncheck();
+ await analyze.click();await restored.getByRole('status').filter({hasText:'AI layihəsi redaktora əlavə edildi'}).waitFor();assert.equal(calls.length,1);assert.equal(calls[0].images,undefined);
+ await restored.getByRole('button',{name:'AI ayarları',exact:true}).click();await settings.getByRole('button',{name:'Açarı sil',exact:true}).click();await settings.getByRole('status').filter({hasText:'API açarı silindi'}).waitFor();
+ await settings.getByRole('button',{name:'Bağla',exact:true}).first().click();assert.equal(await analyze.isDisabled(),true);
+ await restored.screenshot({path:'outputs/viewer-reset/assistant-ai.png'});
  assert.deepEqual(errors,[]);
- console.log('PASS: direct rotation controls; exact pixel reset and shortcut; both CT series/24 images; local preview; saved rich report/instruction restored; AI stays disconnected');
+ console.log('PASS: reset/rotation; all CT series; report persistence; encrypted API settings save/reopen/delete; all 24 images analyzed; plain text appended without overwriting; failed/cancelled requests preserve report; text-only drafting');
 }catch(error){
  console.error(error);
  for(const [i,page] of(browser?.contexts()[0]?.pages()||[]).entries()){

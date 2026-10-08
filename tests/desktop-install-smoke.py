@@ -126,6 +126,10 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
     license_file=data/'product/license.json';license_file.parent.mkdir(exist_ok=True)
     license_file.write_text('{"synthetic":"preserve-opaque-license"}')
     preserved[license_file]=hashlib.sha256(license_file.read_bytes()).hexdigest()
+    # A user-supplied AI credential remains outside version folders as ciphertext.
+    ai_file=data/'product/openai-key.dpapi'
+    ai_file.write_bytes(b'synthetic-encrypted-credential-marker')
+    preserved[ai_file]=hashlib.sha256(ai_file.read_bytes()).hexdigest()
     ps(install/'launcher.ps1','-NoBrowser')
     assert get('/radaz-runtime.json')['startedAt']==first['startedAt']
     print('Offline installation, private runtimes, desktop shortcut, five routes, C-ECHO and repeat launch passed',flush=True)

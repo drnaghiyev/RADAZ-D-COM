@@ -2,7 +2,7 @@
 
 Azərbaycan dilində DICOM görüntüləmə və radiologiya iş sahəsi — Windows 10/11, 64 bit.
 
-[**Son Setup-ı endir**](https://github.com/cesur9872-droid/RADAZ-Releases/releases/latest) · [Buraxılışlar](https://github.com/cesur9872-droid/RADAZ-Releases/releases)
+[**Son Setup-ı endir**](https://github.com/drnaghiyev/RADAZ-D-COM/releases/latest) · [Buraxılışlar](https://github.com/drnaghiyev/RADAZ-D-COM/releases)
 
 ## Quraşdırma
 
@@ -65,7 +65,7 @@ Məhsul sahibi: **Radioloq Rövşən Nağıyev** · [E-poçt](mailto:drnaghiyev@
 
 Xəta bildirərkən RADAZ versiyasını, Windows versiyasını və xəta mətnini qeyd edin. Açıq GitHub yazışmasına pasiyentin DICOM fayllarını və şəxsi məlumatlarını əlavə etməyin.
 
-İlkin sınaq buraxılışıdır. Bütün hüquqlar məhsul sahibinə məxsusdur. Üçüncü tərəf komponentləri öz lisenziyalarına tabedir. Açıq RADAZ-Releases deposu quraşdırıcılar və yenilənmə faylları üçündür.
+İlkin sınaq buraxılışıdır. Bütün hüquqlar məhsul sahibinə məxsusdur. Üçüncü tərəf komponentləri öz lisenziyalarına tabedir. Mənbə kodu bu repoda, quraşdırıcılar və yenilənmə faylları isə Releases bölməsində yerləşir.
 
 ## Sahib idarəetməsi və ödənişlər
 

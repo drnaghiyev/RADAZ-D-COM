@@ -18,7 +18,7 @@ from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from zipfile import ZipFile
 
 REPOSITORY = 'drnaghiyev/RADAZ-D-COM'
-UPDATE_REPOSITORY = 'cesur9872-droid/RADAZ-Releases'
+UPDATE_REPOSITORY = 'drnaghiyev/RADAZ-D-COM'
 SOURCE = Path(__file__).resolve().parent.parent
 NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
 MAX_PACKAGE = 512 * 1024 * 1024

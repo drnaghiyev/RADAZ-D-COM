@@ -65,3 +65,5 @@ issuer-private.pem
 
 owner-vault.json
 owner-vault.json.*
+openai-key.dpapi
+openai-key.*.tmp

@@ -109,5 +109,5 @@ jobs:
           path: outputs/releases
       - name: Publish verified assets and make the release visible to RADAZ
         env:
-          GH_TOKEN: ${{ secrets.RADAZ_RELEASES_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: python scripts/github-release.py publish

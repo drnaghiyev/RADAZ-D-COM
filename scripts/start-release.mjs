@@ -5,6 +5,7 @@ import {existsSync,readFileSync,writeFileSync,renameSync,unlinkSync,mkdirSync,op
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {verifyClientFiles,verifyClientHttp} from './release-health.mjs';
+import {localAiRequest} from './local-ai-request.mjs';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 if(!existsSync(path.join(root,'dist/server/index.js')))throw new Error('Built application missing. Run START-RADAZ.cmd from a source checkout or extract the release ZIP.');
 const build=JSON.parse(readFileSync(path.join(root,'dist/server/radaz-build.json'),'utf8'));
@@ -43,6 +44,7 @@ void (async()=>{
 })();
 const server=http.createServer((req,res)=>{
  const pathname=new URL(req.url,'http://localhost').pathname;
+ if(pathname.startsWith('/local-archive-api/ai/')&&!localAiRequest(req)){res.writeHead(403,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'AI ayarlarını serverin quraşdırıldığı kompüterdə açın.'}));return;}
  res.setHeader('X-RADAZ-Build',runtime.buildId);
  res.setHeader('Cache-Control','no-store');
  if(pathname==='/radaz-health.json'){

@@ -16,7 +16,7 @@ desktop = importlib.util.module_from_spec(spec); spec.loader.exec_module(desktop
 
 class DesktopUpdates(unittest.TestCase):
     def test_transient_release_error_retries_same_asset_with_fresh_query(self):
-        url='https://github.com/cesur9872-droid/RADAZ-Releases/releases/download/v0.2.14/RADAZ-0.2.14-Windows-x64.zip'
+        url='https://github.com/drnaghiyev/RADAZ-D-COM/releases/download/v0.2.14/RADAZ-0.2.14-Windows-x64.zip'
         response=object()
         with patch.object(desktop,'urlopen',side_effect=[HTTPError(url,503,'temporary',{},None),response]) as opened,patch.object(desktop.time,'sleep'):
             self.assertIs(desktop.open_release_download(url),response)
@@ -242,8 +242,9 @@ class DesktopUpdates(unittest.TestCase):
         self.assertIn('--app=http://localhost:5173/?radaz-build=verified-build',command)
         self.assertFalse(any('user-data-dir' in arg or 'incognito' in arg or 'inprivate' in arg for arg in command))
 
-    def test_update_feed_is_separate_from_legacy_product_identity(self):
-        self.assertNotEqual(desktop.UPDATE_REPOSITORY, desktop.REPOSITORY)
+    def test_update_feed_uses_the_main_product_repository(self):
+        self.assertEqual(desktop.UPDATE_REPOSITORY, desktop.REPOSITORY)
+        self.assertEqual(desktop.UPDATE_REPOSITORY, 'drnaghiyev/RADAZ-D-COM')
         with patch.object(desktop, 'get_json', return_value={'tag_name':'v0.2.8'}) as request:
             desktop.check_update(self.root)
         self.assertIn(desktop.UPDATE_REPOSITORY, request.call_args.args[0])

@@ -23,7 +23,7 @@ async function refreshCommerce(){
  if(Date.now()-lastPolicyCheck<15*60000)return;
  lastPolicyCheck=Date.now();
  refreshing=(async()=>{try{
-  const response=await fetch('https://raw.githubusercontent.com/cesur9872-droid/RADAZ-Releases/main/commerce.json',{signal:AbortSignal.timeout(8000)});
+  const response=await fetch('https://raw.githubusercontent.com/drnaghiyev/RADAZ-D-COM/main/commerce.json',{signal:AbortSignal.timeout(8000)});
   if(response.ok){const text=await response.text();if(text.length>32768)throw Error('Policy too large');const envelope=JSON.parse(text),next=verifyPolicy(envelope,publicKey,commerce.revision||0);writeFileSync(policyFile+'.tmp',JSON.stringify(envelope),{mode:0o600});renameSync(policyFile+'.tmp',policyFile);commerce=next;}
  }catch{/* Keep the last verified policy during network outages. */}
  try{if(provider&&(!commerce.exchange||Date.now()-commerce.exchange.checkedAt>86400000))commerce.exchange=await fetchExchange();}catch{/* Converted checkout rejects stale/missing rates. */}

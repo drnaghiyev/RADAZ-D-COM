@@ -584,6 +584,7 @@
 .arrow-comment-editor div{display:flex;justify-content:flex-end;gap:8px}.arrow-comment-editor button{padding:7px 13px;border:1px solid #507f95;background:#254e66;border-radius:5px;font-size:13px;cursor:pointer}
 
 .arch-height-label{pointer-events:all;cursor:pointer}.update-toast .update-open{display:block;padding:5px 0;color:#96e2ff;text-decoration:underline;cursor:pointer}
+.arch-lines .arch-interior{fill:transparent;stroke:none;pointer-events:all;cursor:pointer}
 .localizer-line .localizer-rotate-hit,.localizer-line .localizer-rotate-hit:active{cursor:url('/rotate-cursor.svg') 13 14,crosshair}
 
 /* Commands stay on one row. Very narrow displays can scroll the toolbar. */
@@ -669,3 +670,7 @@ body .output-page-brand strong{display:block!important}
 .assistant-analyze{display:flex;justify-content:center;align-items:center;gap:8px;padding:12px}
 .assistant-connection{color:#a6bdc9;font-size:12px;line-height:1.7;padding:12px;border:1px solid #304d60;border-radius:6px;background:#122936}
 .assistant-new-report{display:block;margin-top:16px}
+.assistant-heading button{margin-left:auto;padding:8px;border:1px solid #426274;border-radius:6px;color:#ccecf8;background:#193849}
+.assistant-stop{padding:9px;border:1px solid #426274;border-radius:6px}.assistant-limitation{color:#b4c8d2;font-size:12px;line-height:1.6}
+.ai-settings{display:grid;gap:16px}.ai-settings p{margin:0}.ai-settings label{display:grid;gap:7px}.ai-settings input{width:100%;height:40px;background:#0c1a25;border:1px solid #50738a;border-radius:5px;color:#fff;padding:8px;font:inherit}
+.ai-settings-actions{display:flex;gap:10px;flex-wrap:wrap}.ai-settings-actions button{padding:10px 15px;background:#285168;color:#e6f7ff;border-radius:6px}.ai-settings-actions button:disabled{opacity:.5;cursor:not-allowed}.ai-settings small{line-height:1.7;color:#a6bdc9}.ai-key-status{color:#a9dbbf}

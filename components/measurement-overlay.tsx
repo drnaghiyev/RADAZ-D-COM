@@ -17,6 +17,7 @@ export type LocalMark = {
   kind: 'hu' | 'deviation' | 'arch' | 'arrow' | 'pencil';
   points: Point3[];
   labelOffset: [number, number];
+  heightLabelOffset?: [number, number];
   override?: number;
   comment?: string;
 };
@@ -55,7 +56,7 @@ export function MeasurementOverlay({ element, viewport, imageId, modality, tool,
   const [revision, setRevision] = useState(0);
   const [editing, setEditing] = useState<string | null>(null);
   const [entry, setEntry] = useState('');
-  const drag = useRef<{ id: string; point?: number; whole?: boolean; startWorld?: Point3 | null; start: [number, number]; offset: [number, number]; points: Point3[] } | null>(null);
+  const drag = useRef<{ id: string; point?: number; whole?: boolean; heightLabel?: boolean; startWorld?: Point3 | null; start: [number, number]; offset: [number, number]; points: Point3[] } | null>(null);
 
   useEffect(() => { setDraft([]); setCursor(null); setEditing(null); }, [imageId, tool]);
   useEffect(() => {
@@ -114,14 +115,14 @@ export function MeasurementOverlay({ element, viewport, imageId, modality, tool,
     return () => { element.removeEventListener('pointerdown', pointerDown); element.removeEventListener('pointermove', pointerMove); };
   }, [element, viewport, imageId, tool, draft, onAdd, onSelectMark]);
 
-  const startDrag = (e: ReactPointerEvent<SVGGElement>, mark: LocalMark, point?: number | 'all') => {
+  const startDrag = (e: ReactPointerEvent<SVGGElement>, mark: LocalMark, point?: number | 'all' | 'height') => {
     if(e.button!==0)return;
     e.stopPropagation(); e.preventDefault();
     if (tool === 'erase') { onRemove(mark.id); return; }
     onSelectMark?.(mark.id);
-    drag.current = { id: mark.id, point: typeof point === 'number' ? point : undefined, whole: point === 'all',
+    drag.current = { id: mark.id, point: typeof point === 'number' ? point : undefined, whole: point === 'all', heightLabel: point === 'height',
       startWorld: point === 'all' ? toWorld(e.clientX, e.clientY) : null,
-      start: [e.clientX, e.clientY], offset: [...mark.labelOffset], points: mark.points.map(p => [...p] as Point3) };
+      start: [e.clientX, e.clientY], offset: [...(point === 'height' ? mark.heightLabelOffset || [0, 0] : mark.labelOffset)], points: mark.points.map(p => [...p] as Point3) };
     e.currentTarget.setPointerCapture(e.pointerId);
   };
   const moveDrag = (e: ReactPointerEvent<SVGGElement>) => {
@@ -134,7 +135,8 @@ export function MeasurementOverlay({ element, viewport, imageId, modality, tool,
       const delta = position.map((value, i) => value - current.startWorld![i]);
       onUpdate(current.id, { points: current.points.map(point => point.map((value, i) => value + delta[i]) as Point3) });
     } else if (current.point === undefined) {
-      onUpdate(current.id, { labelOffset: [current.offset[0] + e.clientX - current.start[0], current.offset[1] + e.clientY - current.start[1]] });
+      const offset: [number, number] = [current.offset[0] + e.clientX - current.start[0], current.offset[1] + e.clientY - current.start[1]];
+      onUpdate(current.id, current.heightLabel ? { heightLabelOffset: offset } : { labelOffset: offset });
     } else {
       const position = toWorld(e.clientX, e.clientY);
       if (!position) return;
@@ -144,7 +146,7 @@ export function MeasurementOverlay({ element, viewport, imageId, modality, tool,
     }
   };
   const endDrag = (e: ReactPointerEvent<SVGGElement>) => {
-    if (drag.current) { e.stopPropagation(); drag.current = null; e.currentTarget.releasePointerCapture(e.pointerId); }
+    if (drag.current) { e.stopPropagation(); drag.current = null; if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId); }
   };
   if (!viewport || !imageId) return null;
   // A render revision tracks Cornerstone camera changes without copying its transform into React state.
@@ -176,8 +178,8 @@ export function MeasurementOverlay({ element, viewport, imageId, modality, tool,
         const footCanvas = arch ? toCanvas(arch.foot) : foot ? toCanvas(foot.foot) : null;
         const arc = arch ? apexArc(canvas[0], canvas[1], canvas[2]) : null;
         const heightText = arch ? `H ${arch.height.toFixed(1)} ${lengthUnit}` : '';
-        const heightX = footCanvas && arch ? (canvas[2][0] + footCanvas[0]) / 2 + 12 : 0;
-        const heightY = footCanvas && arch ? (canvas[2][1] + footCanvas[1]) / 2 : 0;
+        const heightX = footCanvas && arch ? (canvas[2][0] + footCanvas[0]) / 2 + 12 + (mark.heightLabelOffset?.[0] || 0) : 0;
+        const heightY = footCanvas && arch ? (canvas[2][1] + footCanvas[1]) / 2 + (mark.heightLabelOffset?.[1] || 0) : 0;
         const title = mark.kind === 'hu' ? `${unit} ${value === null ? '—' : Math.round(value)}${mark.override === undefined ? '' : ' · əl ilə'}`
           : mark.kind === 'arch' ? `${arch?.angle.toFixed(1) ?? '—'}°`
           : `H ${foot?.height.toFixed(1) ?? '—'} ${lengthUnit} · ${foot?.angle.toFixed(1) ?? '—'}°`;
@@ -191,6 +193,7 @@ export function MeasurementOverlay({ element, viewport, imageId, modality, tool,
             {[[canvas[0],canvas[1]],[canvas[0],footCanvas],[canvas[1],footCanvas]].map(([a,b], index) => <line key={index} className="mark-hit" x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} onPointerDown={e => startDrag(e, mark, 'all')} onPointerMove={moveDrag} onPointerUp={endDrag}/>)}
           </g>}
           {mark.kind === 'arch' && arch && footCanvas && <g className="arch-lines">
+            <polygon className="arch-interior" points={canvas.map(point => point.join(',')).join(' ')} onPointerDown={e => startDrag(e, mark, 'all')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}/>
             <line x1={canvas[0][0]} y1={canvas[0][1]} x2={canvas[1][0]} y2={canvas[1][1]} />
             <line x1={canvas[0][0]} y1={canvas[0][1]} x2={canvas[2][0]} y2={canvas[2][1]} />
             <line x1={canvas[1][0]} y1={canvas[1][1]} x2={canvas[2][0]} y2={canvas[2][1]} />
@@ -200,7 +203,7 @@ export function MeasurementOverlay({ element, viewport, imageId, modality, tool,
             <circle cx={footCanvas[0]} cy={footCanvas[1]} r={3} />
             {arc && <path className="angle-arc" d={arc}/>}
             {[ [canvas[0], canvas[1]], [canvas[0], canvas[2]], [canvas[1], canvas[2]], [canvas[2], footCanvas] ].map(([a, b], i) => <line key={i} className="mark-hit" x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} onPointerDown={e => startDrag(e, mark, 'all')} onPointerMove={moveDrag} onPointerUp={endDrag}/>)}
-            <g className="arch-height-label"><rect x={heightX} y={heightY - 16} width={heightText.length * 8.5 + 16} height={27} rx={4}/><text x={heightX + 8} y={heightY + 1}>{heightText}</text></g>
+            <g className="arch-height-label" onPointerDown={e => startDrag(e, mark, 'height')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}><rect x={heightX} y={heightY - 16} width={heightText.length * 8.5 + 16} height={27} rx={4}/><text x={heightX + 8} y={heightY + 1}>{heightText}</text></g>
           </g>}
           {canvas.map(([x, y], i) => <g key={i} className="mark-anchor" onPointerDown={e => startDrag(e, mark, i)} onPointerMove={moveDrag} onPointerUp={endDrag}>
             <circle cx={x} cy={y} r={16} className="mark-hit-circle"/>
@@ -227,10 +230,5 @@ export function MeasurementOverlay({ element, viewport, imageId, modality, tool,
         <div><button type="submit">Saxla</button><button type="button" onClick={() => { onUpdate(mark.id, { override: undefined }); setEditing(null); }}>Ölçüləni qaytar</button><button type="button" onClick={() => setEditing(null)}>Bağla</button></div>
       </form>;
     })()}
-    {tool === 'deviation' && <div className="measurement-tip">{draft.length === 0 ? 'Deviasiya: ilk nöqtəni seçin' : 'İkinci nöqtəni seçin · bucaq üfüqi xəttə görə · H şaquli məsafə'}</div>}
-    {tool === 'arch' && <div className="measurement-tip">{draft.length === 0 ? 'Tağ bucağı: bazanın ilk ucunu seçin' : draft.length === 1 ? 'Bazanın ikinci ucunu seçin' : 'Zirvə nöqtəsini seçin'}</div>}
-    {tool === 'hu' && <div className="measurement-tip">HU nöqtəsini seçin · nöqtəni və etiketi sürükləyin · etiketi iki dəfə klikləyərək redaktə edin</div>}
-    {tool === 'cobb' && <div className="measurement-tip">Cobb bucağı: yuxarı və aşağı kənar boyunca iki xətt çəkin</div>}
-    {tool === 'erase' && <div className="measurement-tip">Silmək üçün ölçməyə klikləyin</div>}
   </>;
 }

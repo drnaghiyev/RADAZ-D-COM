@@ -3,6 +3,8 @@ import { defineConfig } from "vite";
 import hostingConfig from "./.openai/hosting.json";
 import { readExecutionProfile } from "./scripts/execution-profile.mjs";
 import { sites } from "./build/sites-vite-plugin";
+import { localAiRequest } from './scripts/local-ai-request.mjs';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 
 const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
   "00000000-0000-4000-8000-000000000000";
@@ -60,7 +62,9 @@ export default defineConfig(async () => {
     server: {
       ...(!managedLinux ? {
         host: '0.0.0.0',
-        proxy: { '/local-archive-api': { target: 'http://127.0.0.1:8766', changeOrigin: true, rewrite: (path: string) => path.replace(/^\/local-archive-api/, '') } },
+        proxy: { '/local-archive-api': { target: 'http://127.0.0.1:8766', changeOrigin: true,
+          bypass(req: IncomingMessage, res: ServerResponse | undefined) { if (req.url?.startsWith('/local-archive-api/ai/') && !localAiRequest(req)) { res?.writeHead(403, {'Content-Type':'application/json'}); res?.end(JSON.stringify({error:'AI ayarlarını serverin quraşdırıldığı kompüterdə açın.'})); return false; } },
+          rewrite: (path: string) => path.replace(/^\/local-archive-api/, '') } },
       } : {}),
       ...(managedLinux ? { host: "0.0.0.0", allowedHosts: ["terminal.local"] } : {}),
       ...(isCodexSeatbeltSandbox ? { watch: { useFsEvents: false, usePolling: true } } : {}),
