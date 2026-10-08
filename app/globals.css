@@ -585,6 +585,7 @@
 
 .arch-height-label{pointer-events:all;cursor:pointer}.update-toast .update-open{display:block;padding:5px 0;color:#96e2ff;text-decoration:underline;cursor:pointer}
 .arch-lines .arch-interior{fill:transparent;stroke:none;pointer-events:all;cursor:pointer}
+.deviation-lines .deviation-interior{fill:transparent;stroke:none;pointer-events:all;cursor:move}
 .localizer-line .localizer-rotate-hit,.localizer-line .localizer-rotate-hit:active{cursor:url('/rotate-cursor.svg') 13 14,crosshair}
 
 /* Commands stay on one row. Very narrow displays can scroll the toolbar. */

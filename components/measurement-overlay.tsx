@@ -186,6 +186,7 @@ export function MeasurementOverlay({ element, viewport, imageId, modality, tool,
         const width = Math.max(98, title.length * 9.5 + 20);
         return <g key={mark.id} data-measurement={mark.id} data-kind={mark.kind} className={selectedMarkId === mark.id ? 'themed-measurement selected-measurement' : 'themed-measurement'} onClick={e => e.stopPropagation()}>
           {mark.kind === 'deviation' && footCanvas && <g className="deviation-lines">
+            <polygon className="deviation-interior" points={[canvas[0], footCanvas, canvas[1]].map(point => point.join(',')).join(' ')} onPointerDown={e => startDrag(e, mark, 'all')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}/>
             <line className="deviation-base" x1={canvas[0][0]} y1={canvas[0][1]} x2={footCanvas[0]} y2={footCanvas[1]} />
             <line className="deviation-diagonal" x1={canvas[0][0]} y1={canvas[0][1]} x2={canvas[1][0]} y2={canvas[1][1]} />
             <line className="deviation-perpendicular" x1={canvas[1][0]} y1={canvas[1][1]} x2={footCanvas[0]} y2={footCanvas[1]} />

@@ -15,6 +15,26 @@ spec = importlib.util.spec_from_file_location('desktop', Path(__file__).resolve(
 desktop = importlib.util.module_from_spec(spec); spec.loader.exec_module(desktop)
 
 class DesktopUpdates(unittest.TestCase):
+    def test_setup_starts_fresh_install_but_only_stages_an_upgrade(self):
+        source = self.root / 'package'
+        (source / 'public').mkdir(parents=True)
+        (source / 'installer').mkdir()
+        (source / 'public/radaz.ico').write_bytes(b'synthetic-icon')
+        (source / 'installer/launcher.ps1').write_text('# synthetic launcher')
+        desktop.atomic_json(source / 'public/product.json', {'version': '0.2.9'})
+        (self.root / 'active.json').unlink()
+        arguments = ['radaz_desktop.py', 'initialize', '--install-root', str(self.root), '--no-shortcuts', '--start-background']
+        with patch.object(desktop, 'SOURCE', source), patch.object(desktop, 'validate_directory'), patch.object(desktop, 'launch') as start, patch('sys.argv', arguments):
+            desktop.main()
+            start.assert_called_once_with(self.root, no_browser=True)
+            self.assertEqual(desktop.read_json(self.root / 'active.json')['version'], '0.2.9')
+            self.assertEqual((self.root / 'radaz.ico').read_bytes(), b'synthetic-icon')
+            desktop.atomic_json(source / 'public/product.json', {'version': '0.2.10'})
+            desktop.main()
+            self.assertEqual(start.call_count, 1, 'An upgrade must not restart the running examination')
+            self.assertEqual(desktop.read_json(self.root / 'active.json')['version'], '0.2.9')
+            self.assertEqual(desktop.read_json(self.root / 'pending.json')['version'], '0.2.10')
+
     def test_transient_release_error_retries_same_asset_with_fresh_query(self):
         url='https://github.com/drnaghiyev/RADAZ-D-COM/releases/download/v0.2.14/RADAZ-0.2.14-Windows-x64.zip'
         response=object()

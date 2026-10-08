@@ -7,6 +7,7 @@ foreach ($folder in $folders) {
   $shortcut.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
   $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $InstallRoot 'launcher.ps1')`""
   $shortcut.WorkingDirectory = $InstallRoot
+  $shortcut.WindowStyle = 7
   $shortcut.IconLocation = Join-Path $InstallRoot 'radaz.ico'
   $shortcut.Description = 'RADAZ - DICOM Viewer'
   $shortcut.Save()

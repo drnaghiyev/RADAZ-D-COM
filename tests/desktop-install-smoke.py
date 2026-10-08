@@ -72,7 +72,21 @@ try:
         with ZipFile(os.environ['RADAZ_TEST_BASE_PACKAGE']) as package: package.extractall(baseline)
     base_version=json.loads((baseline/'public/product.json').read_text())['version']
     if os.environ.get('GITHUB_ACTIONS')=='true' or os.environ.get('RADAZ_TEST_SETUP')=='1':
-        run([ROOT/f'outputs/releases/RADAZ-{VERSION}-Setup.exe','/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/NoShortcuts=1','/NoStartup=1',f'/DIR={install}'])
+        setup = os.environ.get('RADAZ_TEST_SETUP_PATH') or ROOT/f'outputs/releases/RADAZ-{VERSION}-Setup.exe'
+        icon_root = os.environ.get('RADAZ_TEST_ICON_ROOT')
+        icon_options = [] if icon_root else ['/NoShortcuts=1','/NoStartup=1']
+        run([setup,'/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',*icon_options,f'/DIR={install}'])
+        assert get('/radaz-runtime.json')['version'] == VERSION
+        assert get('/radaz-health.json')['ready'] is True
+        if icon_root:
+            for name in ('Desktop', 'Programs', 'Startup'):
+                link = str(Path(icon_root)/name/'RADAZ.lnk').replace("'", "''")
+                metadata = json.loads(run([PS, '-NoProfile', '-Command', f"$link=(New-Object -ComObject WScript.Shell).CreateShortcut('{link}'); @{{target=$link.TargetPath;arguments=$link.Arguments;icon=$link.IconLocation}} | ConvertTo-Json -Compress"]))
+                assert Path(metadata['target']) == PS
+                assert f'-File "{install / "launcher.ps1"}"' in metadata['arguments']
+                assert metadata['icon'].split(',')[0] == str(install/'radaz.ico')
+            print('Setup created Desktop, Start menu and Windows Startup shortcuts with the RADAZ icon', flush=True)
+        print('Fresh Setup started localhost in the background without opening a window', flush=True)
     else:
         run([baseline/'runtime/python/python.exe',baseline/'bridge/radaz_desktop.py','install','--install-root',install,'--no-shortcuts'])
     folder=install/'versions'/base_version
@@ -83,6 +97,15 @@ try:
     shortcuts=temporary/'shortcuts';shortcuts.mkdir()
     ps(folder/'scripts/desktop-shortcuts.ps1','-InstallRoot',install,'-ShortcutDirectory',shortcuts)
     assert (shortcuts/'RADAZ.lnk').is_file()
+    shortcut_literal = str(shortcuts/'RADAZ.lnk').replace("'", "''")
+    shortcut = json.loads(run([PS, '-NoProfile', '-Command',
+        f"$link=(New-Object -ComObject WScript.Shell).CreateShortcut('{shortcut_literal}'); @{{target=$link.TargetPath;arguments=$link.Arguments;icon=$link.IconLocation;directory=$link.WorkingDirectory;window=$link.WindowStyle}} | ConvertTo-Json -Compress"]))
+    assert Path(shortcut['target']) == PS
+    assert f'-File "{install / "launcher.ps1"}"' in shortcut['arguments']
+    assert '-WindowStyle Hidden' in shortcut['arguments']
+    assert shortcut['icon'].split(',')[0] == str(install/'radaz.ico')
+    assert shortcut['directory'] == str(install) and shortcut['window'] == 7
+    run([folder/'runtime/python/python.exe', '-c', f"from PIL import Image; icon=Image.open({str(install/'radaz.ico')!r}); assert {{(16,16),(32,32),(48,48),(256,256)}} <= icon.ico.sizes()"])
     ps(install/'launcher.ps1','-NoBrowser')
     first=get('/radaz-runtime.json');assert first['version']==base_version
     for route in ('/','/archive','/pacs','/mpr','/3d'):

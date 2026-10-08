@@ -424,6 +424,7 @@ def initialize(root, shortcuts=True):
     if shortcuts:
         result = subprocess.run(powershell(SOURCE / 'scripts/desktop-shortcuts.ps1', '-InstallRoot', root), creationflags=NO_WINDOW)
         if result.returncode: raise RuntimeError('Desktop shortcut creation failed')
+    return current is None
 
 def install(root, shortcuts=True):
     target = read_json(SOURCE / 'public/product.json')['version']
@@ -437,7 +438,7 @@ def install(root, shortcuts=True):
             os.replace(staging, destination)
         finally:
             if staging.exists() and staging.resolve().parent == (root / 'versions').resolve(): shutil.rmtree(staging)
-    initialize(root, shortcuts)
+    return initialize(root, shortcuts)
 
 def update_error_message(error):
     if isinstance(error, HTTPError):
@@ -540,10 +541,14 @@ def main():
     parser.add_argument('--install-root', type=Path, default=Path(os.environ.get('LOCALAPPDATA', Path.home())) / 'Programs/RADAZ')
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--no-shortcuts', action='store_true')
+    parser.add_argument('--start-background', action='store_true')
     args = parser.parse_args(); root = args.install_root.resolve(); root.mkdir(parents=True, exist_ok=True)
     if args.command in ('initialize', 'install'):
         with lock(root, 'launch', 90):
-            (install if args.command == 'install' else initialize)(root, not args.no_shortcuts)
+            fresh = (install if args.command == 'install' else initialize)(root, not args.no_shortcuts)
+        # A fresh Setup starts the local services even if its optional window is
+        # not opened. Installing an update must never interrupt an examination.
+        if fresh and args.start_background: launch(root, no_browser=True)
     elif args.command == 'launch': launch(root, args.no_browser)
     elif args.command == 'check':
         with lock(root, 'update'): check_update(root)

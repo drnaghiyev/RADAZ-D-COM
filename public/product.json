@@ -1,6 +1,6 @@
 {
   "name": "RADAZ",
-  "version": "0.2.27",
+  "version": "0.2.28",
   "channel": "preview",
   "owner": "Radioloq Rövşən Nağıyev",
   "email": "drnaghiyev@gmail.com",
@@ -11,6 +11,6 @@
   "licenseRequired": true,
   "trialDays": 30,
   "currency": "AZN",
-  "monthly": 10,
+  "monthly": null,
   "billingUrl": ""
 }
