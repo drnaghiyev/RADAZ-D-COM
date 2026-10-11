@@ -1,0 +1,10 @@
+{
+  "name": "radaz-desktop",
+  "productName": "RADAZ Desktop",
+  "version": "0.2.29",
+  "private": true,
+  "main": "main.cjs",
+  "scripts": {
+    "start": "../outputs/electron/runtime/electron.exe ."
+  }
+}

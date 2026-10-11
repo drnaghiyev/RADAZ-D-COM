@@ -1,4 +1,5 @@
 'use client';
+import { importFromRadazSite } from '@/lib/site-import';
 import { VolumeRenderControls } from '@/components/volume-render-controls';
 import { WorkProgress } from '@/components/work-progress';
 import { type WorkProgress as LoadingProgress, yieldToBrowser } from '@/lib/work-progress';
@@ -944,6 +945,14 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       if (request === importEpoch.current) setImportBusy(false);
     }
   };
+  const siteImportStarted = useRef(false);
+  useEffect(() => {
+    if (!ready || detachedMode || siteImportStarted.current) return;
+    if (!new URLSearchParams(window.location.hash.slice(1)).has('radaz-ticket')) return;
+    siteImportStarted.current = true;
+    const allowed = (process.env.NEXT_PUBLIC_RADAZ_SITE_ORIGINS || '').split(',').map(value => value.trim());
+    void importFromRadazSite(openSources, setStatus, allowed).catch(error => setStatus(error instanceof Error ? error.message : String(error)));
+  }, [ready, detachedMode]);
   const dropSources = async (items: DataTransferItemList, fallback: FileList) => {
     try { await openSources(await filesFromDrop(items, fallback)); }
     catch (err) { setStatus(`Qovluqlar oxuna bilmədi: ${String(err)}`); }

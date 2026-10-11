@@ -67,3 +67,7 @@ owner-vault.json
 owner-vault.json.*
 openai-key.dpapi
 openai-key.*.tmp
+
+# Local migration backups and unpublished anatomy research
+/.local-backups/
+/.local-research/

@@ -57,6 +57,12 @@ def main():
         for name in package.namelist():
             if 'license' in name.lower() or 'copying' in name.lower():
                 (ffmpeg / Path(name).name).write_bytes(package.read(name))
+    electron = STAGE / 'runtime/electron'; electron.mkdir()
+    with ZipFile(inputs['electron']) as package: package.extractall(electron)
+    (electron / 'electron.exe').rename(electron / 'RADAZ.exe')
+    shell = electron / 'resources/app'; shell.mkdir(parents=True)
+    for name in ('main.cjs', 'package.json'):
+        shutil.copy2(ROOT / 'desktop' / name, shell / name)
     (STAGE / 'runtime/sources.json').write_text(json.dumps({k:v for k,v in LOCK.items() if k != 'inno'}, indent=2))
     (STAGE / 'desktop.json').write_text(json.dumps({'schema':1,'version':version,'architecture':'x64'}))
     # Render the existing vector logo, then encode a multi-resolution Windows icon.

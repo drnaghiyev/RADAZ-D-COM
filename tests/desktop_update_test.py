@@ -262,6 +262,14 @@ class DesktopUpdates(unittest.TestCase):
         self.assertIn('--app=http://localhost:5173/?radaz-build=verified-build',command)
         self.assertFalse(any('user-data-dir' in arg or 'incognito' in arg or 'inprivate' in arg for arg in command))
 
+    def test_app_window_uses_native_shell_of_active_version(self):
+        native = self.root/'versions/0.2.8/runtime/electron/RADAZ.exe'
+        native.parent.mkdir(parents=True, exist_ok=True)
+        native.write_bytes(b'synthetic-executable')
+        with patch.object(desktop, 'app_browser', side_effect=AssertionError('Browser must not be needed')), patch.object(desktop, 'run_hidden') as started:
+            desktop.open_app(self.root, 'verified-build')
+        started.assert_called_once_with([str(native)], self.root)
+
     def test_update_feed_uses_the_main_product_repository(self):
         self.assertEqual(desktop.UPDATE_REPOSITORY, desktop.REPOSITORY)
         self.assertEqual(desktop.UPDATE_REPOSITORY, 'drnaghiyev/RADAZ-D-COM')

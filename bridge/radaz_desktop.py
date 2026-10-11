@@ -315,6 +315,11 @@ def app_browser():
     raise RuntimeError('RADAZ tətbiq pəncərəsi üçün Microsoft Edge və ya Google Chrome tapılmadı.')
 
 def open_app(root, build):
+    active = read_json(root / 'active.json').get('version')
+    if active:
+        native = version_dir(root, active) / 'runtime/electron/RADAZ.exe'
+        if native.is_file():
+            return run_hidden([str(native)], root)
     port = int(os.environ.get('RADAZ_PORT', '5173'))
     if not 0 < port < 65536: raise ValueError('Invalid RADAZ port')
     from urllib.parse import quote
