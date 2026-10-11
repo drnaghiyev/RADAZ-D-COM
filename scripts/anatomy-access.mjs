@@ -7,7 +7,7 @@ export function anatomyAccess(product,{env=process.env,request=fetch}={}){
   if(!env.RADAZ_ANATOMY_LICENSE_URL||!env.RADAZ_ANATOMY_LICENSE_KEY_FILE){
    const port=Number(env.RADAZ_ARCHIVE_PORT||8766);if(!Number.isInteger(port)||port<1||port>65535)throw Error('license_not_configured');
    const origin='http://127.0.0.1:'+port;
-   let response;try{response=await request(origin+'/anatomy-license'+(action==='trial'?'/trial':''),{method:action==='trial'?'POST':'GET',headers:{Origin:origin,'Content-Type':'application/json'},...(action==='trial'?{body:'{}'}:{}),redirect:'error',signal:AbortSignal.timeout(10000)});}catch{throw Error('license_not_configured');}
+   let response;try{response=await request(origin+'/anatomy-license'+(action==='trial'?'/trial':''),{method:action==='trial'?'POST':'GET',headers:{'Content-Type':'application/json'},...(action==='trial'?{body:'{}'}:{}),redirect:'error',signal:AbortSignal.timeout(10000)});}catch{throw Error('license_not_configured');}
    if(!response.ok)throw Error('license_not_configured');const result=await response.json();
    if(result.moduleId!=='anatomy_ai'||typeof result.allowed!=='boolean')throw Error('invalid_license_response');return result;
   }

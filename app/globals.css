@@ -735,7 +735,7 @@ body main.workstation.grouped-workstation .topbar .brand{margin-right:6px!import
 body main.workstation.grouped-workstation .topbar .help-command{margin-left:auto!important}
 body main.workstation.grouped-workstation .topbar button svg{width:clamp(20px,1.25vw,24px)!important;height:clamp(20px,1.25vw,24px)!important}
 body main.workstation.grouped-workstation .topbar .toolbar-more{display:none!important}
-@media(max-width:1399px){
+@media(max-width:1499px){
  body main.workstation.grouped-workstation .topbar .toolbar-more{display:flex!important;order:5}
  body main.workstation.grouped-workstation .topbar .top-actions{display:none!important}
  body main.workstation.grouped-workstation .topbar.toolbar-more-open .top-actions{display:flex!important;position:absolute;top:100%;right:8px;width:min(590px,calc(100vw - 16px));flex-wrap:wrap;gap:8px;padding:12px;background:#11212e;box-shadow:0 8px 24px #000a;border:1px solid #405465;border-radius:7px;z-index:100;max-height:70vh;overflow:auto}
@@ -765,3 +765,26 @@ body main.workstation.grouped-workstation .topbar .mode-controls{gap:3px!importa
 /* Dropdown indicators must fit inside compact command buttons. */
 body main.workstation.grouped-workstation .topbar button:has(>svg+svg){position:relative;padding-right:8px!important}
 body main.workstation.grouped-workstation .topbar button>svg+svg{position:absolute;right:1px;bottom:3px;width:9px!important;height:9px!important}
+
+/* Compact controls with breathing room, and explicit MPR mode names. */
+body main.workstation.grouped-workstation .topbar{gap:8px!important}
+body main.workstation.grouped-workstation .topbar :is(.toolbar-group,.mode-controls,.display-direct-controls){gap:4px!important;padding:4px!important}
+body main.workstation.grouped-workstation .topbar .mpr-modes{display:flex!important;gap:4px!important}
+body main.workstation.grouped-workstation .topbar .mpr-modes button{width:48px!important;min-width:48px!important;flex-basis:48px!important}
+body main.workstation.grouped-workstation .topbar .mpr-mode-label{font-size:13px!important;font-weight:650;line-height:1}
+.volume-edit-toolbar:empty{display:none!important}
+body main.workstation.grouped-workstation .topbar .volume-direct-tools{position:static;display:flex;gap:4px;padding:0;border:0;background:transparent}
+body main.workstation.grouped-workstation[data-mode="3d"] .topbar .toolbar-more{display:none!important}
+.product-dialog .radaz-logo{background:none!important;border:0!important;border-radius:0!important;box-shadow:none!important;padding:0!important}
+.product-about{text-align:left;display:grid;gap:14px}
+.product-about h3{margin:0;font-size:24px;display:flex;gap:12px;align-items:baseline}
+.product-about p{margin:0;padding-bottom:12px;border-bottom:1px solid #355367;line-height:1.7}
+.product-about p:last-child{border:0;padding-bottom:0}
+@media(max-width:650px){
+ body main.workstation.grouped-workstation .topbar{gap:4px!important}
+ body main.workstation.grouped-workstation .topbar :is(.toolbar-group,.mode-controls,.display-direct-controls){gap:3px!important;padding:3px!important}
+ body main.workstation.grouped-workstation .topbar .mpr-modes button{width:43px!important;min-width:43px!important;flex-basis:43px!important}
+ body main.workstation.grouped-workstation[data-mode="3d"] .topbar{gap:3px!important}
+}
+
+@media(max-width:430px){body main.workstation.grouped-workstation .topbar .brand{display:none!important}}

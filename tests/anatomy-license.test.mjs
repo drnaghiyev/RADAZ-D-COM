@@ -34,3 +34,12 @@ test('paid Anatomy AI activation and renewal are independent; owner suspension s
   now=renewed.expiresAt;const renewedBase=credential(now);assert.equal(service.anatomy.status(renewedBase).status,'expired');assert.throws(()=>service.anatomy.authorize(renewedBase));
  }finally{service.close();}
 });
+
+test('desktop licence proxy uses a server request without an invalid archive-port Origin',async()=>{
+ const calls=[];const access=anatomyAccess({channel:'preview'},{env:{RADAZ_ARCHIVE_PORT:'9876'},request:async(url,options)=>{
+ calls.push([url,options]);assert.equal(options.headers.Origin,undefined);
+ return {ok:true,json:async()=>({moduleId:'anatomy_ai',status:'active',allowed:true})};
+ }});
+ assert.equal((await access.status()).allowed,true);await access.trial();await access.authorize();
+ assert.equal(calls[1][0],'http://127.0.0.1:9876/anatomy-license/trial');assert.equal(calls[1][1].method,'POST');
+});

@@ -24,6 +24,7 @@ export const messages={
  ...anatomyMessages,
  ...uiMessages,
  'license.anatomy':{az:'Anatomiya AI lisenziyası',ru:'Лицензия Анатомия AI',en:'Anatomy AI licence'},
+ 'license.unavailable':{az:'Yerli lisenziya xidməti ilə əlaqə alınmadı. RADAZ-ı yenidən açıb təkrar yoxlayın.',ru:'Нет связи с локальной службой лицензий. Перезапустите RADAZ и повторите проверку.',en:'The local licence service could not be reached. Restart RADAZ and try again.'},
  'license.unconfigured':{az:'Modulun lisenziya serveri qoşulmayıb.',ru:'Сервер лицензирования модуля не подключён.',en:'The module licensing server is not configured.'},
  'license.checking':{az:'Lisenziya yoxlanılır…',ru:'Проверка лицензии…',en:'Checking licence…'},
  'license.inactive':{az:'Aktivləşdirilməyib',ru:'Не активирована',en:'Not activated'},

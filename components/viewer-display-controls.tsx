@@ -89,13 +89,13 @@ export function ViewerDisplayControls({ panel, imageId, defaultImageId, onStatus
       <Button variant="ghost" className="header-control" aria-label={tr('ui.flip_horizontally_bdc43')} title="Üfüqi çevir · Ctrl+Shift+[" onClick={() => void action('horizontal')}><FlipHorizontal2 size={18}/></Button>
       <Button variant="ghost" className="header-control" aria-label={tr('ui.flip_vertically_9b479')} title="Şaquli çevir · Ctrl+Shift+]" onClick={() => void action('vertical')}><FlipVertical2 size={18}/></Button>
     </div>
-    <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className="header-control" aria-label={tr('ui.positive_negative_and_window_3f1e6')}><Contrast size={18}/><span>{tr('ui.positive_negative_3f5da')}</span><ChevronDown size={13}/></Button></DropdownMenuTrigger><DropdownMenuContent className="header-menu" align="end">
+    <div className="toolbar-group"><DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className="header-control" aria-label={tr('ui.positive_negative_and_window_3f1e6')}><Contrast size={18}/><span>{tr('ui.positive_negative_3f5da')}</span><ChevronDown size={13}/></Button></DropdownMenuTrigger><DropdownMenuContent className="header-menu" align="end">
       <DropdownMenuItem onSelect={() => void action('default')}>{tr('ui.dicom_default_window_43881')}</DropdownMenuItem>
       <DropdownMenuItem onSelect={() => void action('full')}>{tr('ui.full_dynamic_range_58c2c')}</DropdownMenuItem><div className="menu-separator"/>
       {[20,40,80,160,320,640,1280,2560].map(wl => <DropdownMenuItem key={wl} onSelect={() => void action('window', wl, wl * 2)}>WL {wl} / WW {wl * 2}</DropdownMenuItem>)}<div className="menu-separator"/>
       <DropdownMenuItem onSelect={() => void action('negative')}>{negative ? '✓ ' : ''}{tr('ui.negative_positive_cc72e')}<kbd>N</kbd></DropdownMenuItem>
       <DropdownMenuItem onSelect={() => void action('custom')}>{tr('ui.custom_window_327c0')}</DropdownMenuItem>
-    </DropdownMenuContent></DropdownMenu>
+    </DropdownMenuContent></DropdownMenu></div>
     <Dialog open={custom} onOpenChange={setCustom}><DialogContent className="output-dialog"><DialogHeader><DialogTitle>{tr('ui.custom_window_15f99')}</DialogTitle><DialogDescription>{tr('ui.brightness_and_contrast_for_the_active_image_a5326')}</DialogDescription></DialogHeader>
       <form onSubmit={event => { event.preventDefault(); if (Number(width) > 0 && level.trim()) { void action('window', Number(level), Number(width)); setCustom(false); } }}><div className="output-fields"><label>{tr('ui.window_level_wl_02ffc')}<input required type="number" step="any" value={level} onChange={e => setLevel(e.target.value)}/></label><label>{tr('ui.window_width_ww_ff819')}<input required type="number" min="0.001" step="any" value={width} onChange={e => setWidth(e.target.value)}/></label></div><button className="output-primary" type="submit">{tr('ui.apply_0c1bd')}</button></form>
     </DialogContent></Dialog>

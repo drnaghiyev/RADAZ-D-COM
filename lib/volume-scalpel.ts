@@ -1,3 +1,4 @@
+import {createScalpelBuffer} from './scalpel-buffer';
 import vtkImageData from '@kitware/vtk.js/Common/DataModel/ImageData';
 import vtkDataArray from '@kitware/vtk.js/Common/Core/DataArray';
 import vtkVolumeMapper from '@kitware/vtk.js/Rendering/Core/VolumeMapper';
@@ -18,37 +19,39 @@ export function insidePolygon(x:number,y:number,polygon:Point[]){
 export function createVolumeScalpel(viewport:Types.IVolumeViewport,source:{dimensions:Vec;spacing:Vec;origin:Vec;direction:number[];values:ArrayLike<number>},floor:number){
  const actor=viewport.getDefaultActor()!.actor as vtkVolume,original=actor.getMapper()!;
  const size=source.dimensions.reduce((a,b)=>a*b,1);
- if(size>64*1024*1024)throw Error('Scalpel üçün həcm çox böyükdür. Kiçik seriya və ya ROI seçin.');
- const values=Float32Array.from(source.values),baseline=values.slice();
+ if(!Number.isSafeInteger(size)||size<1||source.values.length!==size)throw Error('Həcm məlumatları uyğun deyil.');
+ const buffer=createScalpelBuffer(source.values,floor),values=buffer.values;
  const image=vtkImageData.newInstance();image.setDimensions(source.dimensions);image.setSpacing(source.spacing);image.setOrigin(source.origin);image.setDirection(source.direction as mat3);
  const scalars=vtkDataArray.newInstance({name:'RADAZ private scalpel',numberOfComponents:1,values});image.getPointData().setScalars(scalars);
  const mapper=vtkVolumeMapper.newInstance();mapper.setInputData(image);actor.setMapper(mapper);
- let previous:Float32Array|null=null,disposed=false,busy=false;
+ let previous:Uint8Array|null=null,disposed=false,busy=false;
  const render=()=>{scalars.modified();image.modified();mapper.modified();viewport.render();};
  return {
   floor,
   async cut(polygon:Point[],removeInside=true){
    if(busy||disposed||polygon.length<3)return 0;
    if(!viewport.getCamera().parallelProjection)throw Error('Scalpel yalnız parallel 3D görünüşdə işləyir.');
-   busy=true;const before=values.slice();let removed=0;
+   const changes=buffer.begin();busy=true;let removed=0;
    try{
     const at=(p:Vec)=>viewport.worldToCanvas(image.indexToWorld(p) as Vec);
     const zero=at([0,0,0]),axes=[at([1,0,0]),at([0,1,0]),at([0,0,1])].map(p=>[p[0]-zero[0],p[1]-zero[1]]);
     const [nx,ny,nz]=source.dimensions;
+    const xs=polygon.map(p=>p[0]),ys=polygon.map(p=>p[1]),bounds=[Math.min(...xs),Math.max(...xs),Math.min(...ys),Math.max(...ys)];
     for(let z=0;z<nz;z++){
      if(disposed)return 0;
      for(let y=0;y<ny;y++)for(let x=0;x<nx;x++){
       const i=(z*ny+y)*nx+x;if(values[i]===floor)continue;
       const px=zero[0]+x*axes[0][0]+y*axes[1][0]+z*axes[2][0],py=zero[1]+x*axes[0][1]+y*axes[1][1]+z*axes[2][1];
-      if(insidePolygon(px,py,polygon)===removeInside){values[i]=floor;removed++;}
+      if(removeInside&&(px<bounds[0]||px>bounds[1]||py<bounds[2]||py>bounds[3]))continue;
+      if(insidePolygon(px,py,polygon)===removeInside&&buffer.remove(i,changes))removed++;
      }
      if(z%8===0)await new Promise(resolve=>setTimeout(resolve,0));
     }
-    if(removed){previous=before;render();}return removed;
-   }catch(error){values.set(before);render();throw error;}finally{busy=false;}
+    if(removed){previous=changes;render();}return removed;
+   }catch(error){buffer.restore(changes);if(!disposed)render();throw error;}finally{busy=false;}
   },
-  undo(){if(previous&&!busy){values.set(previous);previous=null;render();}},
-  reset(){if(!busy){values.set(baseline);previous=null;render();}},
+  undo(){if(previous&&!busy){buffer.restore(previous);previous=null;render();}},
+  reset(){if(!busy){buffer.reset();previous=null;render();}},
   dispose(){disposed=true;actor.setMapper(original);mapper.delete();image.delete();scalars.delete();previous=null;},
  };
 }
