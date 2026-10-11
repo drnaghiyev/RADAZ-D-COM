@@ -82,7 +82,7 @@ export function ViewerDisplayControls({ panel, imageId, defaultImageId, onStatus
       <Button variant="ghost" className="header-control reset-display" aria-label="Görüntünü sıfırla" title="Sıfırla: parlaqlıq, kontrast, zoom, mövqe, fırlatma və neqativ · Ctrl+Shift+\\" onClick={() => void action('reset')}><Undo2 size={18}/><span>Sıfırla</span></Button>
       <Button variant="ghost" className="header-control" aria-label="90° sola fırlat" title="90° sola fırlat · Ctrl+[" onClick={() => void action('left')}><RotateCcw size={18}/></Button>
       <Button variant="ghost" className="header-control" aria-label="90° sağa fırlat" title="90° sağa fırlat · Ctrl+]" onClick={() => void action('right')}><RotateCw size={18}/></Button>
-      <Button variant="ghost" className="header-control" aria-label="180° fırlat" title="180° fırlat" onClick={() => void action('half')}><b className="rotation-half">180°</b></Button>
+      <Button variant="ghost" className="header-control" aria-label="180° fırlat" title="180° fırlat" onClick={() => void action('half')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 12a8 8 0 0 1 16 0M4 7v5h5M20 17v-5h-5"/></svg></Button>
       <Button variant="ghost" className="header-control" aria-label="Üfüqi çevir" title="Üfüqi çevir · Ctrl+Shift+[" onClick={() => void action('horizontal')}><FlipHorizontal2 size={18}/></Button>
       <Button variant="ghost" className="header-control" aria-label="Şaquli çevir" title="Şaquli çevir · Ctrl+Shift+]" onClick={() => void action('vertical')}><FlipVertical2 size={18}/></Button>
     </div>

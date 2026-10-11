@@ -675,3 +675,19 @@ body .output-page-brand strong{display:block!important}
 .assistant-stop{padding:9px;border:1px solid #426274;border-radius:6px}.assistant-limitation{color:#b4c8d2;font-size:12px;line-height:1.6}
 .ai-settings{display:grid;gap:16px}.ai-settings p{margin:0}.ai-settings label{display:grid;gap:7px}.ai-settings input{width:100%;height:40px;background:#0c1a25;border:1px solid #50738a;border-radius:5px;color:#fff;padding:8px;font:inherit}
 .ai-settings-actions{display:flex;gap:10px;flex-wrap:wrap}.ai-settings-actions button{padding:10px 15px;background:#285168;color:#e6f7ff;border-radius:6px}.ai-settings-actions button:disabled{opacity:.5;cursor:not-allowed}.ai-settings small{line-height:1.7;color:#a6bdc9}.ai-key-status{color:#a9dbbf}
+
+/* Responsive commands: wrap at small widths instead of scrolling or clipping. */
+body .grouped-workstation .topbar{--command-size:clamp(30px,2.5vw,40px);display:flex!important;flex-flow:row wrap!important;overflow:visible!important;height:auto!important;max-height:none!important;gap:3px!important;padding:4px!important;flex-shrink:0}
+body .grouped-workstation .topbar .brand{width:var(--command-size)!important;min-width:var(--command-size)!important;padding:0!important;gap:0!important}
+body .grouped-workstation .topbar .brand>span:not(.radaz-logo),body .grouped-workstation .topbar .mode-identity{display:none!important}
+body .grouped-workstation .topbar .toolbar-group,body .grouped-workstation .topbar .mode-controls,body .grouped-workstation .topbar .display-direct-controls{display:contents!important;white-space:normal!important}
+body .grouped-workstation .topbar button{width:var(--command-size)!important;min-width:var(--command-size)!important;height:var(--command-size)!important;min-height:var(--command-size)!important;padding:4px!important;flex:0 0 var(--command-size)!important;font-size:0!important;gap:0!important;justify-content:center}
+body .grouped-workstation .topbar button svg{width:clamp(16px,1.4vw,21px);height:clamp(16px,1.4vw,21px);flex-shrink:0}
+body .grouped-workstation .topbar button>span,body .grouped-workstation .topbar .command-group-title{display:none!important}
+body .grouped-workstation .topbar .mpr-modes{display:contents}
+body .grouped-workstation .topbar .mpr-thickness{max-width:160px;min-width:0}
+.volume-parameter-menu{width:min(310px,calc(100vw - 16px));padding:14px!important}.volume-parameter-menu .volume-parameter{display:grid;grid-template-columns:1fr auto;gap:8px;margin:10px 0}.volume-parameter-menu input{grid-column:1 / -1;width:100%}
+.volume-stage,.cornerstone-volume-stage{background:#000!important;border-radius:0!important}
+.volume-orientation{position:absolute;right:12px;top:12px;width:100px;z-index:8;user-select:none}.volume-orientation svg{width:100px;height:100px}.volume-orientation polygon{stroke:#b0bac8;stroke-width:.7}.volume-orientation text{fill:white;font-size:20px;text-anchor:middle;dominant-baseline:central;pointer-events:none}.volume-orientation g{cursor:pointer}.volume-orientation g:focus polygon{stroke:#fff;stroke-width:3}.volume-axis-views{display:flex;justify-content:center;gap:2px;flex-wrap:wrap}.volume-axis-views button{background:#13181e;color:#d8e4f0;border:1px solid #48515c;border-radius:3px;width:29px;height:26px;font-size:11px}
+.volume-help-disclosure{position:absolute;bottom:10px;left:12px;z-index:8;color:#bed0df;max-width:calc(100% - 24px)}.volume-help-disclosure>summary{cursor:pointer;list-style:none;border:1px solid #43505c;border-radius:50%;background:#14191e;width:28px;height:28px;text-align:center;line-height:26px}.volume-help-disclosure .volume-help{position:static!important;transform:none!important;max-width:560px;margin-top:6px;background:#10161ee8;padding:10px;pointer-events:auto}
+.workstation.detached[data-mode="3d"] .statusbar{display:none}

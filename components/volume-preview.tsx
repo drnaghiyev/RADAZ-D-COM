@@ -1,5 +1,6 @@
 'use client';
 import {useEffect,useRef,useState} from 'react';
+import {VolumeOrientation} from './volume-orientation';
 import {Box} from 'lucide-react';
 import {getViewer,getSeriesVolume} from '@/lib/cornerstone';
 import {gpuCapabilities} from '@/lib/gpu-capabilities';
@@ -164,7 +165,7 @@ export function VolumePreview(props:Props){
  return <section className="volume-workspace" aria-label="3D həcm görünüşü"><div className="volume-stage cornerstone-volume-stage" data-ready={ready} onContextMenu={e=>e.preventDefault()}
    onDoubleClick={()=>{viewportRef.current?.resetCamera({resetPan:true,resetZoom:true});viewportRef.current?.render();}}
    onPointerDownCapture={e=>{
-    if((e.target as HTMLElement).closest('button,input,select'))return;
+    if((e.target as HTMLElement).closest('button,input,select,summary,.volume-orientation'))return;
     startInteraction();const options=resolvedVolumeSettings(preset,settings);
     const mode=e.button===2?'zoom':e.button===0&&(e.ctrlKey||e.metaKey)?'width':e.button===0&&(e.shiftKey||options.mouseMode==='tissue')?'tissue':null;
     if(mode){e.preventDefault();e.stopPropagation();adjust.current={mode,x:e.clientX,y:e.clientY,scale:viewportRef.current?.getCamera()?.parallelScale||1,threshold,opacity,width:options.transferWidth};e.currentTarget.setPointerCapture(e.pointerId);}
@@ -177,7 +178,8 @@ export function VolumePreview(props:Props){
    onPointerUpCapture={finishInteraction} onPointerCancelCapture={finishInteraction} onPointerLeave={e=>{if(!e.buttons)finishInteraction();}}
    onWheel={e=>{e.preventDefault();startInteraction();const viewport=viewportRef.current,camera=viewport?.getCamera();if(camera?.parallelScale)viewport.setCamera({parallelScale:camera.parallelScale*(e.deltaY>0?1.1:.9)});viewport?.render();finishInteraction();}}>
    {series&&<div key={series.id} ref={hostRef} className="cornerstone-volume-host" aria-label="3D DICOM renderi"/>}
-   {ready&&!error&&<div className="volume-help"><span><b>Sol mouse</b> {settings.mouseMode==='tissue'?'HU / şəffaflıq':'fırlat'}</span><span><b>Shift + sol</b> HU / şəffaflıq</span><span><b>Orta mouse</b> daşı</span><span><b>Sağ mouse</b> zoom</span><span><b>Təkər</b> zoom</span><span>{settings.quality==='auto'?'Auto · ':''}{effectiveQuality[0].toUpperCase()+effectiveQuality.slice(1)}</span><button onClick={()=>setDiagnostics(performanceSnapshot())}>Performans</button>{note&&<span>{note}</span>}</div>}
+   {ready&&!error&&<VolumeOrientation viewport={viewportRef.current}/>}
+   {ready&&!error&&<details className="volume-help-disclosure"><summary aria-label="3D navigation">?</summary><div className="volume-help"><span><b>Sol mouse</b> {settings.mouseMode==='tissue'?'HU / şəffaflıq':'fırlat'}</span><span><b>Shift + sol</b> HU / şəffaflıq</span><span><b>Orta mouse</b> daşı</span><span><b>Sağ mouse</b> zoom</span><span><b>Təkər</b> zoom</span><span>{settings.quality==='auto'?'Auto · ':''}{effectiveQuality[0].toUpperCase()+effectiveQuality.slice(1)}</span><button onClick={()=>setDiagnostics(performanceSnapshot())}>Performans</button>{note&&<span>{note}</span>}</div></details>}
    {ready&&(progress||sourceProgress)&&<WorkProgress className="volume-stream-progress" progress={progress||sourceProgress||null}/>}
    {diagnostics&&<div className="volume-diagnostics" role="status"><button onClick={()=>setDiagnostics(null)}>Bağla</button><span>Decode: {diagnostics.decodeMs.toFixed(0)} ms · {diagnostics.decodeCount} kəsit</span><span>Volume: {diagnostics.volumeBuildMs.toFixed(0)} ms · {diagnostics.volumeBuildCount} qurulma · {diagnostics.volumeCacheHits} reuse</span><span>İlk 3D: {diagnostics.first3DFrameMs.toFixed(0)} ms</span><span>GPU ötürmə: CPU {diagnostics.gpuUploadCpuMs.toFixed(0)} ms · GPU {diagnostics.gpuTimerMs===null?'ölçülmür':diagnostics.gpuTimerMs.toFixed(1)+' ms'}</span><span>GPU ötürmə + ilk render: {diagnostics.gpuUploadAndFirstRenderMs.toFixed(0)} ms</span><span>Fırlatma: {diagnostics.interactionFps?.toFixed(1)||'—'} FPS · JS: {diagnostics.jsHeapBytes?Math.round(diagnostics.jsHeapBytes/1048576)+' MB':'ölçülmür'}</span><span>GPU həcm yaddaşı (təxmini): {Math.round(diagnostics.estimatedGpuBytes/1048576)} MB</span></div>}
    {(!ready||error)&&<div className="volume-cover"><Box size={34}/>{error?<><strong>3D həcm açıla bilmədi</strong><span>{error}</span></>:progress||sourceProgress?<WorkProgress progress={progress||sourceProgress||null}/>:<strong>3D üçün DICOM seriyası seçin</strong>}</div>}
