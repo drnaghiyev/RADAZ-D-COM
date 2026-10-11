@@ -26,7 +26,7 @@ class DesktopUpdates(unittest.TestCase):
         arguments = ['radaz_desktop.py', 'initialize', '--install-root', str(self.root), '--no-shortcuts', '--start-background']
         with patch.object(desktop, 'SOURCE', source), patch.object(desktop, 'validate_directory'), patch.object(desktop, 'launch') as start, patch('sys.argv', arguments):
             desktop.main()
-            start.assert_called_once_with(self.root, no_browser=True)
+            start.assert_called_once_with(self.root.resolve(), no_browser=True)
             self.assertEqual(desktop.read_json(self.root / 'active.json')['version'], '0.2.9')
             self.assertEqual((self.root / 'radaz.ico').read_bytes(), b'synthetic-icon')
             desktop.atomic_json(source / 'public/product.json', {'version': '0.2.10'})
