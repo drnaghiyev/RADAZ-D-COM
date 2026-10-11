@@ -30,6 +30,8 @@ def checksum(file):
     file.with_suffix(file.suffix + '.sha256').write_text(f'{hashlib.sha256(file.read_bytes()).hexdigest()}  {file.name}\n', encoding='ascii')
 
 def main():
+    if json.loads((ROOT / 'public/product.json').read_text(encoding='utf-8-sig')).get('channel') == 'local-anatomy':
+        raise SystemExit('Private Anatomy AI development must not be packaged as a public Setup.')
     version = json.loads((ROOT / 'public/product.json').read_text(encoding='utf-8-sig'))['version']
     CACHE.mkdir(parents=True, exist_ok=True)
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:

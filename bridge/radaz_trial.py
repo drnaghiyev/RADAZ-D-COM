@@ -35,13 +35,15 @@ def protect(raw, decrypt=False):
         kernel.LocalFree(target.data)
 
 class TrialStore:
-    def __init__(self, device, root=None):
+    def __init__(self, device, root=None, namespace=None):
         self.device = device
         # An explicit root isolates tests and never touches the user's registry.
         self.registry = os.name == 'nt' and root is None
         self.root = Path(root) if root else Path(os.environ.get('LOCALAPPDATA', str(Path.home()/'.local/share'))) / 'RADAZ' / 'Licensing'
+        if namespace not in (None, 'anatomy_ai'): raise ValueError('Invalid trial namespace')
+        if namespace: self.root = self.root / namespace
         self.path = self.root / (device + '.trial')
-        self.reg_path = 'Software\\RADAZ\\Licensing\\' + device
+        self.reg_path = 'Software\\RADAZ\\Licensing\\' + device + ('\\' + namespace if namespace else '')
 
     def decode(self, raw):
         record = json.loads(protect(base64.b64decode(raw, validate=True), decrypt=True))

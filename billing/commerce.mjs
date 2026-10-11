@@ -1,7 +1,7 @@
 import {sign,verify,createPrivateKey,createPublicKey} from 'node:crypto';
 import {readFileSync} from 'node:fs';
-export const moduleId=value=>typeof value==='string'&&/^[a-z][a-z0-9-]{1,47}$/.test(value);
-export const defaultCommerce=()=>({baseCurrency:'AZN',monthlyMinor:1000,trialDays:30,modules:[],exchange:null});
+export const moduleId=value=>typeof value==='string'&&/^[a-z][a-z0-9_-]{1,47}$/.test(value);
+export const defaultCommerce=()=>({baseCurrency:'AZN',monthlyMinor:1000,trialDays:30,modules:[{id:'anatomy_ai',name:'Anatomik seqmentasiya',monthlyMinor:500,enabled:true}],exchange:null});
 export function validateCommerce(value={}){
  const next={...defaultCommerce(),...value};
  if(!['AZN','USD'].includes(next.baseCurrency)||!Number.isSafeInteger(next.monthlyMinor)||next.monthlyMinor<1||next.monthlyMinor>100000000)throw Error('Qiymət və valyuta düzgün deyil.');

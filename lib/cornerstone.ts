@@ -8,10 +8,33 @@ import { viewerPerformance } from './viewer-performance';
 import { describeVolume } from './volume-geometry';
 import { areaWeights, resamplePlane, volumeDimensions } from './volume-resampling';
 import { parseDicomFile } from './dicom-file';
+import {anatomyAutoError, type AnatomyPixels} from './anatomy-auto';
+import type {AnatomyVolumeGeometry} from './anatomy-volume';
 
 type DataSet = ReturnType<typeof dicomParser.parseDicom>;
 type RecordItem = { dataSet: DataSet; pixels: Int16Array | Float32Array; rows: number; columns: number; bits: number; min: number; max: number };
 const records = new Map<string, RecordItem>();
+/** Decoded, rescaled pixels, independent of viewer WW/WL, flips and annotations.
+ * Only allow original monochrome projection images; send no identifying tags.
+ */
+export async function getAnatomyPixels(imageId:string):Promise<AnatomyPixels> {
+  if(!records.has(imageId)||derived.has(imageId))throw Error(anatomyAutoError('unsupported_image'));
+  await decodeRegisteredDicom(imageId);
+  const item=records.get(imageId);
+  if(!item)throw Error('Görüntü artıq bağlıdır.');
+  const ds=item.dataSet,modality=(ds.string('x00080060')||'').trim().toUpperCase();
+  const photometric=(ds.string('x00280004')||'').trim().toUpperCase();
+  const bodyPart=(ds.string('x00180015')||'').trim().toUpperCase();
+  const sop=(ds.string('x00080016')||'').trim();
+  if(!['DX','CR'].includes(modality)||!['MONOCHROME1','MONOCHROME2'].includes(photometric)||
+    /BREAST|DENT|TOOTH|TEETH|MAMMO/.test(bodyPart)||['1.2.840.10008.5.1.4.1.1.1.2','1.2.840.10008.5.1.4.1.1.1.2.1','1.2.840.10008.5.1.4.1.1.1.3','1.2.840.10008.5.1.4.1.1.1.3.1'].includes(sop))throw Error(anatomyAutoError('unsupported_image'));
+  if(item.rows*item.columns>16777216||item.rows<16||item.columns<16)throw Error(anatomyAutoError('invalid_size'));
+  if(item.pixels.length!==item.rows*item.columns)throw Error(anatomyAutoError('invalid_pixels'));
+  const floats=Float32Array.from(item.pixels),bytes=new Uint8Array(floats.buffer);
+  let binary='';
+  for(let i=0;i<bytes.length;i+=0x8000)binary+=String.fromCharCode(...bytes.subarray(i,i+0x8000));
+  return {width:item.columns,height:item.rows,pixels:btoa(binary),modality,photometric,bodyPart};
+}
 const pendingDicoms = new Map<string, { bytes: Uint8Array; ds: DataSet; promise?: Promise<string> }>();
 const diskDicoms = new Map<string, {url: string; signal: AbortSignal; metadata: DataSet; tags: Record<string,string>; promise?: Promise<string>; used: number}>();
 const DISK_PIXEL_BUDGET = 256 * 1024 ** 2;
@@ -410,6 +433,36 @@ export function seriesGeometry(imageIds:string[]) {
     if(!g||!ds)throw Error('Volume üçün DICOM məkan koordinatları tələb olunur');
     return {...g,id,sliceThickness:asNumber(ds,'x00180050',0),spacingBetweenSlices:asNumber(ds,'x00180088',0)};
   }));
+}
+/** Stream a complete, geometry-validated CT/MR volume at the model's 3 mm scale.
+ * Area averaging preserves every source voxel and the physical voxel centres;
+ * it never uses screen captures, display windowing or arbitrary slice numbers.
+ */
+export function anatomyVolumeSource(imageIds:string[]) {
+  const source=seriesGeometry(imageIds),first=records.get(imageIds[0])!;
+  const modality=first.dataSet.string('x00080060')?.trim().toUpperCase();
+  if(modality!=='CT'&&modality!=='MR')throw Error('KT və ya MRT seriyası seçin.');
+  for(const id of imageIds){
+    const ds=records.get(id)?.dataSet;
+    if(!ds||derived.has(id)||ds.string('x00080060')?.trim().toUpperCase()!==modality||/LOCALIZER|SCOUT|PROJECTION/.test(ds.string('x00080008')||''))throw Error('Analiz üçün orijinal, eyni sekvensə aid KT/MRT kəsiklərini seçin.');
+  }
+  const dimensions=source.dimensions.map((n,i)=>Math.max(3,Math.min(n,Math.ceil(n*source.spacing[i]/3)))) as Point3;
+  if(dimensions.reduce((a,b)=>a*b,1)>32000000)throw Error('Seriya lokal analizin yaddaş limitini aşır.');
+  const scale=source.dimensions.map((n,i)=>n/dimensions[i]);
+  const spacing=source.spacing.map((n,i)=>n*scale[i]) as Point3;
+  const origin=source.origin.map((n,axis)=>n+scale.reduce((sum,ratio,i)=>sum+source.direction[i*3+axis]*source.spacing[i]*(ratio-1)/2,0)) as Point3;
+  const geometry:AnatomyVolumeGeometry={dimensions,spacing,origin,direction:source.direction,modality};
+  const weights=source.dimensions.map((n,i)=>areaWeights(n,dimensions[i]));
+  let last=-1,plane:Float32Array|null=null;
+  return {geometry,async slice(z:number,signal:AbortSignal){
+    const pixels=new Float32Array(dimensions[0]*dimensions[1]);
+    for(const item of weights[2][z]){
+      signal.throwIfAborted();
+      if(last!==item.index){await core.imageLoader.loadAndCacheImage(source.imageIds[item.index]);signal.throwIfAborted();const record=records.get(source.imageIds[item.index]);if(!record)throw Error('Seriya bağlandı.');plane=resamplePlane(record.pixels,record.columns,weights[0],weights[1]);last=item.index;}
+      for(let i=0;i<pixels.length;i++)pixels[i]+=plane![i]*item.weight;
+    }
+    await yieldToBrowser();return pixels;
+  }};
 }
 /** One streaming volume and the same decoded slice buffers serve MPR and 3D. */
 export async function getSeriesVolume(imageIds:string[],limits?:{maxDimension:number;budgetBytes:number}):Promise<SeriesVolume> {

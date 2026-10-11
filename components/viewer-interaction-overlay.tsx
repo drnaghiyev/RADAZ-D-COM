@@ -1,4 +1,6 @@
 'use client';
+import {useTranslation as useUiTranslation,translate as tr} from '@/lib/i18n';
+
 
 import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent } from 'react';
@@ -6,6 +8,7 @@ import type * as Core from '@cornerstonejs/core';
 import { getLocalizerGeometry } from '@/lib/cornerstone';
 import { sameCoordinateSpace, type ImageGeometry, type Point3 } from '@/lib/localizer';
 import type { LocalMark } from './measurement-overlay';
+import type { AnatomyLabel } from '@/lib/anatomy-atlas';
 
 export type CursorPosition = { world: Point3; geometry: ImageGeometry };
 
@@ -37,7 +40,7 @@ export function useStackNavigation(viewport: Core.Types.IStackViewport | null, i
   };
 }
 
-export function ViewerInteractionOverlay({ viewport, element, imageId, tool, slice, count, marks, selectedMarkId, onSelectMark, cursor, onCursor, onAdd, onUpdate, onRemove, onSelect, onEditArrow, navigate }: {
+export function ViewerInteractionOverlay({ viewport, element, imageId, tool, slice, count, marks, selectedMarkId, onSelectMark, cursor, onCursor, onAdd, onUpdate, onRemove, onSelect, onEditArrow, navigate, anatomyLabel, onRecognizeAnatomy }: {
   viewport: Core.Types.IStackViewport | null; element: HTMLDivElement | null; imageId: string;
   tool: string; slice: number; count: number; marks: LocalMark[]; cursor: CursorPosition | null;
   onCursor: (position: CursorPosition) => void; onAdd: (mark: LocalMark) => void;
@@ -45,12 +48,16 @@ export function ViewerInteractionOverlay({ viewport, element, imageId, tool, sli
   onUpdate: (id: string, patch: Partial<LocalMark>) => void;
   onRemove: (id: string) => void; onSelect: () => void; navigate: (index: number, relative?: boolean) => void;
   selectedMarkId?: string | null; onSelectMark?: (id: string) => void;
+  anatomyLabel?: AnatomyLabel | null;
+  onRecognizeAnatomy?: (point:Point3,tail:Point3)=>void;
 }) {
+  useUiTranslation();
   const [draft, setDraft] = useState<Point3[]>([]);
   const [, repaint] = useState(0);
   const gesture = useRef<{ id: number; y: number; points: Point3[]; last: [number, number] } | null>(null);
   const edit = useRef<{ pointer: number; mark: LocalMark; start: Point3; point?: number } | null>(null);
-  const active = ['scroll', 'arrow', 'pencil', 'cursor3d'].includes(tool);
+  const placingAnatomy = tool === 'anatomy' && anatomyLabel?.imageId === imageId;
+  const active = ['scroll', 'arrow', 'pencil', 'cursor3d','anatomy-auto'].includes(tool) || placingAnatomy;
   const geometry = imageId ? getLocalizerGeometry(imageId) : null;
   useEffect(() => { gesture.current = null; edit.current = null; setDraft([]); }, [tool, viewport, imageId]);
   useEffect(() => { if (tool !== 'scroll' && tool !== 'cursor3d') { gesture.current = null; setDraft([]); } }, [tool, imageId]);
@@ -82,7 +89,7 @@ export function ViewerInteractionOverlay({ viewport, element, imageId, tool, sli
       if (steps) { navigate(steps, true); current.y += steps * 14; }
     } else if (tool === 'cursor3d') {
       if (geometry) onCursor({ world: world(event), geometry });
-    } else {
+    } else if (tool !== 'anatomy' && tool !== 'anatomy-auto') {
       if (Math.hypot(event.clientX - current.last[0], event.clientY - current.last[1]) < 2) return;
       const point = world(event);
       current.points = tool === 'arrow' ? [current.points[0], point] : [...current.points, point];
@@ -92,6 +99,7 @@ export function ViewerInteractionOverlay({ viewport, element, imageId, tool, sli
   const startEdit = (event: PointerEvent<SVGElement>, mark: LocalMark, point?: number) => {
     if (event.button !== 0 || !element) return;
     event.preventDefault(); event.stopPropagation(); onSelect();
+    event.currentTarget.ownerSVGElement!.focus({preventScroll:true});
     if (tool === 'erase') { onRemove(mark.id); return; }
     onSelectMark?.(mark.id);
     edit.current = {pointer: event.pointerId, mark, start: world(event), point};
@@ -106,12 +114,14 @@ export function ViewerInteractionOverlay({ viewport, element, imageId, tool, sli
   if (!viewport || !imageId) return null;
   const cursorPoint = cursor && geometry && sameCoordinateSpace(geometry, cursor.geometry) ? viewport.worldToCanvas(cursor.world) : null;
   return <>
-    <svg className={`drawing-overlay ${active ? 'drawing-active' : ''} ${tool === 'scroll' ? 'scroll-active' : ''}`} aria-label="Barmaqla görüntü idarəsi"
+    <svg tabIndex={-1} className={`drawing-overlay ${active ? 'drawing-active' : ''} ${tool === 'scroll' ? 'scroll-active' : ''}`} aria-label={tr('ui.touch_image_controls_0a9ab')}
+      onClick={event => event.stopPropagation()}
       onWheel={event => { event.stopPropagation(); if (event.deltaY) navigate(Math.sign(event.deltaY), true); }}
       onDoubleClick={event => event.stopPropagation()}
       onPointerDown={event => {
         if (!active || event.button !== 0 || gesture.current || edit.current || !element) return;
         event.preventDefault(); event.stopPropagation(); onSelect();
+        event.currentTarget.focus({preventScroll:true});
         event.currentTarget.setPointerCapture(event.pointerId);
         const point = world(event);
         gesture.current = { id: event.pointerId, y: event.clientY, points: [point], last: [event.clientX, event.clientY] };
@@ -124,13 +134,24 @@ export function ViewerInteractionOverlay({ viewport, element, imageId, tool, sli
         }
         const current = gesture.current;
         if (!current || current.id !== event.pointerId) return;
+        if(tool==='anatomy-auto'&&element&&Math.hypot(event.clientX-current.last[0],event.clientY-current.last[1])<6){
+          const rect=element.getBoundingClientRect(),x=event.clientX-rect.left,y=event.clientY-rect.top;
+          const tail=viewport.canvasToWorld([Math.max(12,Math.min(rect.width-280,x+55)),Math.max(12,y-65)]) as Point3;
+          onRecognizeAnatomy?.(world(event),tail);
+        }
+        if (placingAnatomy && anatomyLabel && element && Math.hypot(event.clientX-current.last[0],event.clientY-current.last[1]) < 6) {
+          const rect=element.getBoundingClientRect();
+          const x=event.clientX-rect.left,y=event.clientY-rect.top;
+          const tail=viewport.canvasToWorld([Math.max(12,Math.min(rect.width-280,x+55)),Math.max(12,y-65)]) as Point3;
+          onAdd({id:`anatomy-${crypto.randomUUID()}`,imageId,kind:'arrow',points:[tail,world(event)],labelOffset:[0,0],comment:anatomyLabel.text,anatomyId:anatomyLabel.id});
+        }
         if ((tool === 'arrow' || tool === 'pencil') && current.points.length > 1) {
           onAdd({ id: `draw-${`${Date.now()}-${Math.random().toString(36).slice(2)}`}`, imageId, kind: tool, points: current.points, labelOffset: [0, 0] });
         }
         gesture.current = null; setDraft([]);
         event.currentTarget.releasePointerCapture(event.pointerId);
       }} onPointerCancel={() => { edit.current = null; gesture.current = null; setDraft([]); }} onLostPointerCapture={() => { edit.current = null; gesture.current = null; setDraft([]); }}>
-      {marks.filter(mark => mark.imageId === imageId && (mark.kind === 'arrow' || mark.kind === 'pencil')).map(mark => <g key={mark.id} data-drawing={mark.kind} data-mark-id={mark.id} className={selectedMarkId === mark.id ? 'selected-measurement' : undefined}
+      {marks.filter(mark => mark.imageId === imageId && (mark.kind === 'arrow' || mark.kind === 'pencil')).map(mark => <g key={mark.id} data-drawing={mark.kind} data-mark-id={mark.id} data-anatomy-id={mark.anatomyId} className={selectedMarkId === mark.id ? 'selected-measurement' : undefined}
         onClick={event=>event.stopPropagation()} onDoubleClick={event=>{event.stopPropagation();if(mark.kind==='arrow')onEditArrow(mark.id);}}
         onPointerDown={event=>startEdit(event, mark)}>
         <polyline points={points(mark.points)} />
@@ -153,7 +174,7 @@ export function ViewerInteractionOverlay({ viewport, element, imageId, tool, sli
       {cursorPoint && <g className="world-cursor"><path d={`M ${cursorPoint[0]-18} ${cursorPoint[1]} h 36 M ${cursorPoint[0]} ${cursorPoint[1]-18} v 36`}/><circle cx={cursorPoint[0]} cy={cursorPoint[1]} r="6"/></g>}
     </svg>
     {count > 1 && <div className="vertical-stack-scroll" onPointerDown={event => { event.stopPropagation(); onSelect(); }} onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}>
-      <input type="range" min="0" max={count - 1} step="1" value={slice} aria-label="Görüntü nömrəsi" aria-orientation="vertical" aria-valuetext={`${slice + 1} / ${count}`} title={`${slice + 1} / ${count}`} onChange={event => navigate(Number(event.currentTarget.value))}/>
+      <input type="range" min="0" max={count - 1} step="1" value={slice} aria-label={tr('ui.image_number_d4fa0')} aria-orientation="vertical" aria-valuetext={`${slice + 1} / ${count}`} title={`${slice + 1} / ${count}`} onChange={event => navigate(Number(event.currentTarget.value))}/>
     </div>}
     {tool === 'cursor3d' && <div className="cursor-readout">{!geometry ? 'Bu görüntüdə 3D məkan koordinatları yoxdur' : cursorPoint && cursor ? `LPS (mm): ${cursor.world.map(n => n.toFixed(1)).join(' / ')}` : '3D nöqtəni seçin · uyğun panellər həmin nöqtəyə keçir'}</div>}
   </>;

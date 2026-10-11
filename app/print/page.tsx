@@ -1,4 +1,6 @@
 'use client';
+import {useTranslation as useUiTranslation,translate as tr} from '@/lib/i18n';
+
 import { OutputPageHeader } from '@/components/output-page-header';
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -24,6 +26,7 @@ function FilmImage({image,adjustment,ratio}:{image:DicomPixelImage;adjustment:Pr
 }
 
 export default function PrintPage() {
+  useUiTranslation();
   useEffect(() => { document.title = 'RADAZ · Çap'; }, []);
   const [images,setImages] = useState<DicomPixelImage[]>([]), [title,setTitle] = useState('Görüntülər');
   const [printer,setPrinter] = useState(defaultPrinter), [layout,setLayout] = useState('2,2'), [filmSize,setFilmSize] = useState('14INX17IN');
@@ -98,28 +101,28 @@ export default function PrintPage() {
 
   return <main className="print-shell print-output-shell">
     <style>{`@media print { @page { size: ${paper} ${orientation==='PORTRAIT'?'portrait':'landscape'}; margin: 5mm; } .print-output-shell .print-sheet {height:${paperHeight}mm!important;width:${paperWidth}mm!important;} }`}</style>
-    <OutputPageHeader kind="print">{title} · {images.length} görüntü</OutputPageHeader>
-    <aside className="print-controls"><label>Önbaxış<select aria-label="Önbaxış formatı" disabled={busy} value={previewTarget} onChange={e=>setPreviewTarget(e.target.value as 'paper'|'film')}><option value="paper">Adi printer / PDF</option><option value="film">DICOM plyonka</option></select></label><label>Çap ediləcək səhifələr<select disabled={busy} value={scope} onChange={e=>setScope(e.target.value)}><option value="all">Bütün seçilmiş görüntülər</option><option value="page">Yalnız cari plyonka</option></select></label>
-      <label>Bölgü<select disabled={busy} value={layout} onChange={e=>{setLayout(e.target.value);selectPage(0);}}>{layouts.map(value=><option key={value} value={value}>{value.replace(',',' × ')} · {value.split(',').map(Number).reduce((a,b)=>a*b)} görüntü</option>)}</select></label>
-      <label>DICOM plyonka ölçüsü<select disabled={busy} value={filmSize} onChange={e=>{setFilmSize(e.target.value);setPreviewTarget('film');}}>{['8INX10IN','10INX12IN','11INX14IN','14INX17IN','A4','A3'].map(value=><option key={value}>{value}</option>)}</select></label>
-      <label>Adi printer kağızı<select value={paper} onChange={e=>setPaper(e.target.value)}><option>A4</option><option>A3</option><option>Letter</option></select></label>
-      <label>İstiqamət<select disabled={busy} value={orientation} onChange={e=>setOrientation(e.target.value as 'PORTRAIT'|'LANDSCAPE')}><option value="PORTRAIT">Portret</option><option value="LANDSCAPE">Landşaft</option></select></label>
-      <label>DICOM nüsxə sayı<input disabled={busy} type="number" min="1" max="99" value={copies} onChange={e=>setCopies(Math.max(1,Math.min(99,+e.target.value || 1)))}/></label>
-      <fieldset className="print-edit-scope" disabled={busy||!images.length}><legend>Dəyişiklik tətbiq olunsun</legend>
-        <label><input type="checkbox" checked={editScope==='single'} onChange={()=>setEditScope('single')}/>Tək</label>
-        <label><input type="checkbox" checked={editScope==='all'} onChange={()=>setEditScope('all')}/>Hamısı</label>
+    <OutputPageHeader kind="print">{title} · {images.length} {tr('ui.images_992d4')}</OutputPageHeader>
+    <aside className="print-controls"><label>{tr('ui.preview_3f088')}<select aria-label={tr('ui.preview_format_7207d')} disabled={busy} value={previewTarget} onChange={e=>setPreviewTarget(e.target.value as 'paper'|'film')}><option value="paper">{tr('ui.standard_printer_pdf_dae40')}</option><option value="film">{tr('ui.dicom_film_465a4')}</option></select></label><label>{tr('ui.pages_to_print_44d08')}<select disabled={busy} value={scope} onChange={e=>setScope(e.target.value)}><option value="all">{tr('ui.all_selected_images_bd947')}</option><option value="page">{tr('ui.current_film_only_bf542')}</option></select></label>
+      <label>{tr('ui.layout_915a8')}<select disabled={busy} value={layout} onChange={e=>{setLayout(e.target.value);selectPage(0);}}>{layouts.map(value=><option key={value} value={value}>{value.replace(',',' × ')} · {value.split(',').map(Number).reduce((a,b)=>a*b)} {tr('ui.images_992d4')}</option>)}</select></label>
+      <label>{tr('ui.dicom_film_size_79a53')}<select disabled={busy} value={filmSize} onChange={e=>{setFilmSize(e.target.value);setPreviewTarget('film');}}>{['8INX10IN','10INX12IN','11INX14IN','14INX17IN','A4','A3'].map(value=><option key={value}>{value}</option>)}</select></label>
+      <label>{tr('ui.standard_printer_paper_608cd')}<select value={paper} onChange={e=>setPaper(e.target.value)}><option>A4</option><option>A3</option><option>Letter</option></select></label>
+      <label>{tr('ui.orientation_4eb06')}<select disabled={busy} value={orientation} onChange={e=>setOrientation(e.target.value as 'PORTRAIT'|'LANDSCAPE')}><option value="PORTRAIT">{tr('ui.portrait_0787f')}</option><option value="LANDSCAPE">{tr('ui.landscape_a7bc2')}</option></select></label>
+      <label>{tr('ui.dicom_copy_count_19c6a')}<input disabled={busy} type="number" min="1" max="99" value={copies} onChange={e=>setCopies(Math.max(1,Math.min(99,+e.target.value || 1)))}/></label>
+      <fieldset className="print-edit-scope" disabled={busy||!images.length}><legend>{tr('ui.apply_changes_to_bfebf')}</legend>
+        <label><input type="checkbox" checked={editScope==='single'} onChange={()=>setEditScope('single')}/>{tr('ui.selected_980e6')}</label>
+        <label><input type="checkbox" checked={editScope==='all'} onChange={()=>setEditScope('all')}/>{tr('ui.all_fba8f')}</label>
         <small>{editScope==='single'?`${selected+1}-ci görüntü · dəyişmək üçün xananı seçin`:'Bütün səhifələrdəki görüntülər'}</small>
       </fieldset>
-      <label>Görüntü zoomu <output>{Math.round(currentAdjustment.zoom*100)}%</output><input aria-label="Görüntü zoomu" disabled={busy||!images.length} type="range" min="0.25" max="4" step="0.05" value={currentAdjustment.zoom} onChange={e=>change({zoom:+e.target.value})}/></label>
-      <label>Parlaqlıq <output>{currentAdjustment.brightness}</output><input aria-label="Parlaqlıq" disabled={busy||!images.length} type="range" min="-128" max="128" value={currentAdjustment.brightness} onChange={e=>change({brightness:+e.target.value})}/></label>
-      <label>Kontrast <output>{currentAdjustment.contrast.toFixed(1)}</output><input aria-label="Kontrast" disabled={busy||!images.length} type="range" min="0.2" max="3" step="0.1" value={currentAdjustment.contrast} onChange={e=>change({contrast:+e.target.value})}/></label>
-      <button className="print-settings-toggle" disabled={busy} onClick={()=>change(defaultPrintAdjustment)}>Görünüşü bərpa et</button>
-      <div className="print-pages"><button aria-label="Əvvəlki plyonka" disabled={page===0||busy} onClick={()=>selectPage(page-1)}><ChevronLeft size={18}/></button><span>{page+1} / {pageCount}</span><button aria-label="Sonrakı plyonka" disabled={page+1>=pageCount||busy} onClick={()=>selectPage(page+1)}><ChevronRight size={18}/></button></div>
-      <button className="print-action" disabled={!images.length||busy} onClick={()=>{setPreviewTarget('paper');requestAnimationFrame(()=>requestAnimationFrame(()=>window.print()));}}><Printer size={17}/> Adi printer / PDF</button>
-      <button className="print-action dicom" disabled={!images.length||busy||!printer.host} onClick={()=>void send()}><Radio size={17}/> DICOM printerə göndər</button>
-      {!printer.host&&<p className="output-note">DICOM çap üçün printerin IP, port və AE Title ayarlarını daxil edin.</p>}
-      <a className="print-settings-toggle" href="/printer-settings" target="_blank" rel="noreferrer"><Settings2 size={17}/> Printer ayarları</a>
-      <button className="output-link" disabled={busy} onClick={()=>void loadPrinterSettings().then(value=>{setPrinter(value);setStatus('Printer ayarları yeniləndi');})}>Ayarları yenilə</button>
+      <label>{tr('ui.image_zoom_9689c')}<output>{Math.round(currentAdjustment.zoom*100)}%</output><input aria-label={tr('ui.image_zoom_9689c')} disabled={busy||!images.length} type="range" min="0.25" max="4" step="0.05" value={currentAdjustment.zoom} onChange={e=>change({zoom:+e.target.value})}/></label>
+      <label>{tr('ui.brightness_38dda')}<output>{currentAdjustment.brightness}</output><input aria-label={tr('ui.brightness_38dda')} disabled={busy||!images.length} type="range" min="-128" max="128" value={currentAdjustment.brightness} onChange={e=>change({brightness:+e.target.value})}/></label>
+      <label>{tr('ui.contrast_f857e')}<output>{currentAdjustment.contrast.toFixed(1)}</output><input aria-label={tr('ui.contrast_f857e')} disabled={busy||!images.length} type="range" min="0.2" max="3" step="0.1" value={currentAdjustment.contrast} onChange={e=>change({contrast:+e.target.value})}/></label>
+      <button className="print-settings-toggle" disabled={busy} onClick={()=>change(defaultPrintAdjustment)}>{tr('ui.restore_appearance_7fd7c')}</button>
+      <div className="print-pages"><button aria-label={tr('ui.previous_film_ef644')} disabled={page===0||busy} onClick={()=>selectPage(page-1)}><ChevronLeft size={18}/></button><span>{page+1} / {pageCount}</span><button aria-label={tr('ui.next_film_7c0ce')} disabled={page+1>=pageCount||busy} onClick={()=>selectPage(page+1)}><ChevronRight size={18}/></button></div>
+      <button className="print-action" disabled={!images.length||busy} onClick={()=>{setPreviewTarget('paper');requestAnimationFrame(()=>requestAnimationFrame(()=>window.print()));}}><Printer size={17}/> {tr('ui.standard_printer_pdf_dae40')}</button>
+      <button className="print-action dicom" disabled={!images.length||busy||!printer.host} onClick={()=>void send()}><Radio size={17}/> {tr('ui.send_to_dicom_printer_157c0')}</button>
+      {!printer.host&&<p className="output-note">{tr('ui.enter_the_printer_ip_port_and_ae_title_for_di_662d3')}</p>}
+      <a className="print-settings-toggle" href="/printer-settings" target="_blank" rel="noreferrer"><Settings2 size={17}/> {tr('ui.printer_settings_75fe9')}</a>
+      <button className="output-link" disabled={busy} onClick={()=>void loadPrinterSettings().then(value=>{setPrinter(value);setStatus('Printer ayarları yeniləndi');})}>{tr('ui.refresh_settings_adc23')}</button>
     </aside>
     <div className="print-sheets">{pages.map((frames,index)=><section key={index} data-print-page={index+1} className={`film-preview print-sheet ${index===page?'is-preview':''} ${scope==='page'&&index!==page?'skip-print':''}`} style={{'--film-columns':columns,'--film-rows':rows,aspectRatio:ratio} as React.CSSProperties}>{frames.map((image,i)=>{const number=index*perPage+i;return <button type="button" aria-label={`${number+1}-ci görüntü`} aria-pressed={selected===number} disabled={busy} className={`film-cell ${selected===number?'is-selected':''}`} key={i} onClick={()=>setSelected(number)}>{(index===page||printing)&&<FilmImage image={image} adjustment={adjustments[number]||defaultPrintAdjustment} ratio={cellRatio}/>}<span>{number+1}</span></button>;})}</section>)}</div>
     <footer className="print-status" role="status">{busy&&<i/>}{status}</footer>

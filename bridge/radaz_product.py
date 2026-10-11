@@ -53,7 +53,7 @@ def verify_key(key, public, device, now=None):
     if claims['expiresAt'] <= claims['issuedAt']: raise ValueError('Lisenziya müddəti düzgün deyil')
     if not all(isinstance(claims.get(k),str) and 0 < len(claims[k]) < 250 for k in ('licenseId','activationId','customer')):
         raise ValueError('Lisenziya məlumatı natamamdır')
-    if 'moduleId' in claims and (not isinstance(claims['moduleId'],str) or not re.fullmatch(r'[a-z][a-z0-9-]{1,47}',claims['moduleId']) or claims['moduleId']=='base' or claims.get('entitlement')=='owner'):
+    if 'moduleId' in claims and (not isinstance(claims['moduleId'],str) or not re.fullmatch(r'[a-z][a-z0-9_-]{1,47}',claims['moduleId']) or claims['moduleId']=='base' or claims.get('entitlement')=='owner'):
         raise ValueError('Modul lisenziyası düzgün deyil')
     return claims
 
@@ -71,6 +71,7 @@ class ProductService:
         self.lock = RLock(); self.cached_update = None; self.last_check = 0
         self.device = device or self.machine_id()
         self.trial = TrialStore(self.device, trial_root)
+        self.anatomy_trial = TrialStore(self.device, trial_root, namespace='anatomy_ai')
         self.policy = None; self.policy_check = 0; self.policy_busy = False
         self.policy_network = config_path is None
         try:
@@ -150,6 +151,19 @@ class ProductService:
         except (OSError,ValueError,KeyError,TypeError): pass
         return modules
 
+    def anatomy_status(self, start=False):
+        with self.lock:
+            base = self.status()
+            paid = base.get('kind') == 'owner' or base.get('modules', {}).get('anatomy_ai', {}).get('valid', False)
+            exists = self.anatomy_trial.path.exists() or self.anatomy_trial.read_registry() is not None
+            trial = self.anatomy_trial.status(days=30) if exists or start and base['valid'] else None
+            allowed = bool(base['valid'] and (paid or trial and trial['valid']))
+            status = 'active' if paid and base['valid'] else 'trial' if allowed else 'expired' if trial else 'inactive'
+            return dict(moduleId='anatomy_ai', status=status, allowed=allowed, serverTime=int(time.time()),
+                        expiresAt=base.get('modules', {}).get('anatomy_ai', {}).get('expiresAt') if paid else (trial or {}).get('expiresAt'),
+                        trialStartedAt=(trial or {}).get('startedAt'), trialExpiresAt=(trial or {}).get('expiresAt'),
+                        remainingTrialDays=(trial or {}).get('daysRemaining', 0))
+
     def module_allowed(self, identifier):
         state=self.status()
         return state['valid'] and (state.get('kind')=='owner' or bool(state['modules'].get(identifier,{}).get('valid')))
@@ -195,13 +209,13 @@ class ProductService:
     def billing_catalog(self):
         self.refresh_policy()
         if not ((self.policy or {}).get('billingUrl') or self.config.get('billingUrl')):
-            policy=self.policy or dict(monthlyMinor=1000,baseCurrency='AZN',modules=[],exchange=None)
+            policy=self.policy or dict(monthlyMinor=1000,baseCurrency='AZN',modules=[dict(id='anatomy_ai',name='Anatomik seqmentasiya',monthlyMinor=500,enabled=True)],exchange=None)
             return dict(enabled=False,monthly=policy['monthlyMinor']/100,currency=policy['baseCurrency'],maxMonths=120,modules=policy['modules'],exchange=policy.get('exchange'),currencies=[],message='Satıcı hesabı və ödəniş provayderi hələ qoşulmayıb.')
         return self.billing_call('/v1/catalog')
 
     def checkout(self, months, currency='AZN', module_id=None):
         if type(months) is not int or not 1<=months<=120: raise ValueError('Ay sayı 1–120 olmalıdır.')
-        if currency not in ('AZN','USD') or module_id is not None and (not isinstance(module_id,str) or not re.fullmatch(r'[a-z][a-z0-9-]{1,47}',module_id)): raise ValueError('Valyuta və ya modul düzgün deyil.')
+        if currency not in ('AZN','USD') or module_id is not None and (not isinstance(module_id,str) or not re.fullmatch(r'[a-z][a-z0-9_-]{1,47}',module_id)): raise ValueError('Valyuta və ya modul düzgün deyil.')
         with self.lock:
             result=self.billing_call('/v1/orders',dict(months=months,currency=currency,moduleId=module_id))
             if not re.fullmatch(r'[a-f0-9-]{36}',result.get('id','')) or not re.fullmatch(r'[a-f0-9]{64}',result.get('token','')): raise ValueError('Sifariş cavabı düzgün deyil.')

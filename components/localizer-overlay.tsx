@@ -1,4 +1,6 @@
 'use client';
+import {useTranslation as useUiTranslation,translate as tr} from '@/lib/i18n';
+
 
 import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
@@ -22,6 +24,7 @@ type Props = {
 };
 
 export function LocalizerOverlay({ element, viewport, imageId, otherImages, enabled, onMoveSource, onMoveIntersection, targetPanel, onRotateSource, onRotateStart, onPreviewRotateSource }: Props) {
+  useUiTranslation();
   const [, setRevision] = useState(0);
   const [rotation, setRotation] = useState<{ panel: string; origin: [number, number]; start: number; delta: number } | null>(null);
   const rotationRef = useRef<typeof rotation>(null);
@@ -70,7 +73,7 @@ export function LocalizerOverlay({ element, viewport, imageId, otherImages, enab
     const rect = element.getBoundingClientRect();
     onMoveIntersection?.(viewport.canvasToWorld([event.clientX-rect.left, event.clientY-rect.top]) as Point3);
   };
-  return <svg className="localizer-overlay" aria-label="Lokayzer xətləri" data-world={pivotWorld?.join(',')}>
+  return <svg className="localizer-overlay" aria-label={tr('ui.localizer_lines_1e289')} data-world={pivotWorld?.join(',')}>
     {lines.map(({ panel, a, b }) => {
       const origin: [number, number] = pivot || [(a[0]+b[0])/2, (a[1]+b[1])/2];
       const handles=localizerRotationHandles(a,b,origin,element.clientWidth,element.clientHeight,hover?.panel===panel?hover.point:undefined);
@@ -109,7 +112,7 @@ export function LocalizerOverlay({ element, viewport, imageId, otherImages, enab
     </g>})}
     {pivot && onMoveIntersection && <g className="localizer-center" onClick={event=>event.stopPropagation()} onDoubleClick={event=>event.stopPropagation()}>
       <circle className="localizer-center-dot" cx={pivot[0]} cy={pivot[1]} r={6}/>
-      <circle className="localizer-center-hit" cx={pivot[0]} cy={pivot[1]} r={12} role="button" aria-label="Lokalizer kəsişməsini hərəkət etdir"
+      <circle className="localizer-center-hit" cx={pivot[0]} cy={pivot[1]} r={12} role="button" aria-label={tr('ui.move_localizer_intersection_33e2a')}
         onPointerDown={event => { if(event.button!==0)return; event.currentTarget.setPointerCapture(event.pointerId); moveCenter(event); }}
         onPointerMove={event => { if(event.currentTarget.hasPointerCapture(event.pointerId))moveCenter(event); }}
         onPointerUp={event => { event.preventDefault();event.stopPropagation(); if(event.currentTarget.hasPointerCapture(event.pointerId))event.currentTarget.releasePointerCapture(event.pointerId); }}/>

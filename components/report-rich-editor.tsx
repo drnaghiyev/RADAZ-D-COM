@@ -1,4 +1,6 @@
 'use client';
+import {useTranslation as useUiTranslation,translate as tr} from '@/lib/i18n';
+
 
 import { useEffect, useRef, useState } from 'react';
 import { AlignCenter, AlignLeft, AlignRight, Bold, Italic, List, ListOrdered, Underline } from 'lucide-react';
@@ -7,6 +9,7 @@ import { reportFonts, reportHtmlText, reportSizes, sanitizeReportHtml } from '@/
 type Props = { html: string; onChange: (html: string, plain: string) => void };
 
 export function ReportRichEditor({ html, onChange }: Props) {
+  useUiTranslation();
   const editor = useRef<HTMLDivElement>(null);
   const selection = useRef<Range | null>(null);
   const [font, setFont] = useState('Arial');
@@ -49,11 +52,11 @@ export function ReportRichEditor({ html, onChange }: Props) {
   };
 
   return <div className="rich-editor">
-    <div className="rich-toolbar" role="toolbar" aria-label="Hesabat mətni formatı">
-      <select aria-label="Şrift" value={font} onChange={event => { setFont(event.target.value); apply('fontName', event.target.value); }}>
+    <div className="rich-toolbar" role="toolbar" aria-label={tr('ui.report_text_formatting_9dae9')}>
+      <select aria-label={tr('ui.font_f1828')} value={font} onChange={event => { setFont(event.target.value); apply('fontName', event.target.value); }}>
         {reportFonts.map(item => <option key={item} value={item}>{item}</option>)}
       </select>
-      <select aria-label="Şrift ölçüsü" value={size} onChange={event => { const next = Number(event.target.value); setSize(next); apply('fontSize', String(next)); }}>
+      <select aria-label={tr('ui.font_size_ba51e')} value={size} onChange={event => { const next = Number(event.target.value); setSize(next); apply('fontSize', String(next)); }}>
         {reportSizes.map(item => <option key={item} value={item}>{item} pt</option>)}
       </select>
       <span className="rich-divider"/>
@@ -61,14 +64,14 @@ export function ReportRichEditor({ html, onChange }: Props) {
         { name: 'Altıxətli', command: 'underline', Icon: Underline }] as const).map(({ name, command, Icon }) =>
         <button key={command} type="button" aria-label={name} title={name} onMouseDown={event => event.preventDefault()} onClick={() => apply(command)}><Icon size={16}/></button>)}
       <span className="rich-divider"/>
-      <button type="button" aria-label="Sola düzlə" title="Sola düzlə" onMouseDown={event => event.preventDefault()} onClick={() => apply('justifyLeft')}><AlignLeft size={16}/></button>
-      <button type="button" aria-label="Mərkəzə düzlə" title="Mərkəzə düzlə" onMouseDown={event => event.preventDefault()} onClick={() => apply('justifyCenter')}><AlignCenter size={16}/></button>
-      <button type="button" aria-label="Sağa düzlə" title="Sağa düzlə" onMouseDown={event => event.preventDefault()} onClick={() => apply('justifyRight')}><AlignRight size={16}/></button>
+      <button type="button" aria-label={tr('ui.align_left_0486f')} title={tr('ui.align_left_0486f')} onMouseDown={event => event.preventDefault()} onClick={() => apply('justifyLeft')}><AlignLeft size={16}/></button>
+      <button type="button" aria-label={tr('ui.align_centre_0d1ef')} title={tr('ui.align_centre_0d1ef')} onMouseDown={event => event.preventDefault()} onClick={() => apply('justifyCenter')}><AlignCenter size={16}/></button>
+      <button type="button" aria-label={tr('ui.align_right_1c707')} title={tr('ui.align_right_1c707')} onMouseDown={event => event.preventDefault()} onClick={() => apply('justifyRight')}><AlignRight size={16}/></button>
       <span className="rich-divider"/>
-      <button type="button" aria-label="Maddəli siyahı" title="Maddəli siyahı" onMouseDown={event => event.preventDefault()} onClick={() => apply('insertUnorderedList')}><List size={16}/></button>
-      <button type="button" aria-label="Nömrəli siyahı" title="Nömrəli siyahı" onMouseDown={event => event.preventDefault()} onClick={() => apply('insertOrderedList')}><ListOrdered size={16}/></button>
+      <button type="button" aria-label={tr('ui.bulleted_list_41fb0')} title={tr('ui.bulleted_list_41fb0')} onMouseDown={event => event.preventDefault()} onClick={() => apply('insertUnorderedList')}><List size={16}/></button>
+      <button type="button" aria-label={tr('ui.numbered_list_15308')} title={tr('ui.numbered_list_15308')} onMouseDown={event => event.preventDefault()} onClick={() => apply('insertOrderedList')}><ListOrdered size={16}/></button>
     </div>
-    <div ref={editor} className="rich-content" role="textbox" aria-label="Hesabat mətni" aria-multiline="true" contentEditable suppressContentEditableWarning
+    <div ref={editor} className="rich-content" role="textbox" aria-label={tr('ui.report_text_35f29')} aria-multiline="true" contentEditable suppressContentEditableWarning
       data-placeholder="Müayinə tapıntılarını və nəticəni daxil edin…" onInput={emit}
       onPaste={event => {
         event.preventDefault();

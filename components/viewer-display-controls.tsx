@@ -1,4 +1,6 @@
 'use client';
+import {useTranslation as useUiTranslation,translate as tr} from '@/lib/i18n';
+
 
 import { useEffect, useState } from 'react';
 import { RotateCw, RotateCcw, FlipHorizontal2, FlipVertical2, Undo2, Contrast, ChevronDown } from 'lucide-react';
@@ -9,6 +11,7 @@ import { getViewer, getDefaultWindow } from '@/lib/cornerstone';
 import type { Types } from '@cornerstonejs/core';
 
 export function ViewerDisplayControls({ panel, imageId, defaultImageId, onStatus, onReset }: { panel: string; imageId?: string; defaultImageId?: string; onStatus: (text: string) => void; onReset?: () => void }) {
+  useUiTranslation();
   const [custom, setCustom] = useState(false);
   const [level, setLevel] = useState('50'), [width, setWidth] = useState('400');
   const [negative, setNegative] = useState(false);
@@ -78,23 +81,23 @@ export function ViewerDisplayControls({ panel, imageId, defaultImageId, onStatus
     return () => window.removeEventListener('keydown', key);
   });
   return <>
-    <div className="display-direct-controls" role="group" aria-label="Fırlatma və sıfırlama">
-      <Button variant="ghost" className="header-control reset-display" aria-label="Görüntünü sıfırla" title="Sıfırla: parlaqlıq, kontrast, zoom, mövqe, fırlatma və neqativ · Ctrl+Shift+\\" onClick={() => void action('reset')}><Undo2 size={18}/><span>Sıfırla</span></Button>
-      <Button variant="ghost" className="header-control" aria-label="90° sola fırlat" title="90° sola fırlat · Ctrl+[" onClick={() => void action('left')}><RotateCcw size={18}/></Button>
-      <Button variant="ghost" className="header-control" aria-label="90° sağa fırlat" title="90° sağa fırlat · Ctrl+]" onClick={() => void action('right')}><RotateCw size={18}/></Button>
-      <Button variant="ghost" className="header-control" aria-label="180° fırlat" title="180° fırlat" onClick={() => void action('half')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 12a8 8 0 0 1 16 0M4 7v5h5M20 17v-5h-5"/></svg></Button>
-      <Button variant="ghost" className="header-control" aria-label="Üfüqi çevir" title="Üfüqi çevir · Ctrl+Shift+[" onClick={() => void action('horizontal')}><FlipHorizontal2 size={18}/></Button>
-      <Button variant="ghost" className="header-control" aria-label="Şaquli çevir" title="Şaquli çevir · Ctrl+Shift+]" onClick={() => void action('vertical')}><FlipVertical2 size={18}/></Button>
+    <div className="display-direct-controls" role="group" aria-label={tr('ui.rotation_and_reset_84a66')}>
+      <Button variant="ghost" className="header-control reset-display" aria-label={tr('ui.reset_image_413a0')} title="Sıfırla: parlaqlıq, kontrast, zoom, mövqe, fırlatma və neqativ · Ctrl+Shift+\\" onClick={() => void action('reset')}><Undo2 size={18}/><span>{tr('ui.reset_82c50')}</span></Button>
+      <Button variant="ghost" className="header-control" aria-label={tr('ui.rotate_90_left_b6e73')} title="90° sola fırlat · Ctrl+[" onClick={() => void action('left')}><RotateCcw size={18}/></Button>
+      <Button variant="ghost" className="header-control" aria-label={tr('ui.rotate_90_right_d0b08')} title="90° sağa fırlat · Ctrl+]" onClick={() => void action('right')}><RotateCw size={18}/></Button>
+      <Button variant="ghost" className="header-control" aria-label={tr('ui.rotate_180_d5e67')} title={tr('ui.rotate_180_d5e67')} onClick={() => void action('half')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 12a8 8 0 0 1 16 0M4 7v5h5M20 17v-5h-5"/></svg></Button>
+      <Button variant="ghost" className="header-control" aria-label={tr('ui.flip_horizontally_bdc43')} title="Üfüqi çevir · Ctrl+Shift+[" onClick={() => void action('horizontal')}><FlipHorizontal2 size={18}/></Button>
+      <Button variant="ghost" className="header-control" aria-label={tr('ui.flip_vertically_9b479')} title="Şaquli çevir · Ctrl+Shift+]" onClick={() => void action('vertical')}><FlipVertical2 size={18}/></Button>
     </div>
-    <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className="header-control" aria-label="Pozitiv, neqativ və window"><Contrast size={18}/><span>Pozitiv / neqativ</span><ChevronDown size={13}/></Button></DropdownMenuTrigger><DropdownMenuContent className="header-menu" align="end">
-      <DropdownMenuItem onSelect={() => void action('default')}>DICOM standart pəncərə</DropdownMenuItem>
-      <DropdownMenuItem onSelect={() => void action('full')}>Tam dinamik diapazon</DropdownMenuItem><div className="menu-separator"/>
+    <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className="header-control" aria-label={tr('ui.positive_negative_and_window_3f1e6')}><Contrast size={18}/><span>{tr('ui.positive_negative_3f5da')}</span><ChevronDown size={13}/></Button></DropdownMenuTrigger><DropdownMenuContent className="header-menu" align="end">
+      <DropdownMenuItem onSelect={() => void action('default')}>{tr('ui.dicom_default_window_43881')}</DropdownMenuItem>
+      <DropdownMenuItem onSelect={() => void action('full')}>{tr('ui.full_dynamic_range_58c2c')}</DropdownMenuItem><div className="menu-separator"/>
       {[20,40,80,160,320,640,1280,2560].map(wl => <DropdownMenuItem key={wl} onSelect={() => void action('window', wl, wl * 2)}>WL {wl} / WW {wl * 2}</DropdownMenuItem>)}<div className="menu-separator"/>
-      <DropdownMenuItem onSelect={() => void action('negative')}>{negative ? '✓ ' : ''}Neqativ / pozitiv <kbd>N</kbd></DropdownMenuItem>
-      <DropdownMenuItem onSelect={() => void action('custom')}>Xüsusi pəncərə</DropdownMenuItem>
+      <DropdownMenuItem onSelect={() => void action('negative')}>{negative ? '✓ ' : ''}{tr('ui.negative_positive_cc72e')}<kbd>N</kbd></DropdownMenuItem>
+      <DropdownMenuItem onSelect={() => void action('custom')}>{tr('ui.custom_window_327c0')}</DropdownMenuItem>
     </DropdownMenuContent></DropdownMenu>
-    <Dialog open={custom} onOpenChange={setCustom}><DialogContent className="output-dialog"><DialogHeader><DialogTitle>Xüsusi window</DialogTitle><DialogDescription>Aktiv görüntü üçün parlaqlıq və kontrast.</DialogDescription></DialogHeader>
-      <form onSubmit={event => { event.preventDefault(); if (Number(width) > 0 && level.trim()) { void action('window', Number(level), Number(width)); setCustom(false); } }}><div className="output-fields"><label>Window level (WL)<input required type="number" step="any" value={level} onChange={e => setLevel(e.target.value)}/></label><label>Window width (WW)<input required type="number" min="0.001" step="any" value={width} onChange={e => setWidth(e.target.value)}/></label></div><button className="output-primary" type="submit">Tətbiq et</button></form>
+    <Dialog open={custom} onOpenChange={setCustom}><DialogContent className="output-dialog"><DialogHeader><DialogTitle>{tr('ui.custom_window_15f99')}</DialogTitle><DialogDescription>{tr('ui.brightness_and_contrast_for_the_active_image_a5326')}</DialogDescription></DialogHeader>
+      <form onSubmit={event => { event.preventDefault(); if (Number(width) > 0 && level.trim()) { void action('window', Number(level), Number(width)); setCustom(false); } }}><div className="output-fields"><label>{tr('ui.window_level_wl_02ffc')}<input required type="number" step="any" value={level} onChange={e => setLevel(e.target.value)}/></label><label>{tr('ui.window_width_ww_ff819')}<input required type="number" min="0.001" step="any" value={width} onChange={e => setWidth(e.target.value)}/></label></div><button className="output-primary" type="submit">{tr('ui.apply_0c1bd')}</button></form>
     </DialogContent></Dialog>
   </>;
 }

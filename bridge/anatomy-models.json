@@ -1,0 +1,12 @@
+{
+ "schema":1,
+ "source":"https://github.com/wasserth/TotalSegmentator#subtasks",
+ "models":[
+  {"id":"total","provider":"totalsegmentator","modality":"CT","license":"Apache-2.0","fast":true,"spacingMm":3},
+  {"id":"total_mr","provider":"totalsegmentator","modality":"MR","license":"Apache-2.0","fast":true,"spacingMm":3},
+  {"id":"body","provider":"totalsegmentator","modality":"CT","license":"Apache-2.0","fast":false},
+  {"id":"lung_vessels","provider":"totalsegmentator","modality":"CT","license":"Apache-2.0","fast":false},
+  {"id":"body_mr","provider":"totalsegmentator","modality":"MR","license":"Apache-2.0","fast":false},
+  {"id":"vertebrae_mr","provider":"totalsegmentator","modality":"MR","license":"Apache-2.0","fast":false}
+ ]
+}

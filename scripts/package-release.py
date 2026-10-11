@@ -6,6 +6,8 @@ import zipfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parent.parent
 config=json.loads((ROOT/'public/product.json').read_text(encoding='utf-8-sig'))
+if config.get('channel') == 'local-anatomy':
+ raise SystemExit('Private Anatomy AI development must not be packaged as a public release.')
 version=config['version']
 if not re.fullmatch(r'\d+\.\d+\.\d+',version): raise SystemExit('Version must be X.Y.Z')
 if not (ROOT/'dist/server/index.js').is_file():raise SystemExit('Build the application first.')
@@ -22,6 +24,7 @@ explicit=['package.json','pnpm-lock.yaml','pnpm-workspace.yaml','README.md','DIS
 explicit.extend(['bridge/radaz_removable.py','bridge/radaz_windows.py'])
 explicit.append('scripts/release-health.mjs')
 explicit.extend(['scripts/local-ai-request.mjs', 'bridge/radaz_ai.py'])
+explicit.extend(['scripts/local-anatomy.mjs','scripts/local-anatomy-volume.mjs','scripts/anatomy-access.mjs','bridge/anatomy-models.json','bridge/anatomy_providers.py','bridge/radaz_anatomy.py','bridge/radaz_anatomy_volume.py'])
 files={p:ROOT/p for p in explicit}
 for folder in ['dist/client','dist/server','dist/runtime','dist/node_modules','bridge/wheels']:
  for p in (ROOT/folder).rglob('*'):

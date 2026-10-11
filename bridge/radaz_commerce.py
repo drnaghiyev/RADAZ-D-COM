@@ -35,6 +35,6 @@ def verify_policy(envelope, public):
     if not isinstance(modules,list) or len(modules)>50: raise ValueError('Invalid modules')
     for item in modules:
         identifier=item.get('id','')
-        if not re.fullmatch(r'[a-z][a-z0-9-]{1,47}',identifier) or identifier=='base' or identifier in ids or not isinstance(item.get('name'),str) or not 1<=len(item['name'])<=100 or type(item.get('monthlyMinor')) is not int or not 1<=item['monthlyMinor']<=100000000 or type(item.get('enabled')) is not bool: raise ValueError('Invalid module')
+        if not re.fullmatch(r'[a-z][a-z0-9_-]{1,47}',identifier) or identifier=='base' or identifier in ids or not isinstance(item.get('name'),str) or not 1<=len(item['name'])<=100 or type(item.get('monthlyMinor')) is not int or not 1<=item['monthlyMinor']<=100000000 or type(item.get('enabled')) is not bool: raise ValueError('Invalid module')
         ids.add(identifier)
     return data

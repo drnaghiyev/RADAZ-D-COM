@@ -24,6 +24,23 @@ class Licenses(unittest.TestCase):
     @classmethod
     def cli(cls,*args,check=True):
         return subprocess.run(['node',str(ROOT/'scripts/license-admin.mjs'),*args,'--dir',str(cls.admin)],capture_output=True,text=True,check=check)
+
+    def test_anatomy_trial_is_explicit_separate_and_never_restarts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);config=root/'product.json';config.write_text(json.dumps({'licenseRequired':True,'trialDays':30}))
+            service=ProductService(root,config_path=config,public_path=self.public,device=self.device,trial_root=root/'trial')
+            service.activate(self.key)
+            self.assertEqual(service.anatomy_status()['status'],'inactive')
+            self.assertFalse(service.anatomy_trial.path.exists())
+            first=service.anatomy_status(start=True)
+            self.assertTrue(first['allowed']);self.assertEqual(first['remainingTrialDays'],30)
+            self.assertEqual(first['trialExpiresAt']-first['trialStartedAt'],30*86400)
+            self.assertEqual(service.anatomy_status(start=True)['trialExpiresAt'],first['trialExpiresAt'])
+            self.assertNotEqual(service.trial.path,service.anatomy_trial.path)
+            service.anatomy_trial.write(dict(v=1,deviceId=self.device,startedAt=int(time.time())-31*86400,lastSeen=int(time.time())))
+            self.assertFalse(service.anatomy_status(start=True)['allowed'])
+            self.assertTrue(service.status()['valid'])
+
     def test_valid_signature(self):
         self.assertEqual(verify_key(self.key,self.pub,self.device)['customer'],'Synthetic Test')
     def signed(self, claims, prefix='RADAZ1'):

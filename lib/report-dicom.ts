@@ -80,7 +80,7 @@ export function readReportMedia(sources: {url:string;tags:Record<string,string>}
 }
 
 /** Render the diagnostic pixel matrix only; patient tags are never painted into the image. */
-export async function renderReportImage(image: ReportImage, windowMode: 'metadata' | 'lung' | 'soft' | 'bone'): Promise<string> {
+export async function renderReportImage(image: ReportImage, windowMode: 'metadata' | 'lung' | 'soft' | 'bone', customWindow?:{ww:number;wl:number}): Promise<string> {
   if (!image.supported) throw new Error('Bu kəsitin piksel formatı analiz üçün dəstəklənmir');
   const response = image.sourceUrl ? await fetch(image.sourceUrl,{cache:'no-store'}) : null;
   if (response && !response.ok) throw new Error('Mənbə disk çıxarılıb və ya görüntü oxunmadı');
@@ -96,9 +96,9 @@ export async function renderReportImage(image: ReportImage, windowMode: 'metadat
     return Number.isFinite(value) && ds.string(tag) ? value : fallback;
   };
   const windows = { lung: [-600, 1500], soft: [50, 400], bone: [300, 1800] };
-  const [wl, ww] = windowMode === 'metadata'
+  const [wl, ww] = customWindow ? [customWindow.wl,customWindow.ww] : windowMode === 'metadata'
     ? [windowValue('x00281050', 50), windowValue('x00281051', 400)] : windows[windowMode];
-  if (!pixel || !Number.isFinite(ww) || ww <= 0) throw new Error('DICOM pəncərələməsi oxunmadı');
+  if (!pixel || !Number.isFinite(ww) || !Number.isFinite(wl) || ww <= 0) throw new Error('DICOM pəncərələməsi oxunmadı');
   const scale = Math.min(1, 1600 / Math.max(image.columns, image.rows));
   const width = Math.max(1, Math.round(image.columns * scale)), height = Math.max(1, Math.round(image.rows * scale));
   const canvas = document.createElement('canvas');

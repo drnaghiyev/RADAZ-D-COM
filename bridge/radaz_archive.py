@@ -341,6 +341,8 @@ def handler_for(archive, removable=None):
                     self.respond(product.billing_catalog()); return
                 if parsed.path == '/billing/order':
                     self.respond(product.order_status(parse_qs(parsed.query).get('id',[''])[0])); return
+                if parsed.path == '/anatomy-license':
+                    self.respond(product.anatomy_status()); return
                 if parsed.path == '/updates':
                     self.respond(product.updates(parse_qs(parsed.query).get('force') == ['1'])); return
                 if parsed.path == '/printer-settings' and not product.allowed():
@@ -460,6 +462,10 @@ def handler_for(archive, removable=None):
                     else:
                         removable.unwatch(client); self.respond({'ok': True})
                     return
+                if self.path == '/anatomy-license/trial':
+                    if self.headers.get_content_type() != 'application/json':
+                        self.respond({'error':'JSON tələb olunur'},415); return
+                    self.respond(product.anatomy_status(start=True)); return
                 if self.path == '/billing/checkout':
                     if self.headers.get_content_type() != 'application/json':
                         self.respond({'error':'JSON tələb olunur'},415); return

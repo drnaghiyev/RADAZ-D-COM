@@ -1,0 +1,162 @@
+RADAZ platform extension — local development, 2026-10-11
+
+Baseline: public 0.2.29, commit 7ea1dc7. Work branch: codex/anatomy-platform-local.
+Canonical source: C:\Users\drnag\Documents\GitHub\RADAZ-D-COM.
+Do not publish experimental anatomy or change the running clinical installation.
+
+Architecture audited:
+- React 19 / TypeScript, Next-compatible routes built by Vinext/Vite.
+- Cornerstone 5.10.7 owns image rendering and shared volumes. Its vtk.js 36.4.1
+  instance provides volume ray casting, lights, shading and GPU transfer functions.
+- lib/volume-geometry.ts validates physical DICOM volume geometry. MPR and 3D
+  reuse lib/cornerstone.ts. Keep those engines and shared resources.
+- Python local archive/PACS and Node gateway. No existing FastAPI/Postgres/Redis;
+  adding them would duplicate working local services unnecessarily.
+- SQLite seller licensing service, RSA signatures, Epoint hosted checkout and
+  signature-verified callbacks already exist. Extend rather than replace them.
+- Existing private TotalSegmentator volume worker and loopback-only job service
+  are in the preserved anatomy source. Brain prototype is unfinished.
+- Existing UI has no global localization, and contains Azerbaijani literals.
+- Electron is an optional shell around the same web viewer; preserve it.
+
+Implementation sequence:
+1. Localization service, persisted AZ/RU/EN selection and semantic keys. Translate
+   routes incrementally; audit coverage rather than claiming partial coverage is full.
+2. Extend the existing renderer with editable transfer functions and physical
+   six-plane cropping. Keep CT HU and MR relative intensity distinct.
+3. Bring private anatomy components into the canonical development branch with
+   explicit release exclusion. Registry, modality checks, immutable results,
+   structure controls, MPR and surfaces, correction history and exports.
+4. Extend existing backend entitlements for explicit seven-day activation,
+   subscriptions and verified payments. No production price/credentials invented.
+5. Geometry/unit/browser regression tests, typecheck and actual build. Record
+   unverified inference/clinical validation and missing deployment configuration.
+
+Applied local implementation (2026-10-11)
+
+This is a substantial local development phase, NOT completion of the entire
+master prompt and NOT a production/clinical certification. Public 0.2.29 Setup
+and the running clinical installation were not replaced. No GitHub push or
+release was made. Source changes are in codex/anatomy-platform-local.
+
+1. Localization
+- lib/i18n.ts, lib/locales/{messages,ui,anatomy}.ts and language-settings.tsx
+  provide typed stable keys, AZ/RU/EN, persisted selection and window sync.
+- 730 keys cover the new anatomy/3D controls and many existing route controls.
+  Tool names switch at render time, not once at module initialization.
+- All anatomical classes in the six-model registry have AZ/RU/EN names. The
+  intentionally excluded kidney-cyst pathology classes are not offered.
+- Patient metadata and report text are not machine-translated or rewritten.
+- Coverage is NOT complete: legacy dynamic status/error strings, some old atlas
+  descriptions and preset descriptions remain. Registered-key completeness is
+  tested; that test is not a claim of complete UI translation.
+
+2. Existing Cornerstone/vtk renderer extension
+- lib/transfer-function.ts and transfer-function-editor.tsx: draggable curve,
+  keyboard and numeric editing, opacity/colour points, local save/load, bounded
+  validated JSON import/export; CT HU and MR relative signal stay distinct.
+- Six crop planes use physical DICOM LPS coordinates and voxel faces.
+- anatomy-surface.worker.ts extracts up to 12 visible structures off the UI
+  thread, explicitly transforms vtk.js points/normals to physical LPS, and
+  transfers typed buffers. Existing renderer/volume resources are reused.
+- Per-label coloured surfaces, source-volume toggle, selected-structure camera
+  focus, and binary PLY export with LPS millimetres are implemented.
+- Workers, actors, mappers, arrays and clipping planes are released on cleanup.
+
+3. Anatomy AI and editing
+- Canonical source includes the previously private working CT/MR and DX/CR
+  modules. The unfinished brain-substructure prototype was not imported.
+- bridge/anatomy-models.json explicitly declares provider, modality, licence and
+  supported precision. Only locally installed verified models are selectable.
+- total (CT) and total_mr (MR), 3 mm fast models, are installed on this computer.
+  Body/vessel/spine tasks remain unavailable until their weights are provisioned.
+- Job API checks local host/origin, access, modality, geometry, bounded uploads,
+  duplicate slices, one active job, cancellation and temporary retention.
+- Raw results remain immutable. Physical-plane brush/eraser changes live in a
+  sparse correction layer, with bounded undo/redo. UI has structure categories,
+  search, show/hide/isolate, colours, opacity, contours and focus.
+- Click labels come from the actual mask. No anatomical label is invented for
+  unlabelled pixels. Results explicitly remain AI results awaiting review.
+- Parent results are shared with detached MPR/3D windows without duplicating the
+  original pixel buffers. All three MPR planes render the same physical mask.
+- .radazseg export/import contains geometry, model labels, source fingerprint,
+  original labels and separate corrections; checksums and exact source matching
+  reject corrupt files and masks belonging to another source volume.
+- anatomy_providers.py supplies the default TotalSegmentator provider and an
+  optional MONAI TorchScript sliding-window adapter. The latter requires an
+  owner-reviewed registry entry, checksum-listed model file, explicit native
+  orientation/spacing/normalization/label/ROI contract and optional MONAI runtime.
+  It rejects incompatible input rather than guessing preprocessing. No MONAI
+  clinical model is installed or claimed validated. MONAI Label is not required.
+  API reference: https://docs.monai.io/en/1.4.0/inferers.html
+  TotalSegmentator: https://github.com/wasserth/TotalSegmentator
+
+4. Independent module entitlement
+- billing/anatomy-entitlements.mjs uses existing seller SQLite and RSA base
+  credentials. anatomy_ai has its own status, audit, seven-day trial, expiry,
+  suspension and paid entitlement. Trial starts only on an explicit request;
+  restarting it cannot extend it. Server time is authoritative.
+- Existing verified Epoint/payment callback architecture is reused. Configured
+  per-month price and selected month count determine the charge; 12 months is
+  supported. Anatomy renewal preserves remaining paid time. Duplicate activation
+  cannot extend time. Base-viewer orders are not modified by this entitlement.
+- Billing routes: GET /v1/anatomy/license, POST /v1/anatomy/trial/start and
+  POST /v1/anatomy/authorize; base licence goes in the Bearer header.
+- Gateway configuration: RADAZ_ANATOMY_LICENSE_URL must be an HTTPS origin;
+  RADAZ_ANATOMY_LICENSE_KEY_FILE is a backend-only JSON file with the base key.
+  Missing production configuration fails closed. Inference/result access is
+  checked server-side. Local cancellation remains possible after expiry.
+- local-anatomy is an explicit private research channel, not a free-trial trick.
+  It uses no payment or trial counter. Both public package builders reject this
+  channel before overwriting any public release artifact.
+- Settings show real entitlement status and the explicit trial action where
+  supported. Prices, production credentials and provider transactions were not
+  invented. The existing commercial module catalogue must be configured with
+  id anatomy_ai and a real approved price before selling this module.
+
+Verification and evidence
+- TypeScript --noEmit and Vinext production build passed.
+- node --test tests/*.test.mjs: 90 tests passed, including existing import,
+  windowing, geometry, reporting, archive/viewer, billing and update regressions.
+- Python geometry: 3 tests; optional-provider contract: 2 tests passed.
+- tests/anatomy-platform-browser.mjs: synthetic DICOM tests cover editing/history,
+  MPR overlay sharing, 3D surfaces, exact oblique LPS worker bounds, PLY export,
+  transfer/crop controls, all three language selections and persistence.
+- tests/anatomy-inference-browser.mjs also passed against the final local build:
+  real CT/MR DICOM upload -> job API -> private Python worker -> actual overlays
+  -> structure focus -> isolated 3D liver. CT contained 40 present structures,
+  MR 22. Only archive routing was mocked to supply public reference DICOM; AI
+  requests/results were real. Browser errors: zero for both. No patient studies.
+- Final web build: 0.2.29 / local-anatomy / 0e0d7f670dee.
+- Real offline worker checks used only official public CT/MR samples. Latest
+  run: CT 30.8 s, median reference Dice 0.9998; MR 19.2 s, median 0.9018.
+  These are tiny regression samples, NOT general accuracy or clinical validation.
+- New core components/libraries pass targeted lint. Full legacy app lint is not
+  clean. A per-rule/file comparison against HEAD was used to remove added errors;
+  inherited ref/effect/any violations remain and are not claimed fixed.
+- Evidence is under outputs/anatomy-platform, anatomy-regression-tests.log,
+  anatomy-lint*.log/json, anatomy-inference-validation.log and anatomy-volume.
+- Live local preview uses http://localhost:5297, with a separate worker on 5298.
+  The existing app on 5173 and archive on 8766 were not stopped or migrated.
+
+Explicit remaining work before the entire master prompt can be called complete
+- Finish all legacy dynamic UI/atlas translations and human medical-language QA.
+- Validate clinical acquisition protocols, accuracy, false labels and unsupported
+  series on an approved representative dataset. A 3 mm whole-body model is NOT
+  a validated fine-brain segmentation model or a universal MRI model.
+- Provision and validate any additional/MONAI models; restricted models require
+  their own permission. No restricted weights are redistributed here.
+- DICOM SEG and NIfTI interoperability exports/imports, advanced mesh smoothing,
+  arbitrary clipping planes, label picking directly on 3D surfaces and a fuller
+  cross-window correction/history synchronization are not implemented.
+- Edits made in a detached window stay in that window; they do not flow back to
+  the parent. Parent results can be refreshed into detached views. Export edited
+  maps before closing a window if those corrections are needed later.
+- Persisted job resume/cross-job cache, multi-user remote GPU deployment and crash
+  recovery/cleanup of orphaned job folders are not implemented. Current jobs are
+  local, bounded and ephemeral; active in-process jobs expire after 30 minutes.
+- Production HTTPS billing deployment, actual Epoint credentials and end-to-end
+  bank callback verification, owner suspension UI, organisation plans and a
+  finished commercial activation/purchase UX still require configuration/work.
+- No production payment, installer release, public update or clinical readiness
+  is claimed by this local phase.

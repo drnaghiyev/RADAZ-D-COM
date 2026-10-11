@@ -1,4 +1,6 @@
 'use client';
+import {useTranslation as useUiTranslation,translate as tr} from '@/lib/i18n';
+
 import { OutputPageHeader } from '@/components/output-page-header';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Disc3, Download, RefreshCw } from 'lucide-react';
@@ -10,6 +12,7 @@ import { parseDicomFile } from '@/lib/dicom-file';
 type Drive = {id:string;name:string;volumes:string[];canWrite:boolean;blank:boolean;mediaSupported:boolean;freeBytes:number};
 type MediaJob = {id:string;state:string;count:number;size:number;message:string;iso?:boolean};
 export default function MediaPage() {
+  useUiTranslation();
   useEffect(() => { document.title = 'RADAZ · CD / DVD'; }, []);
   const [study,setStudy] = useState<ArchiveStudy|null>(null), [files,setFiles] = useState<File[]>([]);
   const [drives,setDrives] = useState<Drive[]>([]),[recorder,setRecorder] = useState('');
@@ -64,14 +67,14 @@ export default function MediaPage() {
     }catch(error){setStatus(String(error));}finally{setBusy(false);}
   };
   const drive=drives.find(item=>item.id===recorder);
-  return <main className="media-shell media-output-shell"><OutputPageHeader kind="media"/><section><Disc3 size={48}/><h1>DICOM diskini hazırla və yaz</h1><p>{study?<><strong>{study.patient}</strong><br/>{study.description} · {files.length} görüntü</>:'Müayinə seçilməyib'}</p><p>DICOMDIR, DICOM görüntüləri və internet olmadan açılan START.html viewer-i eyni diskə yazılır.</p>
-    <div className="disc-device"><label>RADAZ kompüterindəki qurğu<select aria-label="CD/DVD qurğusu" value={recorder} onChange={e=>setRecorder(e.target.value)}>{!drives.length&&<option value="">Qurğu tapılmadı</option>}{drives.map(item=><option key={item.id} value={item.id}>{item.volumes.join(', ')} {item.name} {item.canWrite?'':'· yalnız oxuyur'}</option>)}</select></label><button aria-label="Qurğuları yenilə" disabled={busy||running} onClick={()=>void refresh()}><RefreshCw size={17}/></button></div>
+  return <main className="media-shell media-output-shell"><OutputPageHeader kind="media"/><section><Disc3 size={48}/><h1>{tr('ui.prepare_and_burn_dicom_disc_78d3c')}</h1><p>{study?<><strong>{study.patient}</strong><br/>{study.description} · {files.length} {tr('ui.images_992d4')}</>:'Müayinə seçilməyib'}</p><p>{tr('ui.dicomdir_dicom_images_and_the_offline_start_h_64400')}</p>
+    <div className="disc-device"><label>{tr('ui.drive_on_the_radaz_computer_ae629')}<select aria-label={tr('ui.cd_dvd_drive_0f769')} value={recorder} onChange={e=>setRecorder(e.target.value)}>{!drives.length&&<option value="">{tr('ui.no_drive_found_fbf81')}</option>}{drives.map(item=><option key={item.id} value={item.id}>{item.volumes.join(', ')} {item.name} {item.canWrite?'':'· yalnız oxuyur'}</option>)}</select></label><button aria-label={tr('ui.refresh_drives_9de73')} disabled={busy||running} onClick={()=>void refresh()}><RefreshCw size={17}/></button></div>
     <p className="disc-state">{!drive?'CD/DVD writer qoşun.':!drive.canWrite?'Bu qurğu yalnız oxuyur. Birbaşa yazmaq üçün CD/DVD writer qoşun.':!drive.mediaSupported||!drive.blank?'Uyğun boş CD/DVD daxil edin. Mövcud diskdəki məlumatlar silinmir.':`Boş disk hazırdır · ${(drive.freeBytes/1024/1024).toFixed(0)} MB boş yer`}</p>
-    <button disabled={!files.length||busy||running||!drive?.canWrite||!drive.blank||!drive.mediaSupported} onClick={()=>void start('burn')}><Disc3 size={19}/> Boş CD / DVD-yə yaz</button>
-    <div className="media-secondary"><button disabled={!files.length||busy||running} onClick={()=>void start('iso')}>ISO yarat</button><button disabled={!files.length||busy||running} onClick={()=>void start('package')}>ZIP paketi hazırla</button></div>
-    {job&&<div className="output-actions"><button className="output-primary" disabled={busy||running} onClick={()=>void download('zip')}><Download size={16}/> DICOMDIR + viewer ZIP</button>{job.iso&&<button className="output-primary" disabled={busy||running} onClick={()=>void download('iso')}>ISO-nu yüklə</button>}</div>}
-    {downloadFile&&<a className="output-primary" href={downloadFile.url} download={downloadFile.name}>{downloadFile.name} · Faylı yüklə</a>}
-    <p role="status" className="output-status">{status}</p>{running&&<progress aria-label="Disk işi davam edir"/>}
-    <small>İş lokal kompüterdə yerinə yetirilir. Yazma başlayandan sonra disk bağlanana qədər qurğunu ayırmayın.</small>
+    <button disabled={!files.length||busy||running||!drive?.canWrite||!drive.blank||!drive.mediaSupported} onClick={()=>void start('burn')}><Disc3 size={19}/> {tr('ui.burn_to_blank_cd_dvd_ccce0')}</button>
+    <div className="media-secondary"><button disabled={!files.length||busy||running} onClick={()=>void start('iso')}>{tr('ui.create_iso_e0c1e')}</button><button disabled={!files.length||busy||running} onClick={()=>void start('package')}>{tr('ui.create_zip_package_40d58')}</button></div>
+    {job&&<div className="output-actions"><button className="output-primary" disabled={busy||running} onClick={()=>void download('zip')}><Download size={16}/> {tr('ui.dicomdir_viewer_zip_ac6c0')}</button>{job.iso&&<button className="output-primary" disabled={busy||running} onClick={()=>void download('iso')}>{tr('ui.download_iso_89805')}</button>}</div>}
+    {downloadFile&&<a className="output-primary" href={downloadFile.url} download={downloadFile.name}>{downloadFile.name} {tr('ui._download_file_eb257')}</a>}
+    <p role="status" className="output-status">{status}</p>{running&&<progress aria-label={tr('ui.disc_operation_in_progress_60006')}/>}
+    <small>{tr('ui.the_operation_runs_locally_do_not_disconnect_e0576')}</small>
   </section><footer>{busy?'Paket hazırlanır…':running?'Disk işi davam edir…':'RADAZ lokal media xidməti'}</footer></main>;
 }

@@ -1,4 +1,6 @@
 'use client';
+import {useTranslation as useUiTranslation,translate as tr} from '@/lib/i18n';
+
 
 import { useEffect, useRef, useState } from 'react';
 
@@ -17,7 +19,8 @@ export function useStudySelection(uids: string[]) {
 }
 
 function SelectAll({ checked, mixed, disabled, onChange }: { checked: boolean; mixed: boolean; disabled: boolean; onChange: (on: boolean) => void }) {
+  useUiTranslation();
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => { if (ref.current) ref.current.indeterminate = mixed; }, [mixed]);
-  return <input ref={ref} type="checkbox" aria-label="Hamısını seç" title="Görünən müayinələrin hamısını seç" checked={checked} disabled={disabled} onChange={event => onChange(event.currentTarget.checked)}/>;
+  return <input ref={ref} type="checkbox" aria-label={tr('ui.select_all_a334a')} title={tr('ui.select_all_visible_studies_24bf4')} checked={checked} disabled={disabled} onChange={event => onChange(event.currentTarget.checked)}/>;
 }

@@ -1,7 +1,10 @@
 'use client';
+import {useTranslation as useUiTranslation,translate as tr} from '@/lib/i18n';
+
 import {useEffect,useRef,useState} from 'react';
 import {activatedBuild,reloadBuild,reportUpdateDiagnostic,type InstallationState as State} from '@/lib/update-activation';
 export function DesktopUpdatePanel({fallback,onCheck,busy}:{fallback:React.ReactNode;onCheck:()=>void;busy:boolean}){
+  useUiTranslation();
  const [state,setState]=useState<State|null>(null),[starting,setStarting]=useState(false),[error,setError]=useState('');
  const managed=useRef(false),restartInProgress=useRef(false);
  const [applying,setApplying]=useState(false);
@@ -40,18 +43,18 @@ export function DesktopUpdatePanel({fallback,onCheck,busy}:{fallback:React.React
  return <>
   {state?.managed?<div className="desktop-update-progress" data-state={state.state}>
    <p role={state.state==='error'?'alert':'status'}>{state.message}</p>
-   {(active||state.state==='ready')&&<><progress aria-label="Yenilənmə prosesi" max={total||1} value={total?Math.min(done,total):undefined}/>
+   {(active||state.state==='ready')&&<><progress aria-label={tr('ui.update_progress_48685')} max={total||1} value={total?Math.min(done,total):undefined}/>
     <span>{total?`${Math.round(done/total*100)}%`:'Hazırlanır…'}{state.progress?.unit==='bayt'&&total>0?` · ${(done/1048576).toFixed(1)} / ${(total/1048576).toFixed(1)} MB`:''}</span></>}
    {success&&<p className="update-confirmation">{state.state==='ready'?'Endirmə tamamlandı. Yeni versiyanı tətbiq etmək üçün yenidən başladın.':'RADAZ yenilənmə vəziyyəti təsdiqləndi.'}</p>}
   </div>:fallback}
   {error&&<p role="alert">{error}</p>}
-  <p className="product-note">“Yenilə” yeni versiyanı avtomatik yükləyib hazırlayır. Hazır olduqda “Proqramı yenidən aç” düyməsini basın. Lokal arxiv saxlanılır.</p>
+  <p className="product-note">{tr('ui.update_downloads_and_stages_the_new_version_w_739a3')}</p>
   {state?.managed&&['ready','deferred'].includes(state.state)&&<div className="update-approval">
-   <p>İşinizi bitirdikdən sonra proqramı yenidən açın.</p>
+   <p>{tr('ui.reopen_the_application_after_finishing_your_w_1ed08')}</p>
    <button disabled={applying||starting} onClick={()=>void apply()}>{applying?'RADAZ yenidən başlayır…':'Proqramı yenidən aç'}</button>
   </div>}
   {!(state?.managed&&['ready','deferred'].includes(state.state))&&<button disabled={starting||active||busy||applying} onClick={()=>void start(state?.state==='available'?state.version:undefined)}>
-   {starting||active?'Hazırlanır…':state?.state==='available'?'Yenilə':'Yeniləmələri yoxla'}
+   {starting||active?'Hazırlanır…':state?.state==='available'?tr('ui.refresh_da261'):tr('ui.check_for_updates_adc6c')}
   </button>}
  </>;
 }

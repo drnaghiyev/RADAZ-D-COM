@@ -1,4 +1,6 @@
 'use client';
+import {useTranslation as useUiTranslation,translate as tr} from '@/lib/i18n';
+
 
 import { createContext, useContext, useEffect, useRef, useState, type PointerEvent, type TableHTMLAttributes, type ThHTMLAttributes } from 'react';
 
@@ -48,11 +50,12 @@ export function ResizableTable({ storageKey, children, ...props }: TableHTMLAttr
 }
 
 export function ResizableHeader({ column, label, minimum = 40, children, ...props }: ThHTMLAttributes<HTMLTableCellElement> & { column: string; label?: string; minimum?: number }) {
+  useUiTranslation();
   const context = useContext(Columns);
   return <th {...props} data-column={column} data-minimum={minimum} style={{ ...props.style, ...(context?.widths[column] ? { width: context.widths[column] } : {}) }}>
     {children}
     {context && <span className="column-resizer" role="separator" aria-orientation="vertical" aria-label={`${label || column} sütununun eni`} aria-valuemin={minimum} aria-valuemax={900} aria-valuenow={context.widths[column]} tabIndex={0}
-      title="Sütunun enini dəyişmək üçün sürükləyin. İki klik: bütün enləri sıfırla."
+      title={tr('ui.drag_to_resize_the_column_double_click_to_res_b5848')}
       onClick={event => event.stopPropagation()} onDoubleClick={event => { event.stopPropagation(); context.reset(); }}
       onPointerDown={event => context.start(column, event)} onPointerMove={context.move} onPointerUp={context.finish} onPointerCancel={context.finish} onLostPointerCapture={context.finish}
       onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); event.stopPropagation(); context.adjust(column, (event.key === 'ArrowRight' ? 1 : -1) * (event.shiftKey ? 25 : 5)); } if (event.key === 'Home') { event.preventDefault(); context.reset(); } }}/>}</th>;

@@ -1,4 +1,6 @@
 'use client';
+import {useTranslation as useUiTranslation,translate as tr} from '@/lib/i18n';
+
 import {useEffect,useRef,useState,type RefObject} from 'react';
 import type * as Core from '@cornerstonejs/core';
 import {getViewer} from '@/lib/cornerstone';
@@ -11,6 +13,7 @@ type Props={container:RefObject<HTMLElement|null>;element:HTMLDivElement|null;vi
 
 /** Secondary gestures also work over SVG drawings, which sit above Cornerstone's canvas. */
 export function ViewportMouseControls(props:Props){
+  useUiTranslation();
  const current=useRef(props);current.current=props;
  const [menu,setMenu]=useState<{x:number;y:number;target:Target|null}|null>(null);
  const viewer=useRef<Awaited<ReturnType<typeof getViewer>>|null>(null);
@@ -50,7 +53,7 @@ export function ViewportMouseControls(props:Props){
    event.preventDefault();event.stopPropagation();
    if(Math.hypot(event.clientX-gesture.x,event.clientY-gesture.y)>4)gesture.moved=true;
    if(!gesture.moved)return;
-   root.dataset.measurementHover='false';root.dataset.mouseGesture=gesture.button===1?'pan':'zoom';
+   root.dataset.measurementHover='false';root.dataset.mouseGesture=gesture.button===1?'pan':tr('ui.zoom_d21bb');
    if(gesture.button===2){
     viewport.setCamera({parallelScale:Math.max(.00001,Math.min(1e8,gesture.scale*Math.exp((event.clientY-gesture.y)*.008)))});
    }else{
@@ -102,11 +105,11 @@ export function ViewportMouseControls(props:Props){
   props.onClear(props.imageId);if(tools&&props.element)tools.utilities.triggerAnnotationRender(props.element);setMenu(null);
  };
  const arrow=menu.target?.kind==='local'&&props.marks.find(m=>m.id===menu.target!.id&&m.kind==='arrow');
- return <div className="measurement-menu" role="menu" aria-label="Ölçmə menyusu" style={{left:menu.x,top:menu.y}}
+ return <div className="measurement-menu" role="menu" aria-label={tr('ui.measurement_menu_cbd9f')} style={{left:menu.x,top:menu.y}}
   onPointerDown={e=>{e.stopPropagation();if(props.container.current)props.container.current.dataset.suppressMaximizeUntil=String(performance.now()+750);}}
   onDoubleClick={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()}>
-  <button role="menuitem" disabled={!menu.target} onClick={remove}>Sil</button>
-  {arrow&&<button role="menuitem" onClick={()=>{props.onEditArrow(arrow.id);setMenu(null);}}>Şərhi dəyiş</button>}
-  <button role="menuitem" onClick={clear}>Cari kəsitdə hamısını sil <kbd>Ctrl+D</kbd></button>
+  <button role="menuitem" disabled={!menu.target} onClick={remove}>{tr('ui.delete_f698e')}</button>
+  {arrow&&<button role="menuitem" onClick={()=>{props.onEditArrow(arrow.id);setMenu(null);}}>{tr('ui.edit_comment_c09e7')}</button>}
+  <button role="menuitem" onClick={clear}>{tr('ui.delete_all_on_current_slice_cc1ac')}<kbd>Ctrl+D</kbd></button>
  </div>;
 }

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import {LanguageInitialization} from "@/components/language-settings";
 import { ProductBoundary } from '@/components/app-product';
 import { ViewerFullscreen } from '@/components/viewer-fullscreen';
 
@@ -22,7 +23,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="az">
-      <body className="antialiased"><ViewerFullscreen/><ProductBoundary>{children}</ProductBoundary></body>
+      <body className="antialiased"><LanguageInitialization/><ViewerFullscreen/><ProductBoundary>{children}</ProductBoundary></body>
     </html>
   );
 }

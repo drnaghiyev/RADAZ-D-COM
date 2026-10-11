@@ -1,4 +1,6 @@
 'use client';
+import {useTranslation as useUiTranslation,translate as tr} from '@/lib/i18n';
+
 
 import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
@@ -20,6 +22,7 @@ export type LocalMark = {
   heightLabelOffset?: [number, number];
   override?: number;
   comment?: string;
+  anatomyId?: string;
 };
 
 type Props = {
@@ -51,6 +54,7 @@ function apexArc(start: [number, number], end: [number, number], apex: [number, 
 }
 
 export function MeasurementOverlay({ element, viewport, imageId, modality, tool, marks, onAdd, onUpdate, onRemove, selectedMarkId, onSelectMark }: Props) {
+  useUiTranslation();
   const [draft, setDraft] = useState<Point3[]>([]);
   const [cursor, setCursor] = useState<Point3 | null>(null);
   const [revision, setRevision] = useState(0);
@@ -158,7 +162,7 @@ export function MeasurementOverlay({ element, viewport, imageId, modality, tool,
   const pointer = cursor ? toCanvas(cursor) : null;
 
   return <>
-    <svg className="measurement-overlay" aria-label="Ölçmə işarələri">
+    <svg className="measurement-overlay" aria-label={tr('ui.measurement_annotations_7c03a')}>
       {draft.length > 0 && <g className="mark-preview">
         {guide.map(([x, y], i) => <circle key={i} cx={x} cy={y} r={4} />)}
         {guide.length === 2 && <line x1={guide[0][0]} y1={guide[0][1]} x2={guide[1][0]} y2={guide[1][1]} />}
@@ -215,7 +219,7 @@ export function MeasurementOverlay({ element, viewport, imageId, modality, tool,
             <rect x={labelX} y={labelY - 15} width={width} height={29} rx={4}/>
             <text x={labelX + 8} y={labelY + 2}>{title}</text>
           </g>
-          {mark.kind === 'hu' && mark.override !== undefined && <text className="measured-value" x={labelX + 8} y={labelY + 23}>Ölçülən: {measured === null ? '—' : Math.round(measured)} {unit}</text>}
+          {mark.kind === 'hu' && mark.override !== undefined && <text className="measured-value" x={labelX + 8} y={labelY + 23}>{tr('ui.measured_e5ab1')}{measured === null ? '—' : Math.round(measured)} {unit}</text>}
         </g>;
       })}
     </svg>
@@ -225,10 +229,10 @@ export function MeasurementOverlay({ element, viewport, imageId, modality, tool,
       const [x, y] = toCanvas(mark.points[0]);
       return <form className="hu-editor" style={{ left: Math.max(8, x + mark.labelOffset[0]), top: Math.max(8, y + mark.labelOffset[1] + 14) }}
         onSubmit={e => { e.preventDefault(); const value = Number(entry); if (entry.trim() && Number.isFinite(value)) { onUpdate(mark.id, { override: value }); setEditing(null); } }}>
-        <label htmlFor="hu-override">{unit} göstərimi · əl ilə</label>
+        <label htmlFor="hu-override">{unit} {tr('ui.display_manual_64e30')}</label>
         <input id="hu-override" type="number" step="any" value={entry} onChange={e => setEntry(e.target.value)} autoFocus/>
-        <small>Ölçülən: {sampleLocalDicom(imageId, mark.points[0])?.toFixed(0) ?? '—'} {unit}</small>
-        <div><button type="submit">Saxla</button><button type="button" onClick={() => { onUpdate(mark.id, { override: undefined }); setEditing(null); }}>Ölçüləni qaytar</button><button type="button" onClick={() => setEditing(null)}>Bağla</button></div>
+        <small>{tr('ui.measured_e5ab1')}{sampleLocalDicom(imageId, mark.points[0])?.toFixed(0) ?? '—'} {unit}</small>
+        <div><button type="submit">{tr('ui.save_33632')}</button><button type="button" onClick={() => { onUpdate(mark.id, { override: undefined }); setEditing(null); }}>{tr('ui.restore_measured_value_b5db7')}</button><button type="button" onClick={() => setEditing(null)}>{tr('ui.close_c1cf9')}</button></div>
       </form>;
     })()}
   </>;

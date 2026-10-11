@@ -1,10 +1,11 @@
+import type {TransferFunction,VolumeCrop} from './transfer-function';
 export type VolumePreset = 'bone'|'angio'|'soft'|'lung'|'airway'|'skin'|'transparent'|'mip'|'minip'|'mr';
 export type VolumeQuality = 'performance'|'balanced'|'high'|'ultra'|'auto';
 export type VolumeRenderSettings = {ambient:number;diffuse:number;specular:number;specularPower:number;quality:VolumeQuality;
   shading?:'surface'|'occlusion'|'scattering'; opacityDistance?:number; transferWidth?:number; sampling?:number;
   gradient?:boolean; gradientMin?:number; gradientMax?:number; normalFromOpacity?:boolean;
   occlusionRadius?:number; occlusionSamples?:number; scattering?:number; shadowReach?:number;
-  lightIntensity?:number; interpolation?:'linear'|'nearest'; mouseMode?:'rotate'|'tissue'};
+  lightIntensity?:number; interpolation?:'linear'|'nearest'; mouseMode?:'rotate'|'tissue';customTransfer?:TransferFunction;crop?:VolumeCrop};
 type Definition = {key:VolumePreset;title:string;subtitle:string;tone:string;threshold:number;opacity:number;
   scalar:[number,number][];color:[number,number,number,number][];gradient:[number,number][];
   shade:boolean;interpolation:0|1;blend:'composite'|'maximum'|'minimum';lighting:VolumeRenderSettings;
@@ -38,7 +39,7 @@ export const volumeStyles:Definition[]=[
 ];
 export const volumePresetConfig=Object.fromEntries(volumeStyles.map(v=>[v.key,v])) as Record<VolumePreset,Definition>;
 /** Physical opacity distance is in mm; gradients are calibrated scalar differences. */
-export function resolvedVolumeSettings(preset:VolumePreset, settings:VolumeRenderSettings):Required<VolumeRenderSettings> {
+export function resolvedVolumeSettings(preset:VolumePreset, settings:VolumeRenderSettings):Required<Omit<VolumeRenderSettings,'customTransfer'|'crop'>>&Pick<VolumeRenderSettings,'customTransfer'|'crop'> {
  const definition=volumePresetConfig[preset];
  return {shading:'surface',opacityDistance:definition.surface?.opacityUnitDistance??1,
   transferWidth:1,sampling:1,gradient:definition.surface?.gradientOpacity??definition.shade,

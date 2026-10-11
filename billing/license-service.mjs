@@ -3,6 +3,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {randomBytes,randomUUID,createHash,sign} from 'node:crypto';
 import {chmodSync} from 'node:fs';
 import {defaultCommerce,validateCommerce,convertMinor} from './commerce.mjs';
+import {anatomyEntitlements} from './anatomy-entitlements.mjs';
 export const PRICE_MINOR=1000, CURRENCY='AZN', MAX_MONTHS=120;
 const hash=value=>createHash('sha256').update(value).digest('hex');
 export function addMonths(seconds,months){
@@ -20,6 +21,7 @@ export function createLicenseService({database,privateKey,provider,commerce=defa
  const currencies=()=>provider?.currencies||['AZN'];
  const order=id=>db.prepare('SELECT * FROM orders WHERE id=?').get(id);
  return {
+  anatomy:anatomyEntitlements(db,privateKey,now),
   catalog(){const c=settings();return {enabled:!!provider,monthly:c.monthlyMinor/100,currency:c.baseCurrency,maxMonths:MAX_MONTHS,modules:c.modules.filter(m=>m.enabled),exchange:c.exchange,trialDays:c.trialDays,currencies:provider?currencies():[]};},
   async checkout(months,{currency='AZN',moduleId=null}={}){
    if(!Number.isInteger(months)||months<1||months>MAX_MONTHS)throw new Error('Ay sayı 1–120 olmalıdır.');
@@ -61,7 +63,9 @@ export function createLicenseService({database,privateKey,provider,commerce=defa
    try{
     const row=db.prepare("SELECT * FROM orders WHERE code=? AND status='paid'").get(code);if(!row)throw new Error('Ödənilmiş açar tapılmadı.');
     if(row.deviceId&&row.deviceId!==deviceId)throw new Error('Açar başqa kompüterdə aktivləşdirilib.');
-    const start=row.activatedAt??now(),end=row.expiresAt??addMonths(start,row.months);
+    const start=row.activatedAt??now();
+    const previous=row.moduleId==='anatomy_ai'&&!row.activatedAt?db.prepare("SELECT MAX(expiresAt) AS expiresAt FROM orders WHERE deviceId=? AND moduleId='anatomy_ai' AND status='paid'").get(deviceId)?.expiresAt:0;
+    const end=row.expiresAt??addMonths(Math.max(start,previous||0),row.months);
     const claims={v:1,product:'RADAZ',licenseId:row.id,activationId:row.id,customer:'RADAZ istifadəçisi',plan:'monthly',months:row.months,seats:1,deviceId,issuedAt:start,activatedAt:start,expiresAt:end};
     if(row.moduleId)claims.moduleId=row.moduleId;
     const payload='RADAZ1.'+Buffer.from(JSON.stringify(claims)).toString('base64url');

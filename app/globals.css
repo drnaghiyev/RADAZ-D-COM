@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./anatomy.css";
 @import "tw-animate-css";
 @import "../vendor/shadcn-tailwind-4.13.0.css";
 
@@ -676,6 +677,10 @@ body .output-page-brand strong{display:block!important}
 .ai-settings{display:grid;gap:16px}.ai-settings p{margin:0}.ai-settings label{display:grid;gap:7px}.ai-settings input{width:100%;height:40px;background:#0c1a25;border:1px solid #50738a;border-radius:5px;color:#fff;padding:8px;font:inherit}
 .ai-settings-actions{display:flex;gap:10px;flex-wrap:wrap}.ai-settings-actions button{padding:10px 15px;background:#285168;color:#e6f7ff;border-radius:6px}.ai-settings-actions button:disabled{opacity:.5;cursor:not-allowed}.ai-settings small{line-height:1.7;color:#a6bdc9}.ai-key-status{color:#a9dbbf}
 
+/* Localized workstation preferences and physical volume editing. */
+.language-settings{border:1px solid #314054;border-radius:8px;padding:16px}.language-settings label{display:flex;gap:16px;align-items:center}.language-settings select{background:#111c2c;color:#e8edf5;border:1px solid #40516a;border-radius:5px;padding:8px}.language-settings p{font-size:12px;color:#aab8cc}
+.transfer-editor svg{display:block;width:100%;height:130px;background:repeating-linear-gradient(0deg,transparent,transparent 25px,#263247 26px),repeating-linear-gradient(90deg,#101826,#101826 59px,#263247 60px);border:1px solid #40516a;overflow:visible;touch-action:none;margin:12px 0}.transfer-editor circle{cursor:grab}.transfer-editor circle:focus{stroke:#ffe681;stroke-width:3;outline:none}.transfer-axis,.transfer-actions{display:flex;justify-content:space-between;gap:6px;flex-wrap:wrap}.transfer-actions button{font-size:11px;padding:5px}.transfer-editor input[type=number]{width:90px;background:#101826;color:#edf5ff;border:1px solid #40516a}.transfer-editor input[type=color]{width:50px;height:25px;padding:0}.volume-settings-menu{max-height:80vh;overflow-y:auto}
+
 /* Responsive commands: wrap at small widths instead of scrolling or clipping. */
 body .grouped-workstation .topbar{--command-size:clamp(30px,2.5vw,40px);display:flex!important;flex-flow:row wrap!important;overflow:visible!important;height:auto!important;max-height:none!important;gap:3px!important;padding:4px!important;flex-shrink:0}
 body .grouped-workstation .topbar .brand{width:var(--command-size)!important;min-width:var(--command-size)!important;padding:0!important;gap:0!important}
@@ -691,3 +696,32 @@ body .grouped-workstation .topbar .mpr-thickness{max-width:160px;min-width:0}
 .volume-orientation{position:absolute;right:12px;top:12px;width:100px;z-index:8;user-select:none}.volume-orientation svg{width:100px;height:100px}.volume-orientation polygon{stroke:#b0bac8;stroke-width:.7}.volume-orientation text{fill:white;font-size:20px;text-anchor:middle;dominant-baseline:central;pointer-events:none}.volume-orientation g{cursor:pointer}.volume-orientation g:focus polygon{stroke:#fff;stroke-width:3}.volume-axis-views{display:flex;justify-content:center;gap:2px;flex-wrap:wrap}.volume-axis-views button{background:#13181e;color:#d8e4f0;border:1px solid #48515c;border-radius:3px;width:29px;height:26px;font-size:11px}
 .volume-help-disclosure{position:absolute;bottom:10px;left:12px;z-index:8;color:#bed0df;max-width:calc(100% - 24px)}.volume-help-disclosure>summary{cursor:pointer;list-style:none;border:1px solid #43505c;border-radius:50%;background:#14191e;width:28px;height:28px;text-align:center;line-height:26px}.volume-help-disclosure .volume-help{position:static!important;transform:none!important;max-width:560px;margin-top:6px;background:#10161ee8;padding:10px;pointer-events:auto}
 .workstation.detached[data-mode="3d"] .statusbar{display:none}
+
+/* Bounded icon groups preserve toolbar hierarchy without horizontal scrolling. */
+body .grouped-workstation .topbar{padding:8px 12px!important;gap:6px!important}
+body .grouped-workstation .topbar .toolbar-group,body .grouped-workstation .topbar .mode-controls,body .grouped-workstation .topbar .display-direct-controls{display:flex!important;flex:0 1 auto!important;flex-flow:row wrap!important;gap:3px!important;padding:3px 6px!important;border:1px solid #304753;border-radius:6px;max-width:100%!important;min-width:0!important;background:#142430}
+body .grouped-workstation .topbar .brand{width:auto!important;min-width:0!important;gap:8px!important;margin:0 12px 0 0!important}
+body .grouped-workstation .topbar .brand>span:not(.radaz-logo){display:flex!important;flex-direction:column}
+body .brand strong,.output-page-brand strong{font-size:23px!important;font-weight:500!important;letter-spacing:2px!important;color:#eff9fb}
+body .brand small,.output-page-brand small{font-size:8px!important;font-weight:750!important;letter-spacing:1px!important;color:#a7bec1!important}
+.radaz-logo{color:#2fd3b4!important;display:block!important;flex-shrink:0}.mode-letter-icon{font-size:12px!important;letter-spacing:-.5px;line-height:1;font-weight:750}
+.grouped-records .records-unified-header,.grouped-records .records-header-actions,.grouped-records .records-header-filters,.report-top-actions,.output-page-nav{flex-wrap:wrap!important;overflow:visible!important;max-width:100%!important;gap:6px!important;padding:6px 10px!important}
+.grouped-records .record-action-group,.grouped-records .records-header-actions .toolbar-group,.report-top-actions .toolbar-group{flex:0 1 auto!important;flex-wrap:wrap!important;max-width:100%!important;border:1px solid #304753;border-radius:6px;padding:4px 6px!important;gap:3px!important}
+.assistant-window-controls{display:flex;gap:10px;flex-wrap:wrap;padding:10px 0}.assistant-window-controls label{display:flex;align-items:center;gap:5px}.assistant-window-controls input[type=number]{width:84px;border:1px solid #466575;background:#0b1823;color:#e7f3fa;padding:6px;border-radius:4px}
+
+body .grouped-workstation .topbar{--command-size:clamp(36px,2.9vw,52px)}
+body .grouped-workstation .topbar button svg{width:clamp(20px,1.6vw,28px);height:clamp(20px,1.6vw,28px)}
+body .grouped-workstation .topbar .mode-letter-icon{font-size:clamp(13px,1.05vw,18px)!important}
+body .workstation,body .records-shell,body .report-shell{font-size:clamp(13px,.85vw,18px)}
+.records-unified-header button:not(.modality-trigger),.report-top-actions button,.output-page-nav button,.output-page-nav a{min-height:36px!important;min-width:36px!important}
+@media(min-width:1600px){.records-unified-header button:not(.modality-trigger),.report-top-actions button,.output-page-nav button,.output-page-nav a{height:46px!important;min-width:46px!important}.records-unified-header svg,.report-top-actions svg,.output-page-nav svg{width:24px!important;height:24px!important}.series-copy strong,.study-heading strong,.series-count{font-size:15px!important}.volume-settings-panel{font-size:15px}.volume-settings-panel label{font-size:14px}}
+.volume-direct-tools{position:absolute;top:12px;left:12px;display:flex;gap:5px;padding:5px;border:1px solid #3e5363;border-radius:6px;background:#121c24dc;z-index:12}.volume-direct-tools button{width:38px;height:38px;display:grid;place-items:center;border:1px solid transparent;border-radius:4px;color:#d4e8f2}.volume-direct-tools button[aria-pressed=true]{background:#285265;border-color:#74bdd4}.volume-direct-tools button:disabled{opacity:.4}
+.volume-scalpel-overlay{position:absolute;inset:0;width:100%;height:100%;z-index:9;cursor:crosshair;touch-action:none}.volume-scalpel-status{position:absolute;bottom:12px;left:52px;right:20px;z-index:12;pointer-events:none;font-size:14px;color:#ffe0b8}.volume-orientation{z-index:13}
+
+/* Override legacy per-command sizes as well as the general toolbar rule. */
+body main.workstation.grouped-workstation .topbar button{width:var(--command-size)!important;min-width:var(--command-size)!important;height:var(--command-size)!important;min-height:var(--command-size)!important;flex:0 0 var(--command-size)!important;padding:4px!important;font-size:0!important;gap:0!important;justify-content:center!important}
+body main.workstation.grouped-workstation .topbar button>span{display:none!important}
+body main.workstation.grouped-workstation .topbar button svg{width:clamp(20px,1.6vw,28px)!important;height:clamp(20px,1.6vw,28px)!important}
+body main.workstation.grouped-workstation .topbar .brand{max-width:none!important}
+body main.workstation.grouped-workstation .topbar .brand>.radaz-logo{width:34px!important;height:34px!important}
+body .brand small,body .output-page-brand small{font-size:10px!important}

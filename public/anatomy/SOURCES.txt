@@ -1,0 +1,142 @@
+RADAZ local anatomy atlas — asset provenance
+Downloaded 2026-10-08. Original images are bundled unchanged for offline use.
+
+hand.png
+H. V. Carter · Gray’s Anatomy, 1918
+https://commons.wikimedia.org/wiki/File:Gray220.png
+İctimai mülkiyyət: https://creativecommons.org/publicdomain/mark/1.0/
+SHA-256: eaea49586f965ebb0fa06b1ca23ea61290501da32f06b15fb6f222069e07007e
+
+foot.png
+H. V. Carter · Gray’s Anatomy, 1918
+https://commons.wikimedia.org/wiki/File:Gray268.png
+İctimai mülkiyyət: https://creativecommons.org/publicdomain/mark/1.0/
+SHA-256: a9984ad407c726f749bed013c911770e630871e9913cdad2fe161deadda5b8b9
+
+skeleton.svg
+Mariana Ruiz Villarreal (LadyofHats) / Mikael Häggström
+https://commons.wikimedia.org/wiki/File:Human_skeleton_front_-_no_labels.svg
+İctimai mülkiyyət: https://creativecommons.org/publicdomain/mark/1.0/
+SHA-256: c8d5c3f208deac302ab3f7d70c0f499719c53de865f47df264d21f9e298cbc72
+
+organs.svg
+Mikael Häggström
+https://commons.wikimedia.org/wiki/File:Female_template_with_organs.svg
+CC0: https://creativecommons.org/publicdomain/zero/1.0/
+SHA-256: 5930e8f6a6315630a71b3667d69ac4e06001dcf8243f4c879631f3e431ae7214
+
+vessels.svg
+Mariana Ruiz Villarreal (LadyofHats) / Jmarchn
+https://commons.wikimedia.org/wiki/File:Circulatory_System_no_tags.svg
+İctimai mülkiyyət: https://creativecommons.org/publicdomain/mark/1.0/
+SHA-256: 793b5815b162916c0261102bc6337a47c9cdba852518a6fcc87ce81b26a87036
+
+heart.svg
+Wapcaplet / Yaddah
+https://commons.wikimedia.org/wiki/File:Diagram_of_the_human_heart_(cropped).svg
+CC BY-SA 3.0: https://creativecommons.org/licenses/by-sa/3.0/
+SHA-256: df436f9f323a325b63f1a4e6699165afe7ff5924ec44095300e84e0e2b07ac9e
+
+respiratory.svg
+Mariana Ruiz Villarreal (LadyofHats)
+https://commons.wikimedia.org/wiki/File:Respiratory_system_complete_en.svg
+İctimai mülkiyyət: https://creativecommons.org/publicdomain/mark/1.0/
+SHA-256: 2544b2013ada84edff87c9d16475da335a1a4161440e5bfb48925b3394f20909
+
+digestive.svg
+Mariana Ruiz Villarreal (LadyofHats) / Jmarchn
+https://commons.wikimedia.org/wiki/File:Digestive_system_diagram_en.svg
+İctimai mülkiyyət: https://creativecommons.org/publicdomain/mark/1.0/
+SHA-256: dea8b480a212d90b484603737a1e90bd98714d80c1eb3b0395c43b6936eaa127
+
+urinary.svg
+US Government / SEER · Thstehle
+https://commons.wikimedia.org/wiki/File:Illu_urinary_system.svg
+İctimai mülkiyyət: https://creativecommons.org/publicdomain/mark/1.0/
+SHA-256: 78fb6ce5a54e2b88950197f4712216e50c14ee06078ec3fa5a71a81b2610abcf
+
+female-reproductive.svg
+Mariana Ruiz Villarreal (LadyofHats)
+https://commons.wikimedia.org/wiki/File:Female_reproductive_system_-_anterior_view.svg
+İctimai mülkiyyət: https://creativecommons.org/publicdomain/mark/1.0/
+SHA-256: 5752dcb1b272789c0910be8a76c64c31ee26f0342618e07ea52f22a202d0a307
+
+male-reproductive.jpg
+Mikael Häggström
+https://commons.wikimedia.org/wiki/File:Lateral_cross-section_of_male_reproductive_system.jpg
+CC0: https://creativecommons.org/publicdomain/zero/1.0/
+SHA-256: f5e88c0b240cfc65caf075d1e0057094983c9f1132f855235a57ed5c46bbf7e9
+
+endocrine.svg
+Mariana Ruiz Villarreal (LadyofHats) / RWhitwam
+https://commons.wikimedia.org/wiki/File:Endocrine_glands_%26_their_hormones.svg
+CC BY-SA 4.0: https://creativecommons.org/licenses/by-sa/4.0/
+SHA-256: 8c7a62fda243f9ff59350b1f6e19aba96f85e38c48a782709dddc78f38fac2e8
+
+nerves.png
+Pearson Scott Foresman
+https://commons.wikimedia.org/wiki/File:Nervous_System_(PSF).png
+İctimai mülkiyyət: https://creativecommons.org/publicdomain/mark/1.0/
+SHA-256: ff3a5c06242f4b18136b59f53026ab5808b6e2b675dab846affd513e8ccf18cd
+
+lymphatic.svg
+NIH / JGM73
+https://commons.wikimedia.org/wiki/File:Lymphatic_system_(vector).svg
+İctimai mülkiyyət: https://creativecommons.org/publicdomain/mark/1.0/
+SHA-256: 0a0701c9efbd91f90d6bfc77ad1277caa39b7c15b8b96ff87c4fc5d056c31be0
+
+eye.png
+H. V. Carter · Gray’s Anatomy, 1918
+https://commons.wikimedia.org/wiki/File:Gray869.png
+İctimai mülkiyyət: https://creativecommons.org/publicdomain/mark/1.0/
+SHA-256: f6953d6e294b90f40a4abae7a1ed1a3c21e0ba883a42fc939cb4568bc9f265e8
+
+ear.png
+H. V. Carter · Gray’s Anatomy, 1918
+https://commons.wikimedia.org/wiki/File:Gray907.png
+İctimai mülkiyyət: https://creativecommons.org/publicdomain/mark/1.0/
+SHA-256: 0c0dd467d7c1cf35395185dba5b3f8d02759a18e46d4b955bdba9af4c6c6abfa
+
+skin.png
+US Government / SEER · Prof. Squirrel
+https://commons.wikimedia.org/wiki/File:Skin.png
+İctimai mülkiyyət: https://creativecommons.org/publicdomain/mark/1.0/
+SHA-256: 75eea66f65a485ab9089f0ba8c46fbab8e34bfba035d9c69cec051e715b73d05
+
+muscles-front.png
+H. V. Carter · Gray’s Anatomy, 1918 · Mikael Häggström
+https://commons.wikimedia.org/wiki/File:Muscles_anterior_labeled.png
+İctimai mülkiyyət: https://creativecommons.org/publicdomain/mark/1.0/
+SHA-256: 3a173c7642ba245206e4eab794bab71e5129eb0b27c96c2c00e7e17bfcbcfcc4
+
+muscles-back.png
+H. V. Carter · Gray’s Anatomy, 1918 · Mikael Häggström
+https://commons.wikimedia.org/wiki/File:Muscle_posterior_labeled.png
+İctimai mülkiyyət: https://creativecommons.org/publicdomain/mark/1.0/
+SHA-256: 5d8c4600dc0074d5408123e01d40772415a905ee8ca1d19672fae03df2368c4e
+
+Interactive points are separate reference-plate overlays, never patient-image segmentation.
+The heart overlay is available under CC BY-SA 3.0 and the endocrine overlay under
+CC BY-SA 4.0, matching their source plates. Overlay author: RADAZ, 2026.
+This licensing applies to those image/point contributions, not the application code.
+Historical English labels remain in the original plates; names in the catalogue
+are independently curated in Azerbaijani and Latin. The catalogue covers major
+structures and selected parts, not all microscopic anatomy, variants or projections.
+Hand scaphoid, triquetrum, trapezium, trapezoid and hamate use modern terminology.
+
+Anatomical fact references; no textbook prose or images copied:
+https://openstax.org/books/anatomy-and-physiology-2e/pages/1-2-structural-organization-of-the-human-body
+https://openstax.org/books/anatomy-and-physiology-2e/pages/7-2-the-skull
+https://openstax.org/books/anatomy-and-physiology-2e/pages/7-3-the-vertebral-column
+https://openstax.org/books/anatomy-and-physiology-2e/pages/8-2-bones-of-the-upper-limb
+https://openstax.org/books/anatomy-and-physiology-2e/pages/8-4-bones-of-the-lower-limb
+https://openstax.org/books/anatomy-and-physiology-2e/pages/11-3-axial-muscles-of-the-head-neck-and-back
+https://openstax.org/books/anatomy-and-physiology-2e/pages/11-4-axial-muscles-of-the-abdominal-wall-and-thorax
+https://openstax.org/books/anatomy-and-physiology-2e/pages/11-5-muscles-of-the-pectoral-girdle-and-upper-limbs
+https://openstax.org/books/anatomy-and-physiology-2e/pages/11-6-appendicular-muscles-of-the-pelvic-girdle-and-lower-limbs
+https://openstax.org/books/anatomy-and-physiology-2e/pages/13-4-the-peripheral-nervous-system
+https://openstax.org/books/anatomy-and-physiology-2e/pages/14-1-sensory-perception
+https://openstax.org/books/anatomy-and-physiology-2e/pages/17-1-an-overview-of-the-endocrine-system
+https://openstax.org/books/anatomy-and-physiology-2e/pages/20-5-circulatory-pathways
+https://openstax.org/books/anatomy-and-physiology-2e/pages/23-1-overview-of-the-digestive-system
+https://openstax.org/books/anatomy-and-physiology-2e/pages/25-3-gross-anatomy-of-the-kidney
