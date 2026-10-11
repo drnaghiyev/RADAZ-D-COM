@@ -115,6 +115,17 @@ def validate_package(root, version):
                     validate_files(package.namelist(),json.loads(package.read('SHA256SUMS.json')),package.read,version)
             elif file.read_bytes()[:2] != b'MZ':
                 raise ValueError('Setup executable missing')
+    for patch in sorted((root/'outputs/releases').glob(f'RADAZ-{version}-from-*-x64.patch.zip')):
+        sums=patch.with_suffix('.zip.sha256')
+        if sums.read_text().split()!=[hashlib.sha256(patch.read_bytes()).hexdigest(),patch.name]:raise ValueError('Delta checksum mismatch')
+        with ZipFile(patch) as delta,ZipFile(root/f'outputs/releases/RADAZ-{version}-Windows-x64.zip') as full:
+            meta=json.loads(delta.read('delta.json'));base=meta['baseVersion'];version_parts(base)
+            if meta!=dict(schema=1,baseVersion=base,version=version) or patch.name!=f'RADAZ-{version}-from-{base}-x64.patch.zip':raise ValueError('Delta identity mismatch')
+            manifest=json.loads(delta.read('SHA256SUMS.json'))
+            if manifest!=json.loads(full.read('SHA256SUMS.json')):raise ValueError('Delta target mismatch')
+            for name in set(delta.namelist())-{'delta.json','SHA256SUMS.json'}:
+                if name not in manifest or hashlib.sha256(delta.read(name)).hexdigest()!=manifest[name]:raise ValueError('Delta file mismatch')
+        files.extend((patch,sums))
     return tuple(files)
 
 
@@ -142,10 +153,11 @@ def publish(api, root, version, commit, release_commit=None):
     desktop_name = f'RADAZ-{version}-Windows-x64.zip'
     desktop_file = next((file for file in files if file.name == desktop_name), None)
     if desktop_file:
+        update_files=[desktop_file,*[file for file in files if file.name.endswith('.patch.zip')]]
         feed.write_text(json.dumps({'schema':1,'tag_name':f'v{version}','draft':False,'prerelease':False,
-            'assets':[{'name':desktop_name,'state':'uploaded','size':desktop_file.stat().st_size,
-                'digest':'sha256:'+hashlib.sha256(desktop_file.read_bytes()).hexdigest(),
-                'browser_download_url':f'https://github.com/{api.repo}/releases/download/v{version}/{desktop_name}'}]},indent=2),encoding='utf-8')
+            'assets':[{'name':file.name,'state':'uploaded','size':file.stat().st_size,
+                'digest':'sha256:'+hashlib.sha256(file.read_bytes()).hexdigest(),
+                'browser_download_url':f'https://github.com/{api.repo}/releases/download/v{version}/{file.name}'} for file in update_files]},indent=2),encoding='utf-8')
         files = (*files, feed)
     # Publish only after every portable, offline and installer asset is verified.
     for file in files:

@@ -24,7 +24,7 @@ explicit=['package.json','pnpm-lock.yaml','pnpm-workspace.yaml','README.md','DIS
 explicit.extend(['bridge/radaz_removable.py','bridge/radaz_windows.py'])
 explicit.append('scripts/release-health.mjs')
 explicit.extend(['scripts/local-ai-request.mjs', 'bridge/radaz_ai.py'])
-explicit.extend(['scripts/local-anatomy.mjs','scripts/local-anatomy-volume.mjs','scripts/anatomy-access.mjs','bridge/anatomy-models.json','bridge/anatomy_providers.py','bridge/radaz_anatomy.py','bridge/radaz_anatomy_volume.py'])
+explicit.extend(['scripts/local-anatomy-volume.mjs','scripts/anatomy-access.mjs','bridge/anatomy-models.json','bridge/anatomy_providers.py','bridge/radaz_anatomy_volume.py'])
 files={p:ROOT/p for p in explicit}
 for folder in ['dist/client','dist/server','dist/runtime','dist/node_modules','bridge/wheels']:
  for p in (ROOT/folder).rglob('*'):

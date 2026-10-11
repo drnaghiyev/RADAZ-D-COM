@@ -173,11 +173,22 @@ def open_release_download(url):
                 raise
         time.sleep(.5 * (attempt + 1))
 
-def select_asset(release, current):
+def select_asset(release, current, base_version=None):
     if release.get('draft') or release.get('prerelease'):
         raise ValueError('Only published stable-channel releases can update RADAZ')
     target = release['tag_name'].removeprefix('v')
     if version(target) <= version(current): return None
+    if base_version is not None:
+        version(base_version)
+        patch_name = f'RADAZ-{target}-from-{base_version}-x64.patch.zip'
+        patches = [a for a in release['assets'] if a['name'] == patch_name and a['state'] == 'uploaded']
+        if len(patches) == 1:
+            asset = patches[0]
+            if asset.get('browser_download_url') != f'https://github.com/{UPDATE_REPOSITORY}/releases/download/v{target}/{patch_name}':
+                raise ValueError('Unexpected delta download location')
+            if not isinstance(asset.get('digest'),str) or not re.fullmatch(r'sha256:[a-f0-9]{64}',asset['digest']) or type(asset.get('size')) is not int or not 0 < asset['size'] <= MAX_PACKAGE:
+                raise ValueError('Invalid delta checksum or size')
+            return target, dict(asset, baseVersion=base_version)
     name = f'RADAZ-{target}-Windows-x64.zip'
     matches = [a for a in release['assets'] if a['name'] == name and a['state'] == 'uploaded']
     if len(matches) != 1: raise ValueError('Complete desktop update is not available')
@@ -233,6 +244,56 @@ def stage_package(root, archive, target, digest, size):
     state(root, 'ready', f'RADAZ {target} yeniləməsi uğurla hazırlandı. Tətbiq etmək üçün Proqramı yenidən aç düyməsini basın.', target,
           {'done': 1, 'total': 1, 'unit': 'yeniləmə'})
 
+
+def stage_delta(root, archive, target, digest, size, base):
+    """Copy verified unchanged files to a new version; never mutate a running version."""
+    version(target);version(base)
+    if archive.stat().st_size != size or hashlib.sha256(archive.read_bytes()).hexdigest() != digest:
+        raise ValueError('Delta SHA-256 mismatch')
+    source = version_dir(root, base)
+    destination = version_dir(root, target)
+    if destination.exists():
+        validate_directory(destination, target)
+    else:
+        staging = root / 'versions' / ('.staging-' + secrets.token_hex(10))
+        staging.mkdir(parents=True)
+        try:
+            with ZipFile(archive) as package:
+                entries = package.infolist(); names = package.namelist()
+                if len(entries)>10000 or sum(x.file_size for x in entries)>2*1024**3 or len(names)!=len(set(n.casefold() for n in names)):
+                    raise ValueError('Invalid delta size or duplicate files')
+                for entry in entries:
+                    file_name(entry.filename)
+                    if (entry.external_attr >> 16) & 0o170000 == 0o120000: raise ValueError('Delta links are forbidden')
+                if json.loads(package.read('delta.json')) != dict(schema=1,baseVersion=base,version=target):
+                    raise ValueError('Delta base version mismatch')
+                manifest = json.loads(package.read('SHA256SUMS.json'))
+                if not isinstance(manifest,dict) or len(manifest)>10000 or len(manifest)!=len(set(n.casefold() for n in manifest)):
+                    raise ValueError('Invalid delta manifest')
+                changed = set(names)-{'delta.json','SHA256SUMS.json'}
+                if not changed <= set(manifest): raise ValueError('Unlisted delta file')
+                total=0
+                for index,(name,expected) in enumerate(manifest.items()):
+                    file_name(name)
+                    if name in ('delta.json','SHA256SUMS.json') or not isinstance(expected,str) or not re.fullmatch('[a-f0-9]{64}',expected):
+                        raise ValueError('Invalid delta entry')
+                    if name in changed: raw=package.read(name)
+                    else:
+                        existing=source/name
+                        if not existing.resolve().is_relative_to(source.resolve()) or existing.is_symlink(): raise ValueError('Unsafe base file')
+                        raw=existing.read_bytes()
+                    total+=len(raw)
+                    if total>2*1024**3 or hashlib.sha256(raw).hexdigest()!=expected: raise ValueError('Delta base file or content mismatch: '+name)
+                    file=staging/name;file.parent.mkdir(parents=True,exist_ok=True);file.write_bytes(raw)
+                    if index%20==0: state(root,'installing','Dəyişən fayllar yoxlanılır və yeni versiya hazırlanır…',target,{'done':index+1,'total':len(manifest),'unit':'fayl'})
+                atomic_json(staging/'SHA256SUMS.json',manifest)
+            validate_directory(staging,target)
+            os.replace(staging,destination)
+        finally:
+            if staging.exists() and staging.resolve().parent==(root/'versions').resolve(): shutil.rmtree(staging)
+    atomic_json(root/'pending.json',{'version':target})
+    state(root,'ready',f'RADAZ {target} hazırdır. Tətbiq etmək üçün proqramı yenidən açın.',target,{'done':1,'total':1,'unit':'yeniləmə'})
+
 def check_update(root, approved_version=None):
     active = read_json(root / 'active.json')['version']
     pending = None
@@ -241,7 +302,8 @@ def check_update(root, approved_version=None):
         if version(candidate) > version(active): pending = candidate
     state(root, 'checking', 'Yeniləmələr arxa planda yoxlanılır.')
     try:
-        choice = select_asset(get_latest_release(), pending or active)
+        release = get_latest_release()
+        choice = select_asset(release, pending or active, base_version=active)
     except Exception:
         if not pending: raise
         state(root, 'ready', f'RADAZ {pending} hazırdır. Daha yeni buraxılış yoxlanmadı; hazırlanmış yeniləmə saxlanıldı.', pending)
@@ -274,7 +336,22 @@ def check_update(root, approved_version=None):
                     state(root, 'downloading', f'RADAZ {target} yüklənir…', target,
                           {'done': total, 'total': asset['size'], 'unit': 'bayt'})
                     last_progress = time.monotonic()
-        stage_package(root, temporary, target, asset['digest'][7:], asset['size'])
+        if asset.get('baseVersion'):
+            try: stage_delta(root,temporary,target,asset['digest'][7:],asset['size'],asset['baseVersion'])
+            except (ValueError,OSError,KeyError):
+                # A repaired/modified base cannot supply trusted reusable files. The
+                # same approved version may fall back to its complete verified package.
+                full=select_asset(release,active)[1]
+                state(root,'downloading','Yerli fayllar uyğun deyil; tam paket ilə bərpa edilir…',target)
+                with open_release_download(full['browser_download_url']) as response,temporary.open('wb') as stream:
+                    total=0
+                    while block:=response.read(1024*1024):
+                        total+=len(block)
+                        if total>full['size']: raise ValueError('Unexpected download size')
+                        stream.write(block)
+                        state(root,'downloading','Tam paket ilə bərpa edilir…',target,{'done':total,'total':full['size'],'unit':'bayt'})
+                stage_package(root,temporary,target,full['digest'][7:],full['size'])
+        else: stage_package(root, temporary, target, asset['digest'][7:], asset['size'])
     finally:
         temporary.unlink(missing_ok=True)
 

@@ -23,7 +23,7 @@ try{
  // An extracted release must not accidentally compile leftover source from an older folder.
  mkdirSync(path.join(root,'app'));writeFileSync(path.join(root,'app/page.tsx'),'obsolete source');writeFileSync(path.join(root,'SHA256SUMS.json'),'{}');
  symlinkSync(path.join(source,'node_modules'),path.join(root,'node_modules'),'junction');
- for(const name of ['start-radaz.ps1','start-release.mjs','release-health.mjs','local-ai-request.mjs','local-anatomy.mjs','local-anatomy-volume.mjs','anatomy-access.mjs','stop-web-server.ps1'])cpSync(path.join(source,'scripts',name),path.join(root,'scripts',name));
+ for(const name of ['start-radaz.ps1','start-release.mjs','release-health.mjs','local-ai-request.mjs','local-anatomy-volume.mjs','anatomy-access.mjs','stop-web-server.ps1'])cpSync(path.join(source,'scripts',name),path.join(root,'scripts',name));
  mkdirSync(path.join(root,'bridge'));cpSync(path.join(source,'bridge/anatomy-models.json'),path.join(root,'bridge/anatomy-models.json'));
  writeFileSync(path.join(root,'scripts/start-archive.ps1'),'exit 0');
  const oldScript=path.join(old,'start-release.mjs');

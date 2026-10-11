@@ -11,7 +11,7 @@ export function anatomyVolumeService(root,installRoot,product){
  const access=anatomyAccess(product);
  const moduleRoot=process.env.RADAZ_ANATOMY_VOLUME_ROOT||(installRoot&&path.join(installRoot,'local-modules/totalseg'));
  const python=moduleRoot&&path.join(moduleRoot,'python/python.exe');
- const registry=JSON.parse(readFileSync(path.join(root,'bridge/anatomy-models.json'),'utf8')).models;
+ const registry=JSON.parse(readFileSync(path.join(root,'bridge/anatomy-models.json'),'utf8')).models.filter(model=>model.provider==='totalsegmentator');
  const models=()=>{let tasks={};try{tasks=JSON.parse(readFileSync(path.join(moduleRoot,'weights-manifest.json'),'utf8')).tasks;}catch{}return registry.map(m=>({...m,available:!!python&&existsSync(python)&&m.license==='Apache-2.0'&&!!tasks[m.id]?.files&&Object.keys(tasks[m.id].files).length>0}));};
  const jobs=new Map();let current=null,creating=false;
  const enabled=()=>!!python&&existsSync(python)&&existsSync(path.join(moduleRoot,'weights-manifest.json'));

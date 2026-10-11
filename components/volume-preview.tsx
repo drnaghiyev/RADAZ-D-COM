@@ -59,7 +59,7 @@ export function VolumePreview(props:Props){
   const viewport=viewportRef.current;if(!viewport)return;
   const caps=gpuCapabilities(),currentSettings=resolvedVolumeSettings(propsRef.current.preset,propsRef.current.settings),requested=currentSettings.quality;
   let selected:Profile=requested==='auto'?autoProfile.current:requested;
-  if(caps.tier==='low'&&selected!=='performance')selected='performance';
+  if(caps.tier==='low'&&interacting.current)selected='performance';
   if(caps.tier==='medium'&&selected==='ultra')selected='high';
   const config=qualityProfiles[selected],actor=viewport.getDefaultActor()?.actor,mapper=actor?.getMapper();
   const spacing=volumeRef.current?.volume.spacing||[1,1,1];

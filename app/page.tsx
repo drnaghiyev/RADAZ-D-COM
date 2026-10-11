@@ -11,8 +11,6 @@ import { AppHelpMenu, useViewerLicense } from '@/components/app-product';
 import { openRecordsWindow, registerViewer, requestedStudies } from '@/lib/viewer-session';
 import {publishDetachedSource,readDetachedSource} from '@/lib/detached-viewer';
 import {ViewportMouseControls} from '@/components/viewport-mouse-controls';
-import {AnatomyAtlas} from '@/components/anatomy-atlas';
-import {AutomaticAnatomyStatus,useAutomaticAnatomy} from '@/components/anatomy-auto-control';
 import {AnatomyVolumeControls,AnatomyVolumeOverlay,useAnatomyVolume} from '@/components/anatomy-volume-control';
 import {volumeSourceKey,type AnatomyVolumeResult} from '@/lib/anatomy-volume';
 import type {AnatomyLabel} from '@/lib/anatomy-atlas';
@@ -150,7 +148,6 @@ function ViewportPane({ anatomyControl, anatomyVolume, anatomyVolumeVisible, ana
   const [error, setError] = useState('');
   const viewportId = `panel-${id}`;
   const navigate = useStackNavigation(viewport, imageId, setError);
-  const automatic=useAutomaticAnatomy({viewport,imageId,enabled:tool==='anatomy-auto'&&!limited&&selected&&!concealed,clearToken,onAdd:onAddMark});
 
   useEffect(() => {
     if (!ready || !elementRef.current) return;
@@ -360,13 +357,12 @@ function ViewportPane({ anatomyControl, anatomyVolume, anatomyVolumeVisible, ana
     {!limited && <MeasurementOverlay element={elementRef.current} viewport={viewport} imageId={imageId} modality={series?.modality} tool={tool} marks={marks} selectedMarkId={selectedMarkId}
       onAdd={onAddMark} onUpdate={onUpdateMark} onRemove={onRemoveMark} onSelectMark={onSelectMark}/>}
     {!limited && <LocalizerOverlay element={elementRef.current} viewport={viewport} imageId={imageId} otherImages={otherImages} enabled={localizers} onMoveSource={onMoveSource} onMoveIntersection={onMoveIntersection} targetPanel={id} onRotateSource={onRotateSource} onRotateStart={onRotateStart} onPreviewRotateSource={onPreviewRotateSource}/>}
-    <ViewerInteractionOverlay onRecognizeAnatomy={automatic.recognize} anatomyLabel={anatomyLabel} viewport={viewport} element={elementRef.current} imageId={imageId} tool={tool} slice={slice} count={series?.imageIds.length || 0}
+    <ViewerInteractionOverlay anatomyLabel={anatomyLabel} viewport={viewport} element={elementRef.current} imageId={imageId} tool={tool} slice={slice} count={series?.imageIds.length || 0}
       marks={marks} selectedMarkId={selectedMarkId} onSelectMark={onSelectMark} cursor={cursor} onCursor={onCursor} onEditArrow={setEditingArrow} onUpdate={onUpdateMark} onAdd={mark=>{onAddMark(mark);if(mark.kind==='arrow'&&!mark.anatomyId)setEditingArrow(mark.id);}} onRemove={onRemoveMark} onSelect={onSelect} navigate={navigate}/>
     <ViewportMouseControls container={containerRef} element={elementRef.current} viewport={viewport} imageId={imageId} disabled={limited} marks={marks}
       onSelect={onSelect} onRemove={onRemoveMark} onClear={onClearImage} onEditArrow={setEditingArrow}/>
     {editingArrow&&marks.filter(mark=>mark.id===editingArrow&&mark.imageId===imageId&&mark.kind==='arrow').map(mark=><ArrowCommentEditor key={mark.id} mark={mark} onSave={comment=>onUpdateMark(mark.id,{comment})} onClose={()=>setEditingArrow(null)}/>)}
     {loadingProgress && <WorkProgress className="viewport-work-progress" progress={loadingProgress}/>}
-    {tool==='anatomy-auto'&&!limited&&selected&&imageId&&<AutomaticAnatomyStatus busy={automatic.busy} message={automatic.message}/>}
     <div className="pane-badge">{id}</div>
     {series ? <>
       <div className="overlay top-left"><strong>{series.patient}</strong><span>{age(series.birth, series.date)}</span><span>{formatDate(series.birth)} {tr('ui.born_945da')}</span></div>
@@ -394,7 +390,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   const [layoutHover, setLayoutHover] = useState({ rows: 1, columns: 1 });
   const [layoutOpen, setLayoutOpen] = useState(false);
   const [tool, setTool] = useState<Tool>('wl');
-  const [atlasOpen,setAtlasOpen]=useState(false);
+  const [toolbarMore,setToolbarMore]=useState(false);
   const [anatomyLabel,setAnatomyLabel]=useState<AnatomyLabel|null>(null);
   const [hideText, setHideText] = useState(false);
   const [railHidden, setRailHidden] = useState(false);
@@ -1152,7 +1148,8 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       event.preventDefault(); event.stopPropagation();
       if (!limited) void dropSources(event.dataTransfer.items, event.dataTransfer.files);
     }}>
-    <header className="topbar">
+    <header className={`topbar ${toolbarMore?'toolbar-more-open':''}`}>
+      <button className="toolbar-more" aria-label="Əlavə alətlər" aria-expanded={toolbarMore} onClick={()=>setToolbarMore(v=>!v)}><Settings2/></button>
       {!detachedMode && <div className="brand"><RadazLogo size={34}/><span><strong>RADAZ</strong><RadazTagline/></span></div>}
       <div className="primary-command-row">
         {!detachedMode && <div className="toolbar-group import-command" role="group" aria-label={tr('ui.dicom_import_48fa8')}><DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" className="header-control" title={tr('ui.dicom_import_e8ec8')} aria-label={tr('ui.dicom_import_e8ec8')} disabled={importBusy || limited}><FolderOpen size={17}/><span>{tr('ui.dicom_import_e8ec8')}</span><ChevronDown size={14}/></Button></DropdownMenuTrigger>
@@ -1194,20 +1191,18 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
           <label className="volume-parameter">{tr('ui.opacity_bc511')}<input aria-label={tr('ui.3d_opacity_9d0bc')} type="range" min="0.2" max="2" step="0.1" value={volumeOpacity} onChange={event => setVolumeOpacity(+event.currentTarget.value)}/><output>{Math.round(volumeOpacity * 100)}%</output></label>
 </DropdownMenuContent></DropdownMenu>
           <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" className="header-control volume-preset-trigger" title={tr('ui.lighting_and_quality_settings_89bd5')} aria-label={tr('ui.advanced_3d_settings_86add')}><Settings2 size={18}/></Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="header-menu volume-settings-menu"><div className="volume-menu-heading">{tr('ui.lighting_and_rendering_f92e6')}</div><VolumeRenderControls ct={ctVolume} preset={volumePreset} settings={volumeSettings} onChange={setVolumeSettings}/></DropdownMenuContent></DropdownMenu>
-          <button className="mpr-reset" type="button" aria-label={tr('ui.ct_and_mri_anatomy_32980')} onClick={()=>setAnatomyVolumeOpen(value=>!value)}><Layers3 size={17}/><span>{tr('ui.ct_mri_anatomy_f433a')}</span></button>
+          <button className="mpr-reset" type="button" aria-label="TotalSegmentator" onClick={()=>setAnatomyVolumeOpen(value=>!value)}><Layers3 size={17}/><span>{tr('ui.ct_mri_anatomy_f433a')}</span></button>
           <button className="mpr-reset volume-reset" type="button" onClick={() => { const style = volumeStyles.find(item => item.key === (ctVolume ? 'bone' : 'mr'))!; setVolumePreset(style.key); setVolumeThreshold(style.threshold); setVolumeOpacity(style.opacity); setVolumeSettings(style.lighting); setVolumeResetToken(value => value+1); }} title={tr('ui.reset_3d_view_lighting_opacity_rotation_zoom_628ef')} aria-label={tr('ui.reset_3d_view_24960')}><RotateCcw size={15}/><span>{tr('ui.reset_82c50')}</span></button>
         </div>
       </>}
       <div className="top-actions">
 
-        {!limited && detachedMode !== '3d' && <div className="toolbar-group" role="group" aria-label={tr('ui.image_display_e0186')}>
+        {!limited && detachedMode !== '3d' && <div className="display-command-row">
           <Button variant="ghost" className="header-control" aria-label={tr('ui.hide_annotations_0166e')} aria-pressed={hideText} title={hideText ? 'Yazıları göstər' : tr('ui.hide_annotations_0166e')} onClick={() => setHideText(value => !value)}>{hideText ? <EyeOff size={18}/> : <Eye size={18}/>}<span>{tr('ui.annotations_ce66d')}</span></Button>
           <ViewerDisplayControls panel={workspace === 'mpr' ? mprActive : active} imageId={currentImages[workspace === 'mpr' ? mprActive : active]} defaultImageId={workspace === 'mpr' ? seriesList.find(item => item.id === mprData?.sourceId)?.imageIds[0] : undefined} onStatus={setStatus}/>
 
         </div>}
-        {!limited && !detachedMode && <Button variant="ghost" className="header-control anatomy-trigger" aria-label={tr('ui.radiographic_anatomy_059ce')} title={tr('ui.anatomical_atlas_and_manual_labelling_ac4a1')} onClick={()=>{setAnatomyLabel(null);if(tool==='anatomy')setTool('wl');setAtlasOpen(true);}}><BookOpen size={18}/><span>{tr('ui.anatomy_14d66')}</span></Button>}
-        {!limited&&!detachedMode&&<Button variant="ghost" className={`header-control anatomy-trigger ${tool==='anatomy-auto'?'active':''}`} aria-label={tr('ui.click_to_identify_anatomy_b2c64')} aria-pressed={tool==='anatomy-auto'} title={tr('ui.local_research_60_structure_groups_in_dx_cr_r_c4e9f')} disabled={workspace!=='viewer'||!currentImages[active]} onClick={()=>{setAnatomyLabel(null);setTool(tool==='anatomy-auto'?'wl':'anatomy-auto');}}><ScanSearch size={18}/><span>{tr('ui.identify_anatomy_db50e')}</span></Button>}
-        {!limited&&<Button variant="ghost" className="header-control anatomy-trigger" aria-label={tr('ui.ct_and_mri_anatomy_32980')} title={tr('ui.local_anatomical_map_of_the_complete_ct_mri_s_be7ea')} onClick={()=>setAnatomyVolumeOpen(value=>!value)}><Layers3 size={18}/><span>{tr('ui.ct_mri_anatomy_f433a')}</span></Button>}
+        {!limited&&<Button variant="ghost" className="header-control anatomy-trigger" aria-label="TotalSegmentator" title="TotalSegmentator · CT / MR" onClick={()=>setAnatomyVolumeOpen(value=>!value)}><Layers3 size={18}/><span>{tr('ui.ct_mri_anatomy_f433a')}</span></Button>}
         {!limited && detachedMode !== '3d' && <div className="toolbar-group" role="group" aria-label={tr('ui.navigation_and_measurement_e7a8e')}>{viewTools.map(t => <Button key={t.id} variant="ghost" className={`header-control view-tool ${tool === t.id ? 'selected-tool' : ''}`} aria-pressed={tool === t.id} title={`${t.label} · ${t.hint}`} onClick={() => setTool(t.id)}><t.icon size={17}/><span>{t.label}</span></Button>)}
         <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className="header-control" title={tr('ui.measurement_tools_0762c')} aria-label={tr('ui.measurement_tools_0762c')}><Ruler size={17}/><span>{tr('ui.measurements_a4480')}</span><ChevronDown size={14}/></Button></DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="header-menu">{measureTools.map(t => <DropdownMenuItem key={t.id} onSelect={() => setTool(t.id)} className={tool === t.id ? 'menu-selected' : ''}><t.icon size={16}/>{t.label}<kbd>{t.hint}</kbd></DropdownMenuItem>)}<div className="menu-separator"/><DropdownMenuItem onSelect={() => setClearToken(x => x + 1)}><Trash2 size={16}/> {tr('ui.delete_all_on_current_slice_cc1ac')}<kbd>Ctrl+D</kbd></DropdownMenuItem><div className="menu-hint">{tr('ui.select_a_measurement_delete_to_remove_7f481')}</div></DropdownMenuContent>
@@ -1278,7 +1273,6 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
           } : null}/>
         </div>}
       </aside>}
-      <AnatomyAtlas open={atlasOpen} onOpenChange={setAtlasOpen} canPlace={!limited&&workspace==='viewer'&&!!currentImages[active]} onPlace={(bone,text)=>{setAnatomyLabel({id:bone.id,text,imageId:currentImages[active],panel:active});setTool('anatomy');}}/>
       <section className="main-area">
         {anatomyVolumeOpen&&!limited&&<AnatomyVolumeControls editing={workspace!=='3d'} control={anatomyVolume} source={anatomyVolumeSeries} onFocus={world=>{if(workspace==='3d')setAnatomyFocus(world);else if(workspace==='mpr')moveMprIntersection(world);else if(anatomyVolumeSeries){const index=closestSlice(anatomyVolumeSeries.imageIds,world,getLocalizerGeometry);if(index!==null)void getViewer().then(({engine})=>{const pane=engine.getViewport(`panel-${active}`) as Core.Types.IStackViewport|undefined;if(pane)void pane.setImageIdIndex(index).catch(error=>setStatus(String(error)));});}}} onPick={()=>{setAnatomyLabel(null);setTool('anatomy-volume');}} onClose={()=>{setAnatomyVolumeOpen(false);if(tool==='anatomy-volume')setTool('wl');}}/>}
         {anatomyLabel&&tool==='anatomy'&&<div className="anatomy-placement" role="status"><Crosshair size={18}/><span><strong>{anatomyLabel.text.split('\n')[0]}</strong> {tr('ui._pane_b5c88')}{anatomyLabel.panel}{tr('ui._click_the_structure_once_44e32')}</span><button onClick={()=>{setAnatomyLabel(null);setTool('wl');}}>{tr('ui.cancel_esc_bd665')}</button></div>}

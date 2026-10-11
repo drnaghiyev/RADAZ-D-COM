@@ -6,7 +6,6 @@ import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {verifyClientFiles,verifyClientHttp} from './release-health.mjs';
 import {anatomyVolumeService} from './local-anatomy-volume.mjs';
-import {anatomyService} from './local-anatomy.mjs';
 import {localAiRequest} from './local-ai-request.mjs';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 if(!existsSync(path.join(root,'dist/server/index.js')))throw new Error('Built application missing. Run START-RADAZ.cmd from a source checkout or extract the release ZIP.');
@@ -16,7 +15,6 @@ if(build.product.version!==product.version)throw new Error('RADAZ files belong t
 const runtime={name:'RADAZ',version:build.product.version,buildId:build.buildId,healthProtocol:1,startedAt:new Date().toISOString()};
 const installRoot=process.env.RADAZ_INSTALL_ROOT;
 const anatomyVolume=anatomyVolumeService(root,installRoot,product);
-const anatomy=anatomyService(root,installRoot,product);
 function activeVersion(){try{return JSON.parse(readFileSync(path.join(installRoot,'active.json'),'utf8')).version;}catch{return null;}}
 function recordStartup(error,phase){
  const diagnostic={phase,type:error.name||'Error',message:error.message,version:runtime.version,buildId:runtime.buildId,at:Date.now()};
@@ -49,7 +47,6 @@ void (async()=>{
 const server=http.createServer((req,res)=>{
  const pathname=new URL(req.url,'http://localhost').pathname;
  if(pathname.startsWith('/anatomy-volume/')){void anatomyVolume.handle(req,res);return;}
- if(pathname.startsWith('/anatomy-auto/')){void anatomy.handle(req,res);return;}
  if(pathname.startsWith('/local-archive-api/ai/')&&!localAiRequest(req)){res.writeHead(403,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'AI ayarlarını serverin quraşdırıldığı kompüterdə açın.'}));return;}
  res.setHeader('X-RADAZ-Build',runtime.buildId);
  res.setHeader('Cache-Control','no-store');
@@ -132,7 +129,7 @@ const server=http.createServer((req,res)=>{
  upstream.on('error',()=>{if(!res.headersSent)res.writeHead(503,{'Content-Type':'text/plain; charset=utf-8','Retry-After':'3'});res.end('RADAZ xidməti hazırlanır. Bir neçə saniyə sonra səhifəni yeniləyin.');});
  req.on('aborted',()=>upstream.destroy());req.pipe(upstream);
 });
-const stop=()=>{if(closing)return;closing=true;anatomyVolume.stop();anatomy.stop();server.close();if(process.platform==='win32'&&worker.pid)spawnSync('taskkill.exe',['/PID',String(worker.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});else worker.kill();setTimeout(()=>process.exit(),1500).unref();};
+const stop=()=>{if(closing)return;closing=true;anatomyVolume.stop();server.close();if(process.platform==='win32'&&worker.pid)spawnSync('taskkill.exe',['/PID',String(worker.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});else worker.kill();setTimeout(()=>process.exit(),1500).unref();};
 worker.on('exit',code=>{if(!closing){recordStartup(Error(`RADAZ web runtime exited (${code})${startupStderr?'\n'+startupStderr:''}`),'worker-exit');stop();process.exitCode=code||1;}});worker.on('error',error=>{recordStartup(error,'worker-start');stop();});
 server.on('error',error=>{recordStartup(error,'gateway-start');stop();process.exitCode=1;});
 process.on('SIGINT',stop);process.on('SIGTERM',stop);

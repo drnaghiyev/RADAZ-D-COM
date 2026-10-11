@@ -13,16 +13,16 @@ type Definition = {key:VolumePreset;title:string;subtitle:string;tone:string;thr
 const lighting=(ambient:number,diffuse:number,specular:number,specularPower:number):VolumeRenderSettings=>({ambient,diffuse,specular,specularPower,quality:'high'});
 // Camera-relative key, fill and rim lights: stable depth cues as the volume rotates.
 export const volumeStudioLights=[
- {position:[-.5,.7,1] as [number,number,number],intensity:.85,color:[1,.97,.92] as [number,number,number]},
- {position:[.8,.15,.6] as [number,number,number],intensity:.28,color:[.91,.95,1] as [number,number,number]},
- {position:[.15,-.5,-1] as [number,number,number],intensity:.18,color:[1,1,1] as [number,number,number]},
+ {position:[-.5,.7,1] as [number,number,number],intensity:.85,color:[1,.99,.97] as [number,number,number]},
+ {position:[.8,.15,.6] as [number,number,number],intensity:.28,color:[.96,.98,1] as [number,number,number]},
+ {position:[.15,-.5,-1] as [number,number,number],intensity:.16,color:[1,1,1] as [number,number,number]},
 ];
 export const volumeStyles:Definition[]=[
  {key:'bone',title:'Bone',subtitle:'Kortikal və süngəri sümük · HU',tone:'#eee0c5',threshold:260,opacity:1,
-  scalar:[[-1024,0],[180,0],[260,.015],[340,.38],[500,.78],[800,.94],[1500,.98],[3071,1]],
-  color:[[-1024,.55,.36,.2],[180,.68,.48,.29],[260,.8,.64,.43],[400,.94,.84,.66],[700,1,.96,.85],[1500,1,.99,.95],[3071,1,1,.98]],
-  gradient:[[0,1],[1000,1]],shade:true,interpolation:1,blend:'composite',lighting:lighting(.18,.82,.24,32),
-  surface:{opacityUnitDistance:.8,gradientOpacity:false,normalFromOpacity:true,occlusion:true}},
+  scalar:[[-1024,0],[120,0],[200,.005],[260,.035],[340,.23],[500,.65],[800,.9],[1500,.98],[3071,1]],
+  color:[[-1024,.25,.06,.025],[120,.42,.12,.045],[200,.65,.28,.12],[260,.86,.59,.36],[340,.97,.84,.67],[500,1,.94,.82],[800,1,.97,.9],[1500,1,.985,.95],[3071,1,1,.98]],
+  gradient:[[0,1],[1000,1]],shade:true,interpolation:1,blend:'composite',lighting:{...lighting(.22,.7,.12,28),sampling:.65,lightIntensity:.9},
+  surface:{opacityUnitDistance:1,gradientOpacity:false,normalFromOpacity:false,occlusion:true}},
  {key:'angio',title:'Angio',subtitle:'Kontrastlı damarlar · HU',tone:'#e96543',threshold:120,opacity:1,scalar:[[-1024,0],[80,0],[140,.03],[250,.25],[450,.6],[900,.85],[3071,1]],color:[[0,.2,.01,.02],[120,.6,.06,.09],[250,.9,.35,.4],[500,1,.78,.79],[1000,1,.97,.94]],gradient:[[0,.05],[20,.25],[100,1]],shade:true,interpolation:1,blend:'composite',lighting:lighting(.2,.8,.4,40)},
  {key:'soft',title:'Soft Tissue',subtitle:'Yumşaq toxuma · HU',tone:'#c47068',threshold:0,opacity:1,scalar:[[-1024,0],[-150,0],[-50,.02],[40,.12],[150,.25],[400,.08],[3071,.1]],color:[[-150,.45,.25,.18],[0,.75,.4,.35],[100,1,.75,.6],[400,1,.92,.8]],gradient:[[0,.15],[20,.5],[80,1]],shade:true,interpolation:1,blend:'composite',lighting:lighting(.3,.7,.2,20)},
  {key:'lung',title:'Lung',subtitle:'Ağciyər parenximası · HU',tone:'#b6bec6',threshold:-760,opacity:1,scalar:[[-1024,0],[-950,0],[-850,.03],[-700,.12],[-400,.3],[-200,.02],[3071,0]],color:[[-1000,.12,.14,.16],[-800,.4,.43,.46],[-500,.75,.78,.8],[-200,.95,.96,.97]],gradient:[[0,.1],[10,.4],[80,1]],shade:true,interpolation:1,blend:'composite',lighting:lighting(.3,.75,.15,20)},
