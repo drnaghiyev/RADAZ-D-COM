@@ -2,7 +2,7 @@ import type {TransferFunction,VolumeCrop} from './transfer-function';
 export type VolumePreset = 'bone'|'angio'|'soft'|'lung'|'airway'|'skin'|'transparent'|'mip'|'minip'|'mr';
 export type VolumeQuality = 'performance'|'balanced'|'high'|'ultra'|'auto';
 export type VolumeRenderSettings = {ambient:number;diffuse:number;specular:number;specularPower:number;quality:VolumeQuality;
-  shading?:'surface'|'occlusion'|'scattering'; opacityDistance?:number; transferWidth?:number; sampling?:number;
+  lighting?:'even'|'studio'|'flat'; shading?:'surface'|'occlusion'|'scattering'; opacityDistance?:number; transferWidth?:number; sampling?:number;
   gradient?:boolean; gradientMin?:number; gradientMax?:number; normalFromOpacity?:boolean;
   occlusionRadius?:number; occlusionSamples?:number; scattering?:number; shadowReach?:number;
   lightIntensity?:number; interpolation?:'linear'|'nearest'; mouseMode?:'rotate'|'tissue';customTransfer?:TransferFunction;crop?:VolumeCrop};
@@ -17,6 +17,13 @@ export const volumeStudioLights=[
  {position:[.8,.15,.6] as [number,number,number],intensity:.28,color:[.96,.98,1] as [number,number,number]},
  {position:[.15,-.5,-1] as [number,number,number],intensity:.16,color:[1,1,1] as [number,number,number]},
 ];
+// Symmetric camera-relative fill avoids a permanently dark side after rotation.
+export const volumeEvenLights=[
+ {position:[0,0,1] as [number,number,number],intensity:.45,color:[1,1,1] as [number,number,number]},
+ {position:[-.6,.35,1] as [number,number,number],intensity:.32,color:[1,1,1] as [number,number,number]},
+ {position:[.6,.35,1] as [number,number,number],intensity:.32,color:[1,1,1] as [number,number,number]},
+];
+export const volumeLights=(mode:VolumeRenderSettings['lighting'])=>mode==='studio'?volumeStudioLights:volumeEvenLights;
 export const volumeStyles:Definition[]=[
  {key:'bone',title:'Bone',subtitle:'Kortikal və süngəri sümük · HU',tone:'#eee0c5',threshold:260,opacity:1,
   scalar:[[-1024,0],[120,0],[200,.005],[260,.035],[340,.23],[500,.65],[800,.9],[1500,.98],[3071,1]],
@@ -41,7 +48,7 @@ export const volumePresetConfig=Object.fromEntries(volumeStyles.map(v=>[v.key,v]
 /** Physical opacity distance is in mm; gradients are calibrated scalar differences. */
 export function resolvedVolumeSettings(preset:VolumePreset, settings:VolumeRenderSettings):Required<Omit<VolumeRenderSettings,'customTransfer'|'crop'>>&Pick<VolumeRenderSettings,'customTransfer'|'crop'> {
  const definition=volumePresetConfig[preset];
- return {shading:'surface',opacityDistance:definition.surface?.opacityUnitDistance??1,
+ return {lighting:'even',shading:'surface',opacityDistance:definition.surface?.opacityUnitDistance??1,
   transferWidth:1,sampling:1,gradient:definition.surface?.gradientOpacity??definition.shade,
   gradientMin:definition.gradient[0][0],gradientMax:definition.gradient.at(-1)![0],normalFromOpacity:definition.surface?.normalFromOpacity??false,
   occlusionRadius:2,occlusionSamples:16,scattering:.25,shadowReach:.12,lightIntensity:1,interpolation:'linear',mouseMode:'rotate',...settings};

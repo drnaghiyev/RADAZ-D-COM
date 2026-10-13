@@ -10,18 +10,19 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
   const type=message?.type;
   if(type==='BRIDGE_INFO'){
    if(!sender.tab||!await originAllowed(sender.url))throw new Error('RADAZ ünvanını əlavənin ayarlarında yoxlayın.');
-   return {ok:true,protocol:2,version:chrome.runtime.getManifest().version};
+   return {ok:true,protocol:3,version:chrome.runtime.getManifest().version};
   }
   if(type?.startsWith('ZIP_')){
-   if(!sender.tab||!await originAllowed(sender.url))throw new Error('Bu RADAZ ünvanına icazə verilməyib. Əlavənin ayarlarını açın.');
+   if(!sender.tab||!await originAllowed(sender.url)||new URL(sender.url).pathname!=='/report')throw new Error('Bu RADAZ ünvanına icazə verilməyib. Əlavənin ayarlarını açın.');
    if(!/^[a-f0-9]{32}$/.test(message.request))throw new Error('Sorğu identifikatoru düzgün deyil.');
    const {pending}=await chrome.storage.session.get('pending');
    if(type==='ZIP_BEGIN'){
     if(pending&&pending.expires>Date.now())throw new Error('Əvvəlki ZIP hələ ötürülür. Bir az gözləyin.');
     if(typeof message.prompt!=='string'||!message.prompt.trim()||message.prompt.length>20000||message.name!=='RADAZ-ChatGPT.zip'||!Number.isInteger(message.size)||message.size<4||message.size>MAX_BYTES||message.count!==Math.ceil(message.size/CHUNK_BYTES))throw new Error('ZIP paketi düzgün deyil və ya 480 MB həddini keçir.');
+    if(message.autoSubmit!==undefined&&typeof message.autoSubmit!=='boolean')throw new Error('Göndərmə seçimi düzgün deyil.');
     const a=message.attachments;
     if(a!==undefined&&(!a||typeof a.includeZip!=='boolean'||!Number.isInteger(a.first)||a.first<0||!Number.isInteger(a.count)||a.count<1||a.count>8||!Number.isInteger(a.total)||a.total<1||a.total>100000||a.first+a.count>a.total))throw new Error('JPEG qrupu düzgün deyil.');
-    await clear();const next={request:message.request,sourceTab:sender.tab.id,prompt:message.prompt,name:message.name,size:message.size,count:message.count,attachments:a,next:0,bytes:0,expires:Date.now()+15*60000};
+    await clear();const next={request:message.request,sourceTab:sender.tab.id,prompt:message.prompt,name:message.name,size:message.size,count:message.count,attachments:a,autoSubmit:message.autoSubmit===true,next:0,bytes:0,expires:Date.now()+15*60000};
     await chrome.storage.session.set({pending:next});await chrome.alarms.create('radaz-expire',{when:next.expires});return {ok:true};
    }
    if(!pending||pending.sourceTab!==sender.tab.id||pending.request!==message.request||pending.expires<Date.now())throw new Error('ZIP ötürmə sessiyası bitib. Yenidən ötürün.');
@@ -42,7 +43,7 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
   const {pending,reports={}}=await chrome.storage.session.get(['pending','reports']);
   if(type==='COMPOSER_READY'){
    if(!pending||pending.targetTab!==sender.tab.id||pending.expires<Date.now()||pending.delivered)return {ok:true,bundle:null,returnAvailable:!!reports[sender.tab.id]&&reports[sender.tab.id].expires>Date.now()};
-   pending.delivered=true;await chrome.storage.session.set({pending});return {ok:true,bundle:{prompt:pending.prompt,name:pending.name,size:pending.size,count:pending.count,attachments:pending.attachments}};
+   pending.delivered=true;await chrome.storage.session.set({pending});return {ok:true,bundle:{prompt:pending.prompt,name:pending.name,size:pending.size,count:pending.count,attachments:pending.attachments,autoSubmit:pending.autoSubmit}};
   }
   if(type==='COMPOSER_CHUNK'){
    if(!pending||pending.targetTab!==sender.tab.id||pending.expires<Date.now()||!Number.isInteger(message.index)||message.index<0||message.index>=pending.count)throw new Error('ZIP hissəsi əlçatan deyil.');
@@ -55,7 +56,7 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
     reports[sender.tab.id]={request:pending.request,sourceTab:pending.sourceTab,expires:Date.now()+60*60000};await chrome.storage.session.set({reports});
    }
    const a=pending.attachments;
-   await deliver(pending,'complete',message.ok?`${a?`${a.count} JPEG (${a.first+1}–${a.first+a.count} / ${a.total})${a.includeZip?' və bütün görüntülərin ZIP-i':''}`:'ZIP'} ChatGPT mesaj sahəsində təsdiqləndi. Məzmunu yoxlayıb mesajı göndərin; cavabı “RADAZ-a qaytar” ilə hesabata ötürün.`:String(message.error||'Görüntülər əlavə edilmədi. Əl ilə əlavə edin.').slice(0,500));await clear();return {ok:true};
+   await deliver(pending,'complete',message.ok&&message.sent===true&&pending.autoSubmit?'Tapşırıq və görüntülər ChatGPT-yə göndərildi. Cavab tamamlananda “RADAZ-a qaytar” düyməsini basın.':message.ok?`${a?`${a.count} JPEG (${a.first+1}–${a.first+a.count} / ${a.total})${a.includeZip?' və bütün görüntülərin ZIP-i':''}`:'ZIP'} ChatGPT mesaj sahəsində təsdiqləndi. Məzmunu yoxlayıb mesajı göndərin; cavabı “RADAZ-a qaytar” ilə hesabata ötürün.`:String(message.error||'Görüntülər əlavə edilmədi. Əl ilə əlavə edin.').slice(0,500));await clear();return {ok:true};
   }
   if(type==='REPORT_ANSWER'){
    const link=reports[sender.tab.id];if(!link||link.expires<Date.now()||typeof message.text!=='string'||!message.text.trim()||message.text.length>200000)throw new Error('Hesabat sessiyası bitib və ya cavab boşdur. Mətni əl ilə kopyalayın.');

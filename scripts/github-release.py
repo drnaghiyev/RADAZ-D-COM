@@ -113,6 +113,9 @@ def validate_package(root, version):
                 from radaz_desktop import validate_files
                 with ZipFile(file) as package:
                     validate_files(package.namelist(),json.loads(package.read('SHA256SUMS.json')),package.read,version)
+                    shell = 'runtime/electron/resources/app/package.json'
+                    if shell in package.namelist() and json.loads(package.read(shell))['version'] != version:
+                        raise ValueError('Native shell bootstrap version mismatch')
             elif file.read_bytes()[:2] != b'MZ':
                 raise ValueError('Setup executable missing')
     for patch in sorted((root/'outputs/releases').glob(f'RADAZ-{version}-from-*-x64.patch.zip')):

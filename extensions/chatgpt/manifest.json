@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "RADAZ → ChatGPT",
-  "version": "0.3.3",
-  "description": "Transfers one complete RADAZ ZIP to ChatGPT and returns the answer. Never submits a message automatically.",
+  "version": "0.3.4",
+  "description": "Transfers selected RADAZ images and ZIP to ChatGPT. Sends only after an explicit RADAZ send action; returns the draft for review.",
   "permissions": [
     "storage",
     "scripting",

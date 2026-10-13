@@ -65,6 +65,10 @@ def main():
     shell = electron / 'resources/app'; shell.mkdir(parents=True)
     for name in ('main.cjs', 'package.json'):
         shutil.copy2(ROOT / 'desktop' / name, shell / name)
+    # The native shell selects its bootstrap runtime from this version on first launch.
+    shell_package = json.loads((shell / 'package.json').read_text(encoding='utf-8'))
+    shell_package['version'] = version
+    (shell / 'package.json').write_text(json.dumps(shell_package, indent=2), encoding='utf-8')
     (STAGE / 'runtime/sources.json').write_text(json.dumps({k:v for k,v in LOCK.items() if k != 'inno'}, indent=2))
     (STAGE / 'desktop.json').write_text(json.dumps({'schema':1,'version':version,'architecture':'x64'}))
     # Render the existing vector logo, then encode a multi-resolution Windows icon.

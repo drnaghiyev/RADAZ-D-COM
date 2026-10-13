@@ -904,12 +904,12 @@ body .toolbar-workspace .archive-unified-header .records-search{flex:1 1 150px!i
 }
 
 /* Compact icons leave every desktop command visible at 1920 px. Grips sit on the right. */
-.toolbar-workspace{--command-size:32px;--command-icon:20px;--command-gap:7px;--group-gap:10px}
-@media(min-width:1600px){.toolbar-workspace{--command-size:34px;--command-icon:21px;--command-gap:8px;--group-gap:12px}}
-@media(min-width:1920px){.toolbar-workspace{--command-size:36px;--command-icon:22px;--command-gap:8px;--group-gap:12px}}
-@media(min-width:2560px){.toolbar-workspace{--command-size:44px;--command-icon:26px;--command-gap:9px;--group-gap:16px}}
-@media(min-width:3200px){.toolbar-workspace{--command-size:52px;--command-icon:30px;--command-gap:10px;--group-gap:18px}}
-body .toolbar-workspace .dockable-tool-group,body .toolbar-workspace main.workstation.grouped-workstation .topbar .dockable-tool-group{padding:5px 16px 5px 4px!important;gap:var(--command-gap)!important}
+.toolbar-workspace{--command-size:30px;--command-icon:18px;--command-gap:7px;--group-gap:10px}
+@media(min-width:1600px){.toolbar-workspace{--command-size:32px;--command-icon:19px;--command-gap:8px;--group-gap:12px}}
+@media(min-width:1920px){.toolbar-workspace{--command-size:32px;--command-icon:20px;--command-gap:7px;--group-gap:12px}}
+@media(min-width:2560px){.toolbar-workspace{--command-size:42px;--command-icon:24px;--command-gap:9px;--group-gap:16px}}
+@media(min-width:3200px){.toolbar-workspace{--command-size:48px;--command-icon:28px;--command-gap:10px;--group-gap:18px}}
+body .toolbar-workspace .dockable-tool-group,body .toolbar-workspace main.workstation.grouped-workstation .topbar .dockable-tool-group{padding:6px 18px 6px 8px!important;gap:var(--command-gap)!important}
 body .toolbar-workspace .dockable-tool-group button.toolbar-drag-handle,body .toolbar-workspace main.workstation.grouped-workstation .topbar .dockable-tool-group button.toolbar-drag-handle{top:4px!important;bottom:4px!important;left:auto!important;right:1px!important;width:12px!important;min-width:12px!important;height:auto!important;min-height:0!important;padding:0!important;display:flex;align-items:center;justify-content:center;background:transparent!important;border:0!important;cursor:ew-resize}
 body .toolbar-workspace .dockable-tool-group button.toolbar-drag-handle svg,body .toolbar-workspace main.workstation.grouped-workstation .topbar .dockable-tool-group button.toolbar-drag-handle svg{width:12px!important;height:22px!important;transform:none!important}
 body .toolbar-workspace .right-tool-dock button.toolbar-drag-handle{cursor:move}
@@ -923,3 +923,21 @@ body .toolbar-workspace .records-header .dockable-tool-group{order:var(--group-o
 .measurement-settings label{display:flex;align-items:center;gap:8px;cursor:pointer}
 .measurement-settings input{width:18px;height:18px;accent-color:#65cad8}
 .measurement-settings p{font-size:13px;color:#a8bdc9}
+
+/* Small disclosure marks retain the full button hit area in every dock. */
+body .toolbar-workspace :is(.records-header,.dockable-tool-group) button svg.lucide-chevron-down,
+body .toolbar-workspace main.workstation.grouped-workstation .topbar button:not(.toolbar-drag-handle) svg.lucide-chevron-down{width:7px!important;height:7px!important;min-width:7px!important;flex:0 0 7px!important;right:2px!important;bottom:3px!important}
+body .toolbar-workspace .dockable-tool-group[data-dragging=true]{opacity:.35;outline:2px dashed #69cddd;outline-offset:2px}
+body .toolbar-workspace :is(.topbar,.toolbar-overflow-popup) .mpr-thickness{display:grid!important;grid-template-columns:minmax(64px,84px) 46px;align-items:center;gap:8px!important;flex:0 0 138px!important;width:138px!important;min-width:138px!important;max-width:138px!important;margin:0 6px!important;padding:0!important;box-sizing:border-box}
+body .toolbar-workspace :is(.topbar,.toolbar-overflow-popup) .mpr-thickness>span{display:none!important}
+body .toolbar-workspace :is(.topbar,.toolbar-overflow-popup) .mpr-thickness input{width:100%!important;min-width:0!important;margin:0!important}
+body .toolbar-workspace .mpr-thickness output{white-space:nowrap;font-variant-numeric:tabular-nums}
+
+.assistant-image{touch-action:none;cursor:crosshair;user-select:none}
+.assistant-image img{pointer-events:none;-webkit-user-drag:none}
+.assistant-series{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.assistant-series select{min-width:0;flex:1;background:#162632;color:#e4edf3;border:1px solid #3b5364;border-radius:5px;padding:7px}
+.assistant-mouse-help,.assistant-profile{color:#a8c3cf;font-size:12px;line-height:1.5}
+.assistant-providers{display:flex;gap:8px;margin:12px 0}
+.assistant-providers button{flex:1;padding:9px;border:1px solid #375464;border-radius:6px}
+.assistant-providers button[aria-pressed=true]{background:#1d4858;border-color:#77cdd9}

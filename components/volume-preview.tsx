@@ -8,7 +8,7 @@ import {createVolumeScalpel} from '@/lib/volume-scalpel';
 import {Box,Scissors,RotateCcw,Undo2,Rotate3D} from 'lucide-react';
 import {getViewer,getSeriesVolume} from '@/lib/cornerstone';
 import {gpuCapabilities} from '@/lib/gpu-capabilities';
-import {qualityProfiles,resolvedVolumeSettings,volumePresetConfig,volumeStudioLights,type VolumePreset,type VolumeRenderSettings} from '@/lib/volume-presets';
+import {qualityProfiles,resolvedVolumeSettings,volumePresetConfig,volumeLights,type VolumePreset,type VolumeRenderSettings} from '@/lib/volume-presets';
 import {viewerPerformance,performanceSnapshot,instrumentVolumeUpload} from '@/lib/viewer-performance';
 import {WorkProgress} from './work-progress';
 import type {WorkProgress as LoadingProgress} from '@/lib/work-progress';
@@ -71,9 +71,9 @@ export function VolumePreview(props:Props){
   mapper?.setImageSampleDistance(preview?Math.max(3,config.imageSample):config.imageSample);
   const definition=volumePresetConfig[propsRef.current.preset];
   const property=actor?.getProperty();
-  property?.setShade(definition.shade); // Keep anatomy legible while dragging, too.
+  property?.setShade(definition.shade&&currentSettings.lighting!=='flat'); // Keep anatomy legible while dragging, too.
   property?.setUseGradientOpacity(0,currentSettings.gradient);
-  const shadows=definition.shade&&!preview&&caps.tier!=='low'&&selected!=='performance';
+  const shadows=definition.shade&&currentSettings.lighting!=='flat'&&!preview&&caps.tier!=='low'&&selected!=='performance';
   property?.setLocalAmbientOcclusion(shadows&&currentSettings.shading==='occlusion');
   property?.setLAOKernelSize(Math.min(currentSettings.occlusionSamples,selected==='balanced'?16:32));
   property?.setLAOKernelRadius(Math.min(currentSettings.occlusionRadius,selected==='balanced'?3:8));
@@ -83,7 +83,7 @@ export function VolumePreview(props:Props){
   // Our explicit drag/final profiles own sampling. VTK auto-scaling can leave
   // a stationary image blurred after a slow frame, even after mouse-up.
   mapper?.setAutoAdjustSampleDistances(false);mapper?.setMaximumSamplesPerRay(caps.tier==='low'?1536:4096);
-  hostRef.current?.setAttribute('data-quality',selected);hostRef.current?.setAttribute('data-interacting',String(interacting.current));
+  hostRef.current?.setAttribute('data-lighting',currentSettings.lighting);hostRef.current?.setAttribute('data-quality',selected);hostRef.current?.setAttribute('data-interacting',String(interacting.current));
   setEffectiveQuality(selected);
   elementMaterialState();
  };
@@ -117,7 +117,7 @@ export function VolumePreview(props:Props){
   property?.setGradientOpacityMinimumOpacity(0,0);
   property?.setGradientOpacityMaximumOpacity(0,1);
   if(options.interpolation==='nearest')property?.setInterpolationTypeToNearest();else property?.setInterpolationTypeToLinear();
-  viewport.getRenderer().getLights().forEach((light:any,i:number)=>light.setIntensity((volumeStudioLights[i]?.intensity??1)*options.lightIntensity));
+  viewport.getRenderer().getLights().forEach((light:any,i:number)=>{const config=volumeLights(options.lighting)[i];if(config){light.setPosition(...config.position);light.setColor(...config.color);light.setIntensity(config.intensity*options.lightIntensity);}});
   if(definition.blend==='maximum')mapper?.setBlendModeToMaximumIntensity();
   else if(definition.blend==='minimum')mapper?.setBlendModeToMinimumIntensity();else mapper?.setBlendModeToComposite();
   applyQuality();viewport.render();
@@ -149,7 +149,7 @@ export function VolumePreview(props:Props){
    if(disposed)return;
    const viewport=engine.getViewport(viewportId) as any;viewportRef.current=viewport;
    const renderer=viewport.getRenderer();renderer.removeAllLights();renderer.setAutomaticLightCreation(false);
-   for(const config of volumeStudioLights){const light=renderer.makeLight();light.setLightTypeToCameraLight();light.setPosition(...config.position);light.setFocalPoint(0,0,0);light.setIntensity(config.intensity);light.setColor(...config.color);renderer.addLight(light);lights.push(light);}
+   for(const config of volumeLights(propsRef.current.settings.lighting)){const light=renderer.makeLight();light.setLightTypeToCameraLight();light.setPosition(...config.position);light.setFocalPoint(0,0,0);light.setIntensity(config.intensity);light.setColor(...config.color);renderer.addLight(light);lights.push(light);}
    element.setAttribute('data-volume-id',current.volumeId);element.setAttribute('data-volume-dimensions',current.volume.dimensions.join(','));
    const modified=(event:Event)=>{const detail=(event as CustomEvent).detail;if(detail.volumeId!==current.volumeId)return;
     const done=detail.framesProcessed??0,total=current.imageIds.length;setProgress(done<total?{label:'3D kəsitləri yüklənir',done,total}:null);};

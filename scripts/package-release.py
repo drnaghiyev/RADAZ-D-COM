@@ -23,7 +23,7 @@ explicit=['package.json','pnpm-lock.yaml','pnpm-workspace.yaml','README.md','DIS
  'scripts/start-radaz.ps1','scripts/stop-web-server.ps1','scripts/start-release.mjs','scripts/setup-release.ps1','scripts/start-archive.ps1','scripts/wait-release-browser.ps1','scripts/desktop-shortcuts.ps1','installer/launcher.ps1','bridge/radaz_desktop.py','bridge/radaz_archive.py','bridge/radaz_pacs_bridge.py','bridge/radaz_output.py','bridge/radaz_product.py','bridge/radaz_trial.py','bridge/radaz_commerce.py','bridge/radaz_disc.ps1','bridge/README.md','public/license-public.json']
 explicit.extend(['bridge/radaz_removable.py','bridge/radaz_windows.py'])
 explicit.append('scripts/release-health.mjs')
-explicit.extend(['scripts/local-ai-request.mjs', 'bridge/radaz_ai.py'])
+explicit.extend(['scripts/local-ai-request.mjs', 'bridge/radaz_ai.py', 'bridge/radiology-profile.json'])
 explicit.extend(['scripts/local-anatomy-volume.mjs','scripts/anatomy-access.mjs','bridge/anatomy-models.json','bridge/anatomy_providers.py','bridge/radaz_anatomy_volume.py'])
 files={p:ROOT/p for p in explicit}
 for folder in ['dist/client','dist/server','dist/runtime','dist/node_modules','bridge/wheels']:

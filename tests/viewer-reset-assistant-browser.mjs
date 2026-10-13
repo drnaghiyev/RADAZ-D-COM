@@ -6,6 +6,7 @@ import {mkdtempSync,mkdirSync,rmSync,createWriteStream,readFileSync} from 'node:
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
+import JSZip from 'jszip';
 import {setTimeout as delay} from 'node:timers/promises';
 const {chromium}=createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE||'playwright');
 const free=()=>new Promise(resolve=>{const s=http.createServer();s.listen(0,'127.0.0.1',()=>{const port=s.address().port;s.close(()=>resolve(port));});});
@@ -21,7 +22,7 @@ try{
  const log=createWriteStream('outputs/viewer-reset/server.log');server.stdout.pipe(log);server.stderr.pipe(log);
  for(let i=0;i<100;i++){try{if((await fetch(base)).ok)break;}catch{}await delay(200);}
  browser=await chromium.launch({headless:true,channel:'msedge'});
- const context=await browser.newContext({viewport:{width:1440,height:1000}}),errors=[];context.setDefaultTimeout(25000);
+ const context=await browser.newContext({viewport:{width:1920,height:1080}}),errors=[];context.setDefaultTimeout(25000);
  context.on('page',p=>p.on('pageerror',e=>errors.push(e.message)));
  await context.route('**/local-archive-api/license',route=>route.fulfill({json:{valid:true,required:true,kind:'owner',message:'Synthetic license',deviceId:'TEST'}}));
  const viewer=await context.newPage();await viewer.goto(base);
@@ -51,10 +52,37 @@ try{
  const opened=context.waitForEvent('page');await viewer.getByRole('button',{name:'AI asistent',exact:true}).click();const assistant=await opened;
  await assistant.getByRole('textbox',{name:'Hesabat mətni',exact:true}).waitFor();
  assert.equal(await assistant.locator('.report-series-list input:checked').count(),2,'Both CT series are selected');
- assert.match(await assistant.locator('.assistant-selection').innerText(),/2 seriya · 24 görüntü/);
+ assert.match(await assistant.locator('.assistant-selection').innerText(),/2 seriya ·\s*24 görüntü/);
  assert.equal(await assistant.getByRole('button',{name:'Dərindən incələ və rapor yaz',exact:true}).isDisabled(),true);
  assert.equal(await assistant.locator('a[href*="chatgpt.com"]').count(),0);
  await assistant.locator('.assistant-preview img').waitFor();await assistant.getByRole('button',{name:'Növbəti görüntü',exact:true}).click();assert.match(await assistant.locator('.assistant-navigation').innerText(),/2 \/ 24/);
+ // Actual DICOM windowing by pointer and wheel, isolated to the selected series.
+ const beforeImage=await assistant.locator('.assistant-preview img').getAttribute('src');
+ const area=await assistant.locator('.assistant-image').boundingBox();
+ await assistant.mouse.move(area.x+area.width*.4,area.y+area.height*.4);await assistant.mouse.down();
+ await assistant.mouse.move(area.x+area.width*.4+45,area.y+area.height*.4+25,{steps:6});await assistant.mouse.up();
+ assert.ok(Number(await assistant.getByLabel('AI WW',{exact:true}).inputValue())>400);
+ await assistant.waitForFunction(src=>document.querySelector('.assistant-preview img')?.src!==src,beforeImage);
+ await assistant.mouse.wheel(0,120);await assistant.waitForFunction(()=>document.querySelector('.assistant-navigation')?.textContent.includes('3 / 24'));
+ const series=assistant.getByLabel('AI seriyası',{exact:true});const values=await series.locator('option').evaluateAll(nodes=>nodes.map(n=>n.value));
+ await series.selectOption(values[1]);assert.equal(await assistant.getByLabel('AI WW',{exact:true}).inputValue(),'400');
+ await series.selectOption(values[0]);assert.ok(Number(await assistant.getByLabel('AI WW',{exact:true}).inputValue())>400);
+ await assistant.getByRole('button',{name:'ChatGPT',exact:true}).click();
+ await assistant.locator('.chatgpt-connection.missing').waitFor();
+ assert.equal(await assistant.locator('a[href="/radaz-chatgpt-extension.zip"]').count(),1);
+ assert.match(await assistant.locator('.assistant-profile').innerText(),/RADAZ Radiology AI/);
+ await assistant.getByRole('button',{name:'Bütün görüntüləri ZIP hazırla',exact:true}).click();
+ const zipLink=assistant.getByRole('link',{name:'ZIP yüklə',exact:true});await zipLink.waitFor();
+ const downloading=assistant.waitForEvent('download');await zipLink.click();const download=await downloading;
+ const payload=await JSZip.loadAsync(readFileSync(await download.path()));
+ const manifest=JSON.parse(await payload.file('manifest.json').async('string'));
+ assert.equal(manifest.imageCount,24);assert.equal(manifest.images.length,24);
+ assert.ok(manifest.images[0].window.ww>400);assert.equal(manifest.images[12].window,undefined);
+ assert.match(await payload.file('ChatGPT-tapsiriq.txt').async('string'),/RADAZ Radiology AI/);
+ assert.match(await payload.file('ChatGPT-tapsiriq.txt').async('string'),/Capture region/);
+ assert.equal(Object.keys(payload.files).filter(name=>name.endsWith('.jpg')).length,24);
+
+ await assistant.getByRole('button',{name:'OpenAI API',exact:true}).click();
  await assistant.getByRole('textbox',{name:'AI üçün əlavə tapşırıq',exact:true}).fill('Bronxit raporu yaz — sınaq');
  await assistant.getByRole('textbox',{name:'Hesabat mətni',exact:true}).fill('Sintetik sınaq hesabatı.');
  await assistant.getByRole('button',{name:'Yadda saxla',exact:true}).click();await assistant.locator('[role="status"]').filter({hasText:'Hesabat bu brauzerdə saxlanıldı'}).waitFor();
@@ -86,7 +114,7 @@ try{
   return route.fulfill({json:{text:body.images?.length?'Sintetik müşahidələr':'AI hesabat layihəsi — sınaq nəticəsi. <script>alert(1)</script>'}}).catch(()=>{});
  });
  await analyze.click();await restored.getByRole('status').filter({hasText:'AI layihəsi redaktora əlavə edildi'}).waitFor();
- assert.equal(calls.length,4);assert.equal(calls.slice(0,3).flatMap(c=>c.images).length,24,'All images in both series are sent');
+ assert.equal(calls[0].phase,'observations');assert.deepEqual(calls[0].modalities,['CT']);assert.equal(calls.at(-1).phase,'report');assert.equal(calls.length,4);assert.equal(calls.slice(0,3).flatMap(c=>c.images).length,24,'All images in both series are sent');
  assert.equal(new Set(calls.slice(0,3).flatMap(c=>c.images).map(i=>i.label)).size,24,'Every image gets a distinct label');
  assert.equal(JSON.stringify(calls).includes(key),false);
  const text=await restored.getByRole('textbox',{name:'Hesabat mətni',exact:true}).innerText();assert.match(text,/Sintetik sınaq hesabatı/);assert.match(text,/AI hesabat layihəsi/);

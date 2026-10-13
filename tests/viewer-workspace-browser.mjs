@@ -44,7 +44,8 @@ try {
   await page.mouse.move(target.x+target.width*.75,target.y+target.height/2,{steps:15});
   await page.waitForFunction(x=>document.querySelector('[data-toolbar-group="import"] .toolbar-drag-handle').getBoundingClientRect().x!==x,oldX);
   assert.ok(Number(await page.locator('[data-toolbar-group="import"]').evaluate(n=>n.style.order))<5,'Reorder stays beside pointer instead of jumping to end');
-  await page.mouse.up();console.log('PASS live reorder before mouse release');
+  const ghost=await page.locator('[data-toolbar-ghost]').boundingBox();assert.ok(ghost&&Math.abs(ghost.y-target.y)<40,'Group preview follows pointer');
+  await page.mouse.up();assert.equal(await page.locator('[data-toolbar-ghost]').count(),0);console.log('PASS live reorder before mouse release');
   let box=await grip.boundingBox();await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();
   await page.mouse.move(1900,200,{steps:25});await page.mouse.up();
   await page.locator('.right-tool-dock [data-toolbar-group="import"]').waitFor();
@@ -69,6 +70,7 @@ try {
     await page.mouse.move(c.x+c.width*.35,c.y+c.height*.4);await page.mouse.down();await page.mouse.move(c.x+c.width*.65,c.y+c.height*.6,{steps:10});await page.mouse.up();
   }
   await draw('A');await paneA.locator('.dicom-canvas svg').getByText(/mm/).first().waitFor();
+  await page.waitForTimeout(300); // Cornerstone throttles the last length-stat refresh.
   const metric=await paneA.locator('.dicom-canvas svg').getByText(/mm/).first().textContent();
   await page.getByRole('button',{name:'Ölçmə alətləri',exact:true}).click();
   await page.getByRole('menuitem',{name:/Ölçü ayarları/}).click();

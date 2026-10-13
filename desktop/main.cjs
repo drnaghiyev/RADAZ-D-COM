@@ -15,7 +15,8 @@ const external=url=>{try{if(['https:','http:','mailto:'].includes(new URL(url).p
 const show=()=>{if(mainWindow&&!mainWindow.isDestroyed()){if(mainWindow.isMinimized())mainWindow.restore();mainWindow.show();mainWindow.focus();}};
 function configure(win){
  windows.add(win);win.setMenuBarVisibility(false);win.on('closed',()=>windows.delete(win));
- win.webContents.setWindowOpenHandler(({url})=>{
+ win.webContents.setWindowOpenHandler(({url,frameName})=>{
+  if(frameName==='radaz-system-report'&&local(url)&&new URL(url).pathname==='/report'){external(url);return {action:'deny'};}
   // Native window.open retains opener and BroadcastChannel for MPR/report handoffs.
   if(local(url)||url==='about:blank'||url==='')return {action:'allow',overrideBrowserWindowOptions:{width:1500,height:980,minWidth:1000,minHeight:680,autoHideMenuBar:true,icon:path.join(runtime,'public/radaz.ico'),webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,webSecurity:true}}};
   external(url);return {action:'deny'};

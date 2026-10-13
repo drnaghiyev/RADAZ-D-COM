@@ -22,6 +22,14 @@ try{
  await page.setViewportSize({width:1600,height:1000});
  const opened=context.waitForEvent('page');await page.getByRole('button',{name:'3D həcm görüntüləmə',exact:true}).click();const volume=await opened;await volume.locator('.cornerstone-volume-stage[data-ready=true]').waitFor();
  assert.equal(await volume.locator('.topbar [aria-label=Scalpel]').count(),1);
+ const host=volume.locator('.cornerstone-volume-host');assert.equal(await host.getAttribute('data-lighting'),'even');
+ await volume.getByRole('button',{name:'Professional 3D ayarları',exact:true}).click();
+ await volume.getByLabel('İşıqlanma rejimi',{exact:true}).selectOption('flat');
+ await volume.waitForFunction(()=>document.querySelector('.cornerstone-volume-host')?.dataset.shaded==='false');
+ await volume.getByLabel('İşıqlanma rejimi',{exact:true}).selectOption('even');
+ await volume.waitForFunction(()=>document.querySelector('.cornerstone-volume-host')?.dataset.shaded==='true');
+ await volume.keyboard.press('Escape');
+
  await volume.locator('.volume-orientation').waitFor();await volume.locator('.volume-orientation svg [role=button]').first().click();assert.equal(await volume.locator('.volume-axis-views').count(),0);await volume.screenshot({path:out+'/after-cube.png'});
  await volume.getByRole('button',{name:'3D HU / Opacity',exact:true}).click();await volume.getByRole('slider',{name:'3D HU həddi',exact:true}).fill('300');await volume.keyboard.press('Escape');await volume.locator('.volume-parameter-menu').waitFor({state:'hidden'});
  await volume.screenshot({path:out+'/bone-vr.png'});
@@ -36,8 +44,11 @@ try{
  await volume.screenshot({path:out+'/after-scalpel.png'});await volume.getByRole('button',{name:'Kəsimi geri al',exact:true}).click();
  await volume.getByRole('button',{name:'3D rotate',exact:true}).click();await volume.screenshot({path:out+'/after-undo.png'});
  const mprOpened=context.waitForEvent('page');await page.getByRole('button',{name:'MPR rekonstruksiya',exact:true}).click();const mpr=await mprOpened;await mpr.locator('.topbar').waitFor();
+ await mpr.setViewportSize({width:1920,height:1080});await mpr.waitForTimeout(300);
+ const thickness=await mpr.locator('.mpr-thickness').boundingBox(),reset=await mpr.locator('.mpr-reset').first().boundingBox();
+ assert.ok(thickness.x+thickness.width+4<=reset.x,'Slab thickness never overlaps crosshair reset');
  for(const width of [1712,1366,768,390]){await mpr.setViewportSize({width,height:1000});const bounds=await mpr.locator('.topbar').evaluate(e=>({height:e.getBoundingClientRect().height,scroll:e.scrollWidth,client:e.clientWidth}));assert.ok(bounds.height<=106&&bounds.scroll<=bounds.client+1,JSON.stringify({width,...bounds}));}
- assert.deepEqual(await mpr.locator('.mpr-mode-label').allTextContents(),['MPR','MİP','MinİP','Avg']);
+ assert.deepEqual(await mpr.locator('.mpr-mode-label').allTextContents(),['MPR','MIP','MinIP','Avg']);
  await page.keyboard.press('Control+F1');const about=page.getByRole('dialog',{name:'RADAZ haqqında',exact:true});await about.waitFor();assert.equal(await about.locator('.radaz-logo').count(),1);assert.equal(await about.locator('.product-about img').count(),0);await page.screenshot({path:out+'/about.png'});
  assert.deepEqual(errors,[]);writeFileSync(out+'/result.json',JSON.stringify({passed:true,responsive:results,errors},null,2));console.log('PASS responsive header, real volume renderer, orientation, transfer controls');
 }finally{await browser.close();}

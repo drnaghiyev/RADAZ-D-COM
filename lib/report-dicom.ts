@@ -12,6 +12,8 @@ export type ReportImage = {
   rows: number;
   columns: number;
   supported: boolean;
+  windowWidth?: number;
+  windowCenter?: number;
 };
 
 export type ReportStudy = {
@@ -24,6 +26,26 @@ export type ReportStudy = {
   images: ReportImage[];
 };
 
+const windowTag=(value:string,fallback:number)=>value.trim()&&Number.isFinite(Number(value.split('\\')[0]))?Number(value.split('\\')[0]):fallback;
+export type ReportWindow={ww:number;wl:number};
+export type ReportWindowMode='metadata'|'lung'|'soft'|'bone';
+export const reportWindowKey=(image:ReportImage)=>['CT','MR'].includes(image.modality)?image.seriesUID:image.sopUID;
+export function defaultReportWindow(image:ReportImage,mode:ReportWindowMode):ReportWindow{
+ if(mode==='metadata')return {ww:Math.max(1,image.windowWidth??400),wl:image.windowCenter??50};
+ return {lung:{ww:1500,wl:-600},soft:{ww:400,wl:50},bone:{ww:1800,wl:300}}[mode];
+}
+// Reuse only the few active frames during pointer windowing, not the whole examination.
+const pixelCache=new Map<ReportImage,Promise<Uint8Array>>();
+function reportPixels(image:ReportImage){
+ let pending=pixelCache.get(image);
+ if(!pending){pending=(async()=>{const response=image.sourceUrl?await fetch(image.sourceUrl,{cache:'no-store'}):null;
+  if(response&&!response.ok)throw new Error('Mənbə disk çıxarılıb və ya görüntü oxunmadı');
+  return new Uint8Array(await(response||image.file!).arrayBuffer());})();
+  pixelCache.set(image,pending);while(pixelCache.size>3)pixelCache.delete(pixelCache.keys().next().value!);
+  pending.catch(()=>{if(pixelCache.get(image)===pending)pixelCache.delete(image);});
+ }
+ return pending;
+}
 const dateInput = (raw: string) => /^\d{8}$/.test(raw) ? `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}` : '';
 
 export async function readReportStudies(files: File[], onProgress?: (done: number, total: number) => void): Promise<ReportStudy[]> {
@@ -51,7 +73,7 @@ export async function readReportStudies(files: File[], onProgress?: (done: numbe
       study.images.push({ file: files[i], studyUID: uid, seriesUID, sopUID,
         seriesName: tag('x0008103e') || `Seriya ${tag('x00200011') || '—'}`,
         modality: tag('x00080060') || study.modality, instance: Number(tag('x00200013')) || i + 1,
-        rows, columns, supported: !!pixel && !pixel.encapsulatedPixelData && rows > 0 && columns > 0 &&
+        windowWidth: windowTag(tag('x00281051'),400), windowCenter: windowTag(tag('x00281050'),50), rows, columns, supported: !!pixel && !pixel.encapsulatedPixelData && rows > 0 && columns > 0 &&
           [8, 16].includes(bits) && ds.uint16('x00280002') === 1 &&
           ['1.2.840.10008.1.2', '1.2.840.10008.1.2.1'].includes(syntax) });
     } catch { /* Skip DICOMDIR and non-DICOM files without blocking the remaining study. */ }
@@ -74,7 +96,7 @@ export function readReportMedia(sources: {url:string;tags:Record<string,string>}
     if(!study){study={uid,patient:tag('x00100010').replaceAll('^',' '),birth:dateInput(tag('x00100030')),date:dateInput(tag('x00080020')),modality:tag('x00080060'),description:tag('x00081030'),images:[]};studies.set(uid,study);}
     const rows=Number(tag('x00280010')),columns=Number(tag('x00280011'));
     study.images.push({sourceUrl:source.url,studyUID:uid,seriesUID,sopUID:tag('x00080018'),seriesName:tag('x0008103e'),modality:tag('x00080060'),instance:Number(tag('x00200013')),rows,columns,
-      supported:rows>0&&columns>0&&Number(tag('x00280002'))===1&&[8,16].includes(Number(tag('x00280100')))&&['1.2.840.10008.1.2','1.2.840.10008.1.2.1'].includes(tag('x00020010'))});
+      windowWidth:windowTag(tag('x00281051'),400),windowCenter:windowTag(tag('x00281050'),50),supported:rows>0&&columns>0&&Number(tag('x00280002'))===1&&[8,16].includes(Number(tag('x00280100')))&&['1.2.840.10008.1.2','1.2.840.10008.1.2.1'].includes(tag('x00020010'))});
   }
   return [...studies.values()].map(study=>({...study,images:study.images.sort((a,b)=>a.instance-b.instance)}));
 }
@@ -82,9 +104,7 @@ export function readReportMedia(sources: {url:string;tags:Record<string,string>}
 /** Render the diagnostic pixel matrix only; patient tags are never painted into the image. */
 export async function renderReportImage(image: ReportImage, windowMode: 'metadata' | 'lung' | 'soft' | 'bone', customWindow?:{ww:number;wl:number}): Promise<string> {
   if (!image.supported) throw new Error('Bu kəsitin piksel formatı analiz üçün dəstəklənmir');
-  const response = image.sourceUrl ? await fetch(image.sourceUrl,{cache:'no-store'}) : null;
-  if (response && !response.ok) throw new Error('Mənbə disk çıxarılıb və ya görüntü oxunmadı');
-  const bytes = new Uint8Array(await (response || image.file!).arrayBuffer());
+  const bytes = await reportPixels(image);
   const ds = parseDicomFile(bytes);
   const pixel = ds.elements.x7fe00010;
   const bits = ds.uint16('x00280100') || 0;

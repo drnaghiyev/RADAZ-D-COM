@@ -21,7 +21,7 @@ function digestFiles(root, inputs) {
   return hash.digest('hex');
 }
 
-export const sourceHash = root => digestFiles(root, ['app/','components/','lib/','public/','scripts/','package.json','pnpm-lock.yaml','vite.config.ts','tsconfig.json','postcss.config.mjs']);
+export const sourceHash = root => digestFiles(root, ['app/','components/','lib/','public/','scripts/','bridge/radiology-profile.json','package.json','pnpm-lock.yaml','vite.config.ts','tsconfig.json','postcss.config.mjs']);
 export function writeBuildIdentity(root, expectedSource) {
   const current = sourceHash(root);
   if (current !== expectedSource) throw new Error('Source changed during build. Build RADAZ again.');

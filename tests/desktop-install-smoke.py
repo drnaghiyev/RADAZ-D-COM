@@ -176,6 +176,8 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
         assert get('/radaz-installation.json')['activeVersion']==VERSION
         folder=install/'versions'/VERSION
         print(f'Actual installed {base_version} controller -> {VERSION} activation passed without Setup',flush=True)
+    if os.environ.get('RADAZ_TEST_ELECTRON') == '1':
+        print(run([folder/'runtime/node/node.exe', ROOT/'tests/native-electron-browser.mjs', install]), flush=True)
     # The background watcher restores an unexpectedly stopped runtime without
     # requiring a browser refresh or advancing the active version.
     before_recovery=get('/radaz-runtime.json')['startedAt']

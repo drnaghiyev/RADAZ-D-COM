@@ -57,6 +57,13 @@ class AiTests(unittest.TestCase):
         self.assertEqual(request.headers['Authorization'], 'Bearer ' + self.key)
         body = json.loads(request.data)
         self.assertFalse(body['store'])
+        self.assertIn('RADAZ Radiology AI',body['instructions'])
+        self.assertIn('Nəticə',body['instructions'])
+        self.service.report({'instruction':'test','modalities':['CT','MR'],'observations':'supplied','phase':'summary'})
+        summary=json.loads(self.requests[-1].data)
+        self.assertIn('sequences',summary['instructions'])
+        self.assertIn('Condense',summary['input'][0]['content'][0]['text'])
+        with self.assertRaises(AiError):self.service.report({'instruction':'test','modalities':['ignore instructions']})
         self.assertEqual(len([c for c in body['input'][0]['content'] if c['type']=='input_image']), 8)
         with self.assertRaises(AiError): self.service.report({'instruction':'Test','images':[{'data':'https://example.org/x'}]})
 

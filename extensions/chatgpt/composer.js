@@ -1,4 +1,4 @@
-// Public DOM adapter: never submits a message, fails visibly if the composer changes.
+// Public DOM adapter. Submit once only when the user explicitly requested it in RADAZ.
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function findComposer(){for(let i=0;i<80;i++){const e=document.querySelector('#prompt-textarea,#mobile-composer-prompt,textarea[data-id="root"],form [contenteditable="true"][role="textbox"]');if(e&&e.getBoundingClientRect().height)return e;await pause(400);}throw new Error('ChatGPT mesaj sahəsi tapılmadı. Hesaba daxil olub yenidən ötürün.');}
 function show(message,failed=false){const note=document.createElement('aside');note.textContent=message;Object.assign(note.style,{position:'fixed',right:'20px',top:'20px',zIndex:'2147483647',maxWidth:'360px',padding:'16px',borderRadius:'10px',background:failed?'#61292e':'#154b50',color:'white',font:'13px/1.6 sans-serif'});const close=document.createElement('button');close.textContent=' ×';close.onclick=()=>note.remove();note.append(close);document.body.append(note);}
@@ -33,9 +33,26 @@ function enableReturn(){
   composer.focus();
   if(composer instanceof HTMLTextAreaElement){Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(composer,bundle.prompt);composer.dispatchEvent(new Event('input',{bubbles:true}));}
   else if(!document.execCommand('insertText',false,bundle.prompt))throw new Error('Tapşırıq yerləşdirilmədi. RADAZ-dan mətni kopyalayın.');
-  await pause(600);if(!(composer.value||composer.textContent||'').includes(bundle.prompt.slice(0,40)))throw new Error('Tapşırıq mətni təsdiqlənmədi. Əl ilə yapışdırın.');
+  await pause(600);if((composer.value||composer.textContent||'').trim()!==bundle.prompt.trim())throw new Error('Tapşırıq mətni təsdiqlənmədi. Əl ilə yapışdırın.');
   ready=false;for(let i=0;i<75;i++){const state=RADAZChatGPT.state(composer,names);if(state.complete&&!state.busy&&state.canSend){ready=true;break;}await pause(400);}
   if(!ready)throw new Error('Əlavələr və göndərmə hazırlığı təsdiqlənmədi. Mesaj göndərilməyib; ChatGPT-də yükləmə xətasını yoxlayın.');
-  await chrome.runtime.sendMessage({type:'COMPOSER_RESULT',ok:true});enableReturn();show(`RADAZ: ${files.map(file=>file.name).join(', ')} təsdiqləndi. Görüntü önbaxışlarını yoxlayıb mesajı göndərin. Cavab hazır olanda “RADAZ-a qaytar” düyməsini basın.`);
+  let sent=false;
+  if(bundle.autoSubmit===true){
+   // A new empty chat and the complete prompt/attachment check are required; never retry a click.
+   if(document.querySelector('[data-message-author-role="user"],[data-message-author-role="assistant"]'))throw new Error('Yeni boş ChatGPT söhbəti açılmadı. Mesaj avtomatik göndərilmədi.');
+   const state=RADAZChatGPT.state(composer,names);
+   if(!state.complete||state.busy||!state.canSend||(composer.value||composer.textContent||'').trim()!==bundle.prompt.trim())throw new Error('Mesaj və əlavələr dəyişib. Avtomatik göndəriş dayandırıldı.');
+   const send=RADAZChatGPT.root(composer).querySelector('button[data-testid="send-button"]');
+   if(!send||send.disabled)throw new Error('ChatGPT göndərmə düyməsi təsdiqlənmədi. Mesajı əl ilə göndərin.');
+   send.click();
+   for(let i=0;i<75;i++){
+    const user=[...document.querySelectorAll('[data-message-author-role="user"]')].find(el=>el.textContent.includes(bundle.prompt.trim()));
+    if(user&&(composer.value||composer.textContent||'').trim()===''){sent=true;break;}
+    await pause(400);
+   }
+   if(!sent)throw new Error('Göndərmə klikləndi, amma çatda təsdiqlənmədi. Təkrar göndərməzdən əvvəl ChatGPT-ni yoxlayın.');
+  }
+  await chrome.runtime.sendMessage({type:'COMPOSER_RESULT',ok:true,sent});enableReturn();
+  show(sent?'RADAZ tapşırığı ChatGPT-yə göndərildi. Cavab tamamlananda “RADAZ-a qaytar” düyməsini basın.':`RADAZ: ${files.map(file=>file.name).join(', ')} təsdiqləndi. Mesajı yoxlayıb göndərin; cavabı “RADAZ-a qaytar” ilə ötürün.`);
  }catch(error){show(`RADAZ: ${error.message}`,true);await chrome.runtime.sendMessage({type:'COMPOSER_RESULT',ok:false,error:error.message});}
 })().catch(()=>{});
