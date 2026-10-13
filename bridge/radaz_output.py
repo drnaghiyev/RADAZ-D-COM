@@ -22,7 +22,7 @@ from pydicom.uid import generate_uid, ImplicitVRLittleEndian, ExplicitVRLittleEn
 from pynetdicom import AE, evt
 from pynetdicom.sop_class import BasicGrayscalePrintManagementMeta as META, BasicFilmSession, BasicFilmBox, BasicGrayscaleImageBox, Printer, PrinterInstance
 
-LAYOUTS = {'1,1','1,2','2,2','2,3','2,4','3,3','3,4','4,4'}
+LAYOUTS = {'1,1','1,2','2,2','2,3','2,4','3,3','3,4','4,4','5,5','6,6'}
 SIZES = {'8INX10IN','10INX12IN','11INX14IN','14INX17IN','A4','A3'}
 PRINT_LOCK = Lock()
 BURN_LOCK = Lock()

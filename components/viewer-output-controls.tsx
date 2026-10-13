@@ -1,4 +1,5 @@
 'use client';
+import {ToolbarGroup} from '@/components/toolbar-workspace';
 import {useTranslation as useUiTranslation,translate as tr} from '@/lib/i18n';
 
 
@@ -9,7 +10,7 @@ import JSZip from 'jszip';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu';
-import { captureViewport } from '@/lib/export-viewport';
+import { captureViewport, capturePrintFrame } from '@/lib/export-viewport';
 import { canvasBlob, readDisplayState, renderFullImage, resizeCanvas, fitCanvas } from '@/lib/image-output';
 import { getOriginalDicom } from '@/lib/cornerstone';
 import { outputRequest, saveOutputJob, type PrintFrame } from '@/lib/output-jobs';
@@ -93,9 +94,12 @@ export function ViewerOutputControls({ panel, imageId, series, allSeries, datase
     selecting.current = true; setBusy(true); const version = generation.current;
     try {
       if (selectionRef.current.length >= 200) throw new Error('Bir çap siyahısında ən çox 200 görüntü seçilə bilər');
-      const canvas = await capture(targetPanel, targetImage), blob = await canvasBlob(canvas, 'png');
+      const pane = document.querySelector<HTMLElement>(`[data-panel="${targetPanel}"]`);
+      if (!pane) throw Error('Görüntü paneli tapılmadı');
+      const {canvas, overlay: labels} = await capturePrintFrame(pane);
+      const blob = await canvasBlob(canvas, 'png'), overlay = await canvasBlob(labels, 'png');
       if (version !== generation.current) return;
-      setSelection(items => [...items, { id: targetImage, name: `${targetSeries?.name || 'Görüntü'} · ${(targetSeries?.imageIds.indexOf(targetImage) ?? 0) + 1}`, blob, width: canvas.width, height: canvas.height, preview: URL.createObjectURL(blob) }]);
+      setSelection(items => [...items, { id: targetImage, name: `${targetSeries?.name || 'Görüntü'} · ${(targetSeries?.imageIds.indexOf(targetImage) ?? 0) + 1}`, blob, overlay, width: canvas.width, height: canvas.height, preview: URL.createObjectURL(blob) }]);
       onStatus('Görüntü cari görünüşü ilə çap siyahısına əlavə edildi');
     } catch (error) { onStatus(String(error)); } finally { selecting.current = false; setBusy(false); }
   };
@@ -153,7 +157,9 @@ export function ViewerOutputControls({ panel, imageId, series, allSeries, datase
       let saved: string | undefined, saveError = '';
       try { saved = await writeToDirectory(result, prefix, extension); }
       catch (error) { saveError = `Qovluğa yazılmadı: ${(error as Error).message}. Faylı aşağıdakı düymədən yükləyə bilərsiniz.`; }
-      setReady({ url: URL.createObjectURL(result), name: `${prefix}.${extension}`, count: entries.length, preview: preview ? URL.createObjectURL(preview) : undefined, saved });
+      const downloadUrl = URL.createObjectURL(result);
+      if (!saved && !saveError) { const link = document.createElement('a'); link.href = downloadUrl; link.download = `${prefix}.${extension}`; document.body.appendChild(link); link.click(); link.remove(); }
+      setReady({ url: downloadUrl, name: `${prefix}.${extension}`, count: entries.length, preview: preview ? URL.createObjectURL(preview) : undefined, saved });
       setMessage(saveError || (saved ? `Saxlanıldı: ${saved}` : `${entries.length} görüntü · ${(result.size / 1024 / 1024).toFixed(1)} MB · yükləməyə hazırdır`));
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
     finally { setBusy(false); }
@@ -171,7 +177,7 @@ export function ViewerOutputControls({ panel, imageId, series, allSeries, datase
         <input type="checkbox" aria-label={`${item.panel} panelindəki görüntünü çap üçün seç`} checked={checked} disabled={busy} onChange={() => void selectCurrent(item.panel, item.imageId, item.series)}/><span>{tr('ui.select_for_printing_d6e38')}</span>
       </label>, target, item.panel);
     })}
-    <div className="toolbar-group output-command-group" role="group" aria-label={tr('ui.export_selection_and_printing_5c5b1')}>
+    <ToolbarGroup className="toolbar-group output-command-group" role="group" aria-label={tr('ui.export_selection_and_printing_5c5b1')} groupId="output" order={35}>
       <Button variant="ghost" className="header-control" aria-label={tr('ui.export_images_fd961')} title={tr('ui.export_images_fd961')} onClick={() => { setMessage(''); setOpen(true); }}><Download size={18}/><span>{tr('ui.export_fd2ae')}</span></Button>
       <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className={`header-control ${currentSelected ? 'selected-tool' : ''}`} aria-label={tr('ui.select_images_7c3a3')} title={tr('ui.select_images_7c3a3')}><CheckSquare size={18}/><span>{tr('ui.select_images_7c3a3')}</span><ChevronDown size={12}/></Button></DropdownMenuTrigger><DropdownMenuContent className="header-menu" align="end">
         <DropdownMenuItem disabled={!imageId || busy} onSelect={() => void selectCurrent()}><CheckSquare size={16}/>{currentSelected ? 'Cari görüntünü seçimdən çıxar' : 'Cari görüntünü seç'}</DropdownMenuItem>
@@ -185,7 +191,7 @@ export function ViewerOutputControls({ panel, imageId, series, allSeries, datase
         <div className="menu-separator"/>
         <DropdownMenuItem onSelect={() => window.open('/printer-settings', '_blank')}><Settings2 size={16}/>{tr('ui.printer_settings_75fe9')}</DropdownMenuItem>
       </DropdownMenuContent></DropdownMenu>
-    </div>
+    </ToolbarGroup>
     <Dialog open={open} onOpenChange={value => { if (!busy) setOpen(value); }}><DialogContent className="output-dialog export-pro-dialog" showCloseButton={!busy}>
       <DialogHeader className="export-dialog-heading"><span className="export-heading-icon"><Download size={23}/></span><div><DialogTitle>{tr('ui.export_images_fd961')}</DialogTitle><DialogDescription>{tr('ui.choose_the_format_destination_and_image_setti_3c623')}</DialogDescription></div></DialogHeader>
       <div className="export-scroll-body">

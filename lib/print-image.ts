@@ -23,6 +23,11 @@ export function renderPrintImage(image:DicomPixelImage,adjustment:PrintAdjustmen
   const scale=Math.min(canvas.width/image.columns,canvas.height/image.rows)*adjustment.zoom;
   const width=image.columns*scale,height=image.rows*scale;
   target.drawImage(source,(canvas.width-width)/2,(canvas.height-height)/2,width,height);
+  if (image.overlay) {
+    const fit = Math.min(canvas.width / image.columns, canvas.height / image.rows);
+    const w = image.columns * fit, h = image.rows * fit;
+    target.drawImage(image.overlay, (canvas.width-w)/2, (canvas.height-h)/2, w, h);
+  }
   return canvas;
 }
 

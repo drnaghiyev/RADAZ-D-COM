@@ -1,6 +1,7 @@
 import { parseDicomFile } from './dicom-file';
 
 export type DicomPixelImage = {
+  overlay?: HTMLCanvasElement;
   name: string; rows: number; columns: number; pixels: Uint8Array;
   windowCenter: number; windowWidth: number; photometric: string;
 };

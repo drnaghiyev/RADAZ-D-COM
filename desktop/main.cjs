@@ -61,8 +61,8 @@ async function boot(){
   let ready=false;try{const r=await fetch(bridge+'/health',{headers:{Origin:'http://localhost:5173'},signal:AbortSignal.timeout(1500)});ready=r.ok;}catch{}
   if(!ready){const log=openSync(path.join(profile,'logs/pacs.log'),'a');try{const child=spawn(path.join(runtime,'runtime/python/python.exe'),['bridge/radaz_pacs_bridge.py','--origin','http://localhost:5173'],{cwd:runtime,windowsHide:true,detached:true,stdio:['ignore',log,log]});child.on('error',()=>{});child.unref();}finally{closeSync(log);}}
  }
- session.defaultSession.setPermissionRequestHandler((contents,permission,callback)=>callback(local(contents.getURL())&&['fullscreen','clipboard-sanitized-write'].includes(permission)));
- session.defaultSession.setPermissionCheckHandler((contents,permission)=>!!contents&&local(contents.getURL())&&['fullscreen','clipboard-sanitized-write'].includes(permission));
+ session.defaultSession.setPermissionRequestHandler((contents,permission,callback,details)=>callback(local(contents.getURL())&&(!details.requestingUrl||local(details.requestingUrl))&&['fullscreen','clipboard-sanitized-write','fileSystem'].includes(permission)));
+ session.defaultSession.setPermissionCheckHandler((contents,permission,requestingOrigin)=>!!contents&&local(contents.getURL())&&local(requestingOrigin)&&['fullscreen','clipboard-sanitized-write','fileSystem'].includes(permission));
  Menu.setApplicationMenu(null);
  mainWindow=new BrowserWindow({width:1500,height:980,minWidth:1000,minHeight:680,title:'RADAZ',backgroundColor:'#071017',show:false,autoHideMenuBar:true,icon:path.join(runtime,'public/radaz.ico'),webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,webSecurity:true}});
  configure(mainWindow);mainWindow.on('close',event=>{if(!quitting){event.preventDefault();mainWindow.hide();}});

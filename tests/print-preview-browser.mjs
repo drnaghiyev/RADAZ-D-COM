@@ -19,7 +19,8 @@ try{
   for(let i=0;i<6;i++){
    const c=document.createElement('canvas');c.width=i%2?160:320;c.height=i%2?320:160;
    const ctx=c.getContext('2d');ctx.fillStyle=i%2?'rgb(64,64,64)':'rgb(128,128,128)';ctx.fillRect(0,0,c.width,c.height);
-   const blob=await new Promise(resolve=>c.toBlob(resolve));frames.push({id:String(i),name:'Synthetic '+i,blob,width:c.width,height:c.height});
+   const labels=document.createElement('canvas');labels.width=c.width;labels.height=c.height;const l=labels.getContext('2d');if(i===0){l.fillStyle='white';l.fillRect(8,8,14,5);}const overlay=await new Promise(resolve=>labels.toBlob(resolve));
+   const blob=await new Promise(resolve=>c.toBlob(resolve));frames.push({id:String(i),name:'Synthetic '+i,blob,overlay,width:c.width,height:c.height});
   }
   await new Promise((resolve,reject)=>{const r=indexedDB.open('radaz-output-jobs',1);r.onupgradeneeded=()=>r.result.createObjectStore('jobs',{keyPath:'id'});r.onsuccess=()=>{const db=r.result,t=db.transaction('jobs','readwrite');t.objectStore('jobs').put({id:'synthetic-print',title:'Synthetic print fitting',created:Date.now(),frames});t.oncomplete=()=>{db.close();resolve();};t.onerror=reject;};});
  });
@@ -33,10 +34,13 @@ try{
  const initial=await sample(1),second=await sample(2);
  assert.ok(Math.abs((initial.box[2]-initial.box[0]+1)/(initial.box[3]-initial.box[1]+1)-2)<.02,'Wide image fits without cropping or stretching');
  assert.ok(Math.abs((second.box[2]-second.box[0]+1)/(second.box[3]-second.box[1]+1)-.5)<.02,'Tall image fits without cropping');
+ const white=()=>cell(1).locator('canvas').evaluate(c=>{const d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;let x0=c.width,y0=c.height,x1=0,y1=0;for(let y=0;y<c.height;y++)for(let x=0;x<c.width;x++)if(d[(y*c.width+x)*4]>240){x0=Math.min(x0,x);x1=Math.max(x1,x);y0=Math.min(y0,y);y1=Math.max(y1,y);}return[x0,y0,x1,y1];});
+ const fixedLabels=await white();
  const sheetBefore=await page.locator('.is-preview').boundingBox();
  await page.getByRole('slider',{name:'Görüntü zoomu',exact:true}).fill('2');
  assert.ok((await sample(1)).box[3]-(await sample(1)).box[1]>initial.box[3]-initial.box[1]);
  assert.deepEqual(await page.locator('.is-preview').boundingBox(),sheetBefore,'Zoom changes the image, not the sheet');
+ assert.deepEqual(await white(),fixedLabels,'Corner labels do not zoom with anatomy');
  await page.getByRole('slider',{name:'Parlaqlıq',exact:true}).fill('50');
  assert.equal((await sample(1)).center,178);assert.deepEqual(await sample(2),second,'Single applies only to selected image');
  await page.getByRole('checkbox',{name:'Hamısı',exact:true}).check();assert.equal(await page.getByRole('checkbox',{name:'Tək',exact:true}).isChecked(),false);
@@ -54,5 +58,6 @@ try{
  await page.screenshot({path:'outputs/print-qa/paper.png',fullPage:true});
  await page.emulateMedia({media:'screen'});await page.evaluate(()=>window.dispatchEvent(new Event('afterprint')));
  await page.screenshot({path:'outputs/print-qa/preview.png',fullPage:true});
+ for(const layout of ['5,5','6,6']){await page.getByRole('combobox',{name:'Bölgü',exact:true}).selectOption(layout);assert.equal(await page.locator('.is-preview .film-cell').count(),6);assert.equal(await page.locator('.is-preview').evaluate(e=>getComputedStyle(e).getPropertyValue('--film-columns').trim()),layout.split(',')[0]);}
  assert.deepEqual(errors,[]);console.log('PASS: image fit, single/all brightness, zoom without resizing paper, persistence across pages, matching DICOM pixels and PDF layout');
 }catch(error){await page?.screenshot({path:'outputs/print-qa/failure.png',fullPage:true});throw error;}finally{await browser.close();}

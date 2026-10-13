@@ -1,4 +1,5 @@
 'use client';
+import {ToolbarWorkspace, ToolbarGroup, ToolbarOverflow} from '@/components/toolbar-workspace';
 import {useTranslation as useUiTranslation,translate as tr} from '@/lib/i18n';
 
 import { ResizableTable, ResizableHeader } from '@/components/resizable-table';
@@ -280,17 +281,19 @@ export default function PacsPage() {
     finally { setBusy(false); }
   };
 
-  return <main className="pacs-shell grouped-records">
+  return <ToolbarWorkspace scope="pacs"><main className="pacs-shell grouped-records">
     <header className="records-header records-unified-header pacs-unified-header">
       <div className="pacs-query records-header-filters">
         <label className="pacs-server">{tr('ui.pacs_server_d81a7')}<select aria-label={tr('ui.pacs_server_d81a7')} value={location?.id || ''} onChange={event => { const target = locations.find(item => item.id === event.currentTarget.value); if (target) choose(target); }}><option value="">{locations.length ? 'Server seçin' : 'Konfiqurasiya əlavə edin'}</option>{locations.map(item => <option key={item.id} value={item.id}>{item.description || item.host || item.aeTitle || item.dicomwebUrl}</option>)}</select></label>
         <label className="pacs-patient">{tr('ui.patient_name_01761')}<span className="search-field"><input aria-label={tr('ui.pacs_patient_search_6978c')} placeholder={tr('ui.first_or_last_name_18b98')} value={patient} onChange={event => setPatient(event.currentTarget.value)}/>{patient && <button type="button" className="search-clear" aria-label={tr('ui.clear_pacs_search_7dcf4')} title={tr('ui.clear_1e4f8')} onClick={() => setPatient('')}><X size={16}/></button>}</span></label>
         <StudyFilterControls from={dateFrom} to={dateTo} modalities={modalities} options={modalityOptions} onFromChange={setDateFrom} onToChange={setDateTo} onModalitiesChange={setModalities}/>
-        <button className="records-primary pacs-search-button" title={tr('ui.search_e036c')} aria-label={tr('ui.search_e036c')} disabled={busy || !canSearch} onClick={() => { void search(); }}><Search size={16}/> {tr('ui.search_e036c')}</button>
-        <button className="pacs-check-button" title={tr('ui.test_connection_f3128')} aria-label={tr('ui.test_pacs_connection_6608c')} disabled={busy || !canSearch} onClick={() => { void test(); }}><RefreshCw size={16}/></button>
+
         <label className="pacs-token">Bearer token <input aria-label="PACS Bearer token" type="password" autoComplete="off" placeholder={location?.dicomwebUrl ? 'Yalnız bu vərəqədə istifadə edilir' : 'Yalnız DICOMweb üçün'} disabled={!location?.dicomwebUrl} value={token} onChange={event => setToken(event.currentTarget.value)}/></label>
       </div>
-      <div className="records-header-actions"><button title={`Seçilmişləri aç (${selection.checked.length})`} aria-label={`Seçilmişləri aç (${selection.checked.length})`} disabled={busy || !selection.checked.length} onClick={() => void openSelectedStudies()}><ExternalLink size={18}/><span>{tr('ui.open_selected_d1078')}{selection.checked.length})</span></button><button disabled={busy || (!selection.checked.length && !activeStudy)} onClick={() => void removeCopies()} title={tr('ui.delete_copies_downloaded_to_this_computer_ef549')} aria-label={tr('ui.delete_local_copies_ec8fe')}><Trash2 size={16}/><span>{tr('ui.delete_local_copies_ec8fe')}{selection.checked.length ? ` (${selection.checked.length})` : ''}</span></button><button type="button" title={tr('ui.pacs_configuration_f5584')} onClick={openConfig} aria-label={tr('ui.open_pacs_configuration_327fe')}><Settings2 size={18}/><span>{tr('ui.pacs_settings_3f4c4')}</span></button><AppHelpMenu/></div>
+        <ToolbarGroup groupId="pacs-query" order={20} aria-label="PACS axtarış"><button className="records-primary pacs-search-button" title={tr('ui.search_e036c')} aria-label={tr('ui.search_e036c')} disabled={busy || !canSearch} onClick={() => { void search(); }}><Search size={16}/> {tr('ui.search_e036c')}</button>
+        <button className="pacs-check-button" title={tr('ui.test_connection_f3128')} aria-label={tr('ui.test_pacs_connection_6608c')} disabled={busy || !canSearch} onClick={() => { void test(); }}><RefreshCw size={16}/></button></ToolbarGroup>
+      <ToolbarGroup className="pacs-action-toolbar" groupId="pacs-actions" order={30}><button title={`Seçilmişləri aç (${selection.checked.length})`} aria-label={`Seçilmişləri aç (${selection.checked.length})`} disabled={busy || !selection.checked.length} onClick={() => void openSelectedStudies()}><ExternalLink size={18}/><span>{tr('ui.open_selected_d1078')}{selection.checked.length})</span></button><button disabled={busy || (!selection.checked.length && !activeStudy)} onClick={() => void removeCopies()} title={tr('ui.delete_copies_downloaded_to_this_computer_ef549')} aria-label={tr('ui.delete_local_copies_ec8fe')}><Trash2 size={16}/><span>{tr('ui.delete_local_copies_ec8fe')}{selection.checked.length ? ` (${selection.checked.length})` : ''}</span></button><button type="button" title={tr('ui.pacs_configuration_f5584')} onClick={openConfig} aria-label={tr('ui.open_pacs_configuration_327fe')}><Settings2 size={18}/><span>{tr('ui.pacs_settings_3f4c4')}</span></button><AppHelpMenu/></ToolbarGroup>
+      <ToolbarOverflow/>
     </header>
     <div className="pacs-content">
       <div className="pacs-browser"><div className="pacs-card-title"><Network size={19}/><div><strong>{tr('ui.pacs_studies_d77a3')}</strong><span>{location ? `${location.description || location.host || location.aeTitle || location.dicomwebUrl} · ${location.dicomwebUrl ? 'DICOMweb' : 'DICOM C-FIND'}` : 'Server seçin'}</span></div></div>
@@ -313,5 +316,5 @@ export default function PacsPage() {
       </div>
     </dialog>
     <footer className="records-status" role="status">{busy && <span className="records-spinner"/>}<span className="records-count">{selection.checked.length > 0 && `${selection.checked.length} seçilib · `}{visibleStudies.length} {tr('ui.studies_00cf3')}{series.length} {tr('ui.series_1ebd2')}</span><span>{status}</span></footer>
-  </main>;
+  </main></ToolbarWorkspace>;
 }

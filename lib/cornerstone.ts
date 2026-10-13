@@ -201,6 +201,11 @@ export function getMeasurementUnit(imageId: string): 'mm' | 'px' {
   return spacing.length === 2 && spacing.every(value => Number.isFinite(value) && value > 0) ? 'mm' : 'px';
 }
 
+export async function loadDicomThumbnail(imageId: string): Promise<string | undefined> {
+  await decodeRegisteredDicom(imageId);
+  return thumbnailLocalDicom(imageId);
+}
+
 export function thumbnailLocalDicom(imageId: string): string | undefined {
   const item = records.get(imageId);
   if (!item || !item.pixels.length || typeof document === 'undefined') return;

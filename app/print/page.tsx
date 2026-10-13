@@ -13,7 +13,7 @@ import { defaultPrinter, loadPrinterSettings } from '@/lib/printer-settings';
 import { readOutputJob } from '@/lib/output-jobs';
 import {defaultPrintAdjustment,renderPrintImage,printImagePixels,type PrintAdjustment} from '@/lib/print-image';
 
-const layouts = ['1,1','1,2','2,2','2,3','2,4','3,3','3,4','4,4'];
+const layouts = ['1,1','1,2','2,2','2,3','2,4','3,3','3,4','4,4','5,5','6,6'];
 function FilmImage({image,adjustment,ratio}:{image:DicomPixelImage;adjustment:PrintAdjustment;ratio:number}){
   const ref=useRef<HTMLCanvasElement>(null);
   useLayoutEffect(()=>{
@@ -57,7 +57,13 @@ export default function PrintPage() {
           const ctx = canvas.getContext('2d')!;ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close();
           const rgba = ctx.getImageData(0,0,canvas.width,canvas.height).data,pixels = new Uint8Array(canvas.width*canvas.height);
           for(let i=0;i<pixels.length;i++)pixels[i]=Math.round(.299*rgba[i*4]+.587*rgba[i*4+1]+.114*rgba[i*4+2]);
-          decoded.push({name:frame.name,rows:canvas.height,columns:canvas.width,pixels,windowCenter:127.5,windowWidth:255,photometric:'MONOCHROME2'});
+          let overlay: HTMLCanvasElement | undefined;
+          if (frame.overlay) {
+            const labels = await createImageBitmap(frame.overlay);
+            overlay = document.createElement('canvas'); overlay.width = canvas.width; overlay.height = canvas.height;
+            overlay.getContext('2d')!.drawImage(labels,0,0,overlay.width,overlay.height); labels.close();
+          }
+          decoded.push({overlay,name:frame.name,rows:canvas.height,columns:canvas.width,pixels,windowCenter:127.5,windowWidth:255,photometric:'MONOCHROME2'});
         }
       } else {
         const uid = query.get('study'); if(!uid)throw new Error('Çap üçün viewer-də görüntü və ya arxivdə müayinə seçin.');

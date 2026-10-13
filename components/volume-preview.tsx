@@ -30,7 +30,7 @@ export function VolumePreview(props:Props){
  const {t}=useTranslation();
  const [showVolume,setShowVolume]=useState(true);
  const [toolbarTarget,setToolbarTarget]=useState<HTMLElement|null>(null);
- useEffect(()=>{setToolbarTarget(document.getElementById('volume-edit-toolbar'));},[]);
+ useEffect(()=>{const update=()=>setToolbarTarget(document.getElementById('volume-edit-toolbar'));update();const observer=new MutationObserver(update);observer.observe(document.body,{childList:true,subtree:true});return()=>observer.disconnect();},[]);
  const [scalpel,setScalpel]=useState(false),[cutting,setCutting]=useState(false),[cutError,setCutError]=useState(''),[polygon,setPolygon]=useState<[number,number][]>([]);
  const cutRef=useRef<ReturnType<typeof createVolumeScalpel>|null>(null),drawing=useRef(false),points=useRef<[number,number][]>([]);
  const cut=async()=>{if(points.current.length<3)return;setCutting(true);setCutError('');try{const viewport=viewportRef.current,current=volumeRef.current;if(!viewport||!current)return;if(!current.volume.loadStatus?.loaded)throw Error('Bütün kəsiklərin yüklənməsini gözləyin.');

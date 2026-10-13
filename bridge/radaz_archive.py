@@ -55,7 +55,7 @@ def metadata(ds):
         'birth': get('PatientBirthDate'), 'date': get('StudyDate'), 'time': get('StudyTime'),
         'description': get('StudyDescription'), 'accession': get('AccessionNumber'),
         'referring': get('ReferringPhysicianName'), 'modality': get('Modality'),
-        'seriesDescription': get('SeriesDescription'), 'number': get('SeriesNumber'),
+        'seriesDescription': get('SeriesDescription') or get('ProtocolName') or get('SequenceName') or ' · '.join(filter(None, [get('Modality'), get('BodyPartExamined') or get('StudyDescription'), get('ViewPosition')])), 'number': get('SeriesNumber'),
         'instanceNumber': int(getattr(ds, 'InstanceNumber', 0) or 0), 'protocol': get('ProtocolName'),
     }
 
@@ -209,7 +209,7 @@ class Archive:
             study['storage'] = 'disk'
             series = study['series'].setdefault(row['series'], {
                 'uid': row['series'], 'number': item['number'], 'modality': item['modality'],
-                'description': item['seriesDescription'] or 'Adsız seriya', 'protocol': item['protocol'],
+                'description': item['seriesDescription'] or item['protocol'] or 'Seriya ' + str(item['number'] or '—'), 'protocol': item['protocol'],
                 'imageCount': 0, 'addedAt': row['added'],
             })
             series['imageCount'] += 1; study['imageCount'] += 1; study['size'] += row['size']

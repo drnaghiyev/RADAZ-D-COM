@@ -1,6 +1,9 @@
 'use client';
+import {ToolbarWorkspace, ToolbarGroup, ToolbarOverflow} from '@/components/toolbar-workspace';
 import {useTranslation as useUiTranslation,translate as tr} from '@/lib/i18n';
 
+import { dicomSeriesName, paneId, paneIndex } from '@/lib/dicom-description';
+import { DicomInfoButton } from '@/components/dicom-info';
 import { importFromRadazSite } from '@/lib/site-import';
 import { VolumeRenderControls } from '@/components/volume-render-controls';
 import { WorkProgress } from '@/components/work-progress';
@@ -29,7 +32,7 @@ import { LocalizerOverlay } from '@/components/localizer-overlay';
 import { VolumePreview, type VolumeRenderSettings } from '@/components/volume-preview';
 import { volumeStyles, type VolumePreset, type VolumeQuality } from '@/lib/volume-presets';
 import { ArrowUpRight, Pencil, MoveVertical, Eye, EyeOff, Download, PanelLeftClose, Activity, Box, ChevronDown, CircleDot, Crosshair, Database, Disc3, Eraser, FileArchive, FileText, Focus, Grid2X2, Hand, Layers3, MoveDiagonal2, RotateCcw, Ruler, ScanLine, ScanSearch, ServerCog, Settings2, SlidersHorizontal, Trash2, FolderOpen, Triangle, Waypoints } from 'lucide-react';
-import { addLocalDicom, registerDiskDicom, getOriginalDicom, getDiskDicomSource, registerLocalDicom, shareLocalDicoms, borrowLocalDicoms, getSeriesVolume, createMprStacks, createObliqueMprStacks, getDefaultWindow, getLocalizerGeometry, getMprOrientations, getViewer, releaseLocalDicoms, rotateMprOrientation, thumbnailLocalDicom, type MprOrientations, type MprMode, type MprSettings } from '@/lib/cornerstone';
+import { addLocalDicom, registerDiskDicom, getOriginalDicom, getDiskDicomSource, registerLocalDicom, shareLocalDicoms, borrowLocalDicoms, getSeriesVolume, createMprStacks, createObliqueMprStacks, getDefaultWindow, getLocalizerGeometry, getMprOrientations, getViewer, releaseLocalDicoms, rotateMprOrientation, thumbnailLocalDicom, loadDicomThumbnail, type MprOrientations, type MprMode, type MprSettings } from '@/lib/cornerstone';
 import { closestSlice, sameCoordinateSpace, normalOf, planeLabel, intersectPlanes, type Point3 } from '@/lib/localizer';
 import { expandSources, filesFromDrop } from '@/lib/import-sources';
 import { parseDicomFile } from '@/lib/dicom-file';
@@ -41,7 +44,7 @@ import { Sparkles } from 'lucide-react';
 import type * as Core from '@cornerstonejs/core';
 
 type Tool = 'anatomy-volume' | 'anatomy-auto' | 'anatomy' | 'scroll' | 'arrow' | 'pencil' | 'cursor3d' | 'wl' | 'pan' | 'zoom' | 'length' | 'angle' | 'arch' | 'cobb' | 'ellipse' | 'hu' | 'deviation' | 'erase';
-type Series = { id: string; studyId: string; name: string; modality: string; patient: string; patientId: string; birth: string; date: string; number: string; imageIds: string[]; initialImageId?:string; thumb?: string; mediaSession?: string; archived?: boolean; discovered?: number; loading?: boolean };
+type Series = { institution?: string; id: string; studyId: string; name: string; modality: string; patient: string; patientId: string; birth: string; date: string; number: string; imageIds: string[]; initialImageId?:string; thumb?: string; mediaSession?: string; archived?: boolean; discovered?: number; loading?: boolean };
 type Preset = { ww: number; wl: number; token: number; panel: string; seriesId: string; imageId: string } | null;
 type ImportSource = { id: number; label: string; files: File[] };
 type MprData = { sourceId: string; stacks: Record<'SAG' | 'COR' | 'AX', string[]>; planes: Series[]; owned: string[]; orientations: MprOrientations | null; pivot?: Point3 | null };
@@ -150,6 +153,19 @@ function ViewportPane({ anatomyControl, anatomyVolume, anatomyVolumeVisible, ana
   const navigate = useStackNavigation(viewport, imageId, setError);
 
   useEffect(() => {
+    if (!selected || concealed || !viewport) return;
+    const key = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || !['ArrowUp','ArrowDown'].includes(event.key)) return;
+      const target = event.target as HTMLElement;
+      if (target.closest('input,textarea,select,button,[role="menu"],[role="dialog"],[contenteditable="true"]') || document.querySelector('[role="dialog"],dialog[open],[role="menu"]')) return;
+      event.preventDefault(); event.stopPropagation(); navigate(event.key === 'ArrowDown' ? 1 : -1, true);
+    };
+    // Handle slice keys before Cornerstone marks every canvas key as prevented.
+    window.addEventListener('keydown', key, true);
+    return () => window.removeEventListener('keydown', key, true);
+  }, [selected, concealed, viewport, navigate]);
+
+  useEffect(() => {
     if (!ready || !elementRef.current) return;
     const element = elementRef.current;
     let disposed = false;
@@ -234,6 +250,7 @@ function ViewportPane({ anatomyControl, anatomyVolume, anatomyVolumeVisible, ana
     return () => {
       disposed = true; requestRef.current++;
       (element as any).__cleanup?.();
+      if (group) viewer.tools.cancelActiveManipulations(element);
       if (group) viewer.tools.ToolGroupManager.destroyToolGroup(`group-${id}`);
       if (viewer?.engine.getViewport(viewportId)) viewer.engine.disableElement(viewportId);
       groupRef.current = null; setEnabled(false); setViewport(null); setImageId('');
@@ -255,6 +272,9 @@ function ViewportPane({ anatomyControl, anatomyVolume, anatomyVolumeVisible, ana
       const presentation = extending && reconstruction ? vp.getViewPresentation() : null;
       const anchorCanvas = camera && viewAnchor ? vp.worldToCanvas(viewAnchor) : null;
       const properties = extending ? vp.getProperties() : null;
+      const previousIds = vp.getImageIds();
+      if (previousIds.length === series.imageIds.length && previousIds.every((value, index) => value === series.imageIds[index])) return;
+      if (elementRef.current) (await getViewer()).tools.cancelActiveManipulations(elementRef.current);
       await vp.setStack(series.imageIds, initialIndex >= 0 ? initialIndex : 0);
       if (token !== requestRef.current) return;
       stackSeries.current = series.id;
@@ -344,7 +364,7 @@ function ViewportPane({ anatomyControl, anatomyVolume, anatomyVolumeVisible, ana
     });
   }, [enabled, selected, clearToken, viewportId, onClearImage]);
 
-  return <section ref={containerRef} data-has-image={!!imageId} data-panel={id} data-expanded={expanded || undefined} aria-hidden={concealed || undefined} className={`viewport ${selected ? 'active' : ''} ${hideText ? 'hide-image-text' : ''} ${tool === 'scroll' ? 'touch-scroll-mode' : ''}`} onClick={onSelect} onDoubleClick={event=>{
+  return <section ref={containerRef} data-has-image={!!imageId} data-panel={id} data-expanded={expanded || undefined} aria-hidden={concealed || undefined} className={`viewport ${selected ? 'active' : ''} ${hideText ? 'hide-image-text' : ''} ${tool === 'scroll' ? 'touch-scroll-mode' : ''}`} onPointerDownCapture={event => { if (event.button === 0) onSelect(); }} onClick={onSelect} onDoubleClick={event=>{
     if(limited||event.button!==0||event.defaultPrevented||performance.now()<Number(containerRef.current?.dataset.suppressMaximizeUntil||0))return;
     if(event.target instanceof Element&&event.target.closest('button,input,textarea,select,[role="menu"],[role="button"],.measurement-menu,.localizer-overlay,.measurement-overlay,.drawing-overlay'))return;
     onToggleMaximize?.();
@@ -366,7 +386,7 @@ function ViewportPane({ anatomyControl, anatomyVolume, anatomyVolumeVisible, ana
     <div className="pane-badge">{id}</div>
     {series ? <>
       <div className="overlay top-left"><strong>{series.patient}</strong><span>{age(series.birth, series.date)}</span><span>{formatDate(series.birth)} {tr('ui.born_945da')}</span></div>
-      <div className="overlay top-right"><strong>{series.modality} · {series.name}</strong><span>{formatDate(series.date)}</span><span>{reconstruction && `${reconstruction.mode} · ${reconstruction.thickness} mm`} {tr('ui._series_13b8a')}{series.number}</span></div>
+      <div className="overlay top-right">{series.institution && <span className="institution-name">{series.institution}</span>}<strong>{series.modality} · {series.name}</strong><span>{formatDate(series.date)}</span><span>{reconstruction && `${reconstruction.mode} · ${reconstruction.thickness} mm`} {tr('ui._series_13b8a')}{series.number}</span></div>
       <div className="overlay bottom-left"><span>WL {wl ?? '—'} · WW {ww ?? '—'}</span>{orientation.left && <span>{tr('ui.left_fb38f')}{orientation.left} {tr('ui._right_b21a9')}{orientation.right}</span>}</div>
       <div className="overlay bottom-right"><span>{tr('ui.image_b3c86')}{slice + 1} / {series.imageIds.length}</span><span>{id === 'MS' ? 'SAG' : id === 'MC' ? 'COR' : id === 'MA' ? 'AX' : planeLabel(getLocalizerGeometry(imageId))} · {series.modality}</span></div>
       {id.startsWith('M') && id !== 'MA' && <><span className="mpr-orientation-top">{orientation.top}</span><span className="mpr-orientation-bottom">{orientation.bottom}</span></>}
@@ -532,7 +552,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         for (const item of images) {
           const id = mediaId(session, item), existing = next.find(s => s.id === id);
           if (existing) next = next.map(s => s.id === id ? { ...s, mediaSession: session, discovered: (s.mediaSession === session ? s.discovered || 0 : 0) + 1, loading: true } : s);
-          else next.push({ ...item, id, imageIds: [], mediaSession: session, discovered: 1, loading: true });
+          else next.push({ ...item, name: dicomSeriesName(tag => item.tags[tag]), institution: item.tags.x00080080, id, imageIds: [], mediaSession: session, discovered: 1, loading: true });
         }
         mediaSeries.current = new Map(next.map(s => [s.id, s]));
         next = mergeMedia(listRef.current);
@@ -602,6 +622,29 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     }, mediaFilter);
   }, [ready, mediaEnabled, mediaFilter]);
 
+  const thumbnailJobs = useRef(new Set<string>());
+  const thumbnailAttempts = useRef(new Set<string>());
+  useEffect(() => {
+    if (!ready) return;
+    for (const series of seriesList) {
+      if (thumbnailJobs.current.size >= 2) break;
+      const image = series.imageIds[0];
+      if (series.thumb || !image || thumbnailAttempts.current.has(image)) continue;
+      thumbnailAttempts.current.add(image); thumbnailJobs.current.add(image);
+      void loadDicomThumbnail(image).then(thumb => {
+        if (!thumb || !listRef.current.some(item => item.id === series.id && item.imageIds.includes(image))) return;
+        const media = mediaSeries.current.get(series.id);
+        if (media) mediaSeries.current.set(series.id, {...media, thumb});
+        const next = listRef.current.map(item => item.id === series.id ? {...item, thumb} : item);
+        listRef.current = next; setSeriesList(next);
+      }).catch(() => {}).finally(() => {
+        thumbnailJobs.current.delete(image);
+        // Advance the queue even when a damaged representative image fails.
+        setSeriesList(current => [...current]);
+      });
+    }
+  }, [ready, seriesList]);
+
   const importFiles = useCallback(async (files: File[], request = ++importEpoch.current, preferredSeriesId?: string): Promise<boolean> => {
     setLoadProgress({label: 'DICOM yüklənir', done: 0, total: files.length});
     const viewer = await getViewer();
@@ -668,7 +711,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         if (request !== importEpoch.current) { discardUnpublished(); return false; }
         acceptedFiles.push(file);
         const record = found.get(uid) || {
-          id: uid, studyId, name: get('x0008103e') || 'Adsız seriya', modality: get('x00080060') || 'DICOM',
+          id: uid, studyId, name: dicomSeriesName(get), institution: get('x00080080'), modality: get('x00080060') || 'DICOM',
           patient: (get('x00100010') || 'Naməlum pasiyent').replaceAll('^', ' '),
           patientId: get('x00100020') || '—', birth: get('x00100030'), date: get('x00080020'),
           number: get('x00200011') || '—', imageIds: [], ordered: [], sopUIDs: new Set<string>(),
@@ -886,26 +929,26 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       void Promise.resolve(context.registerTool(tool, { signal: controller.signal })).catch(() => {});
     };
     register({ name: 'set_viewer_layout', title: 'Panel düzülüşünü dəyiş',
-      description: 'DICOM viewer görüntü panellərini 1–5 sətir və 1–5 sütun üzrə düz.',
-      inputSchema: { type: 'object', properties: { rows: { type: 'integer', minimum: 1, maximum: 5 }, columns: { type: 'integer', minimum: 1, maximum: 5 } }, required: ['rows', 'columns'], additionalProperties: false },
+      description: 'DICOM viewer görüntü panellərini 1–6 sətir və 1–6 sütun üzrə düz.',
+      inputSchema: { type: 'object', properties: { rows: { type: 'integer', minimum: 1, maximum: 6 }, columns: { type: 'integer', minimum: 1, maximum: 6 } }, required: ['rows', 'columns'], additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
       async execute(input) {
-        if (![input?.rows, input?.columns].every(n => Number.isInteger(n) && n >= 1 && n <= 5)) throw new Error('Sətir və sütun sayı 1–5 olmalıdır');
+        if (![input?.rows, input?.columns].every(n => Number.isInteger(n) && n >= 1 && n <= 6)) throw new Error('Sətir və sütun sayı 1–6 olmalıdır');
         setLayout({ rows: input.rows, columns: input.columns });
         setMaximizedPane(null);
-        setActive(current => current.charCodeAt(0) - 65 < input.rows * input.columns ? current : 'A');
+        setActive(current => paneIndex(current) < input.rows * input.columns ? current : 'A');
         await new Promise(resolve => requestAnimationFrame(resolve));
         return { rows: input.rows, columns: input.columns, panes: input.rows * input.columns };
       } });
     register({ name: 'set_active_series', title: 'Seriyanı panelə yerləşdir',
       description: 'Siyahıdakı DICOM seriyasını seçilmiş görüntü panelində aç.',
-      inputSchema: { type: 'object', properties: { seriesId: { type: 'string' }, panel: { type: 'string', description: 'A–Y arası açıq panel hərfi' } }, required: ['seriesId', 'panel'], additionalProperties: false },
+      inputSchema: { type: 'object', properties: { seriesId: { type: 'string' }, panel: { type: 'string', description: 'A–AJ arası açıq panel hərfi' } }, required: ['seriesId', 'panel'], additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
       async execute(input) {
-        if (typeof input?.panel !== 'string' || !/^[A-Y]$/.test(input.panel)) throw new Error('Panel A–Y arası olmalıdır');
+        if (typeof input?.panel !== 'string' || !/^(?:[A-Z]|A[A-J])$/.test(input.panel)) throw new Error('Panel A–AJ arası olmalıdır');
         const match = seriesList.find(s => s.id === input.seriesId);
         if (!match) throw new Error('Seriya tapılmadı');
-        const index = input.panel.charCodeAt(0) - 65;
+        const index = paneIndex(input.panel);
         if (index >= layout.rows * layout.columns) throw new Error('Bu panel cari düzülüşdə açıq deyil');
         setAssigned(current => ({ ...current, [input.panel]: match.id }));
         setCurrentImages(current => ({ ...current, [input.panel]: '' }));
@@ -1141,7 +1184,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
 
   const mprPreview = currentSeries?.imageIds.length && ['CT','MR'].includes(currentSeries.modality) ? currentSeries : seriesList.find(item=>item.imageIds.length && ['CT','MR'].includes(item.modality));
   const sourceLoading: LoadingProgress | null = loadProgress || (mediaProgress?.sessions && (mediaProgress.scanning || mediaProgress.loaded + mediaProgress.skipped < mediaProgress.discovered) ? {label:detachedMode === '3d'?'3D görüntü hazırlanır':'MPR hazırlanır',done:mediaProgress.loaded,total:mediaProgress.discovered,indeterminate:mediaProgress.scanning,phase:'DICOM görüntüləri oxunur'} : null);
-  return <main className={`workstation grouped-workstation ${railHidden ? 'rail-hidden' : ''} ${detachedMode ? 'detached' : ''}`} data-mode={detachedMode || 'viewer'} style={measurementVariables as React.CSSProperties}
+  return <ToolbarWorkspace scope={workspace}><main className={`workstation grouped-workstation ${railHidden ? 'rail-hidden' : ''} ${detachedMode ? 'detached' : ''}`} data-mode={detachedMode || 'viewer'} style={measurementVariables as React.CSSProperties}
     onDragOverCapture={event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; } }}
     onDropCapture={event => {
       if (!event.dataTransfer.types.includes('Files') || (event.target as HTMLElement).closest('.source-list')) return;
@@ -1149,43 +1192,43 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       if (!limited) void dropSources(event.dataTransfer.items, event.dataTransfer.files);
     }}>
     <header className={`topbar ${toolbarMore?'toolbar-more-open':''}`}>
-      <button className="toolbar-more" aria-label="Əlavə alətlər" aria-expanded={toolbarMore} onClick={()=>setToolbarMore(v=>!v)}><Settings2/></button>
+      <ToolbarOverflow/>
       {!detachedMode && <div className="brand"><RadazLogo size={34}/><span><strong>RADAZ</strong><RadazTagline/></span></div>}
       <div className="primary-command-row">
-        {!detachedMode && <div className="toolbar-group import-command" role="group" aria-label={tr('ui.dicom_import_48fa8')}><DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" className="header-control" title={tr('ui.dicom_import_e8ec8')} aria-label={tr('ui.dicom_import_e8ec8')} disabled={importBusy || limited}><FolderOpen size={17}/><span>{tr('ui.dicom_import_e8ec8')}</span><ChevronDown size={14}/></Button></DropdownMenuTrigger>
+        {!detachedMode && <ToolbarGroup className="toolbar-group import-command" role="group" aria-label={tr('ui.dicom_import_48fa8')} groupId="import" order={10}><DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" className="header-control" title={tr('ui.dicom_import_e8ec8')} aria-label={tr('ui.dicom_import_e8ec8')} disabled={importBusy || limited}><FolderOpen size={17}/><span>{tr('ui.dicom_import_e8ec8')}</span><ChevronDown size={14}/></Button></DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="header-menu">
             <DropdownMenuItem onSelect={() => { setImportOpen(true); folderRef.current?.click(); }}><FolderOpen size={16}/> {tr('ui.open_folder_55722')}</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => { setImportOpen(true); zipRef.current?.click(); }}><FileArchive size={16}/> {tr('ui.open_zip_rar_38098')}</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => fileRef.current?.click()}><ScanSearch size={16}/> {tr('ui.dicom_files_650bc')}</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setImportOpen(true)}><Grid2X2 size={16}/> {tr('ui.select_multiple_sources_e4aae')}</DropdownMenuItem>
           </DropdownMenuContent>
-        </DropdownMenu></div>}
-        {!detachedMode && <Button variant="outline" className={`header-control cd-import-command ${mediaEnabled ? 'active' : ''}`} aria-label={tr('ui.import_cd_dvd_b673d')} aria-pressed={mediaEnabled}
+        </DropdownMenu></ToolbarGroup>}
+        {!detachedMode && <ToolbarGroup groupId="cd" order={15} aria-label="CD / DVD"><Button variant="outline" className={`header-control cd-import-command ${mediaEnabled ? 'active' : ''}`} aria-label={tr('ui.import_cd_dvd_b673d')} aria-pressed={mediaEnabled}
           title={mediaEnabled ? 'CD/DVD importunu dayandır; köçürülmüş görüntülər arxivdə qalır' : 'CD/DVD-ni avtomatik aşkar et və aç'} disabled={limited}
           onClick={() => { setMediaEnabled(enabled => !enabled); setRailHidden(false); }}>
           <Disc3 size={18}/><span>{tr('ui.import_cd_dvd_b673d')}</span>{mediaEnabled && <span className="status-led"/>}
-        </Button>}
-      {!detachedMode && <div className="workspace-launch toolbar-group" role="group" aria-label={tr('ui.view_mode_a87b2')}>
+        </Button></ToolbarGroup>}
+      {!detachedMode && <ToolbarGroup className="workspace-launch toolbar-group" role="group" aria-label={tr('ui.view_mode_a87b2')} groupId="workspace" order={20}>
         <button type="button" aria-label={tr('ui.2d_viewer_b2533')} onClick={() => setWorkspace('viewer')}><ScanLine size={18}/></button>
         <button type="button" disabled={limited} title={tr('ui.mpr_reconstruction_9bcc7')} aria-label={tr('ui.mpr_reconstruction_9bcc7')} onClick={() => openDetached('mpr')}><b className="mode-letter-icon">MPR</b></button>
         <button type="button" disabled={limited} title={tr('ui.3d_volume_rendering_8b54e')} aria-label={tr('ui.3d_volume_rendering_8b54e')} onClick={() => openDetached('3d')}><b className="mode-letter-icon">3D</b></button>
         <button type="button" disabled={limited} title={tr('ui.ai_assistant_eb79d')} aria-label={tr('ui.ai_assistant_eb79d')} onClick={openReport}><Sparkles size={18}/><span>{tr('ui.ai_assistant_eb79d')}</span></button>
         <button type="button" title={tr('ui.local_archive_c13fe')} aria-label={tr('ui.local_archive_c13fe')} onClick={async () => { if (!await openRecordsWindow('archive')) setStatus('Local arxiv vərəqəsi açıla bilmədi'); }}><Database size={18}/><span>{tr('ui.local_archive_c13fe')}</span></button>
         <button type="button" title={tr('ui.pacs_studies_d77a3')} aria-label={tr('ui.pacs_studies_d77a3')} onClick={async () => { if (!await openRecordsWindow('pacs')) setStatus('PACS vərəqəsi açıla bilmədi'); }}><ServerCog size={18}/><span>PACS</span></button>
-      </div>}
+      </ToolbarGroup>}
         {!limited && detachedMode !== '3d' && <ViewerOutputControls panes={Object.entries(currentImages).map(([panel, imageId]) => ({ panel, imageId, series: [...seriesList, ...(mprData?.planes || [])].find(item => item.imageIds.includes(imageId)) }))} panel={workspace === 'mpr' ? mprActive : active} imageId={currentImages[workspace === 'mpr' ? mprActive : active]} series={workspace === 'mpr' ? mprData?.planes.find(item => item.imageIds.includes(currentImages[mprActive])) : currentSeries} allSeries={seriesList} datasetVersion={datasetVersion} onStatus={setStatus}/>}
       </div>
       {workspace === 'mpr' && <>
         <div className="mode-identity" title={tr('ui.mpr_reconstruction_9bcc7')}><strong><Layers3 size={17}/><span>{tr('ui.mpr_reconstruction_9bcc7')}</span></strong><span title={seriesList.find(s => s.id === mprData?.sourceId)?.name || ''}>{seriesList.find(s => s.id === mprData?.sourceId)?.name || currentSeries?.name || 'Seriya seçin'}</span></div>
-        <div className="mode-controls mpr-header-controls">
+        <ToolbarGroup className="mode-controls mpr-header-controls" groupId="mpr-modes" order={30}>
           <div className="mpr-modes" role="group" aria-label={tr('ui.active_mpr_pane_mode_5965d')}>{(['MPR','MIP','MinIP','Avg'] as const).map(mode => <button key={mode} title={mode} aria-label={mode} type="button" className={mprSettings[panePlane[mprActive as keyof typeof panePlane] || 'AX'].mode === mode ? 'current' : ''} onClick={() => changeMprSetting({ mode })}><b className="mpr-mode-label">{mode==='MIP'?'MİP':mode==='MinIP'?'MinİP':mode}</b></button>)}</div>
           <label className="mpr-thickness"><span>{tr('ui.thickness_1a60e')}</span><input type="range" min="1" max="50" step="1" aria-label={tr('ui.active_mpr_slab_thickness_af500')} value={mprSettings[panePlane[mprActive as keyof typeof panePlane] || 'AX'].thickness} onChange={e => changeMprSetting({ thickness: Number(e.currentTarget.value) })}/><output>{mprSettings[panePlane[mprActive as keyof typeof panePlane] || 'AX'].thickness} mm</output></label>
           <button className="mpr-reset" type="button" onClick={resetMprLines} title={tr('ui.restore_initial_mpr_lines_8cc74')} aria-label={tr('ui.reset_mpr_lines_92ff9')}><RotateCcw size={15}/><span>{tr('ui.reset_lines_fb045')}</span></button>
-        </div>
+        </ToolbarGroup>
       </>}
       {workspace === '3d' && <>
         <div className="mode-identity"><strong><Box size={17}/> 3D VR</strong><span title={volumeSeries?.name || ''}>{volumeSeries ? `${volumeSeries.name} · ${volumeSeries.imageIds.length} kəsit` : 'Seriya seçin'}</span></div>
-        <div className="mode-controls volume-header-controls">
+        <ToolbarGroup className="mode-controls volume-header-controls" groupId="volume-display" order={30}>
           <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" className="header-control volume-preset-trigger" title={`3D preset: ${volumeStyles.find(style => style.key === volumePreset)?.title}`} aria-label={tr('ui.3d_rendering_presets_21999')}><SlidersHorizontal size={18}/><ChevronDown size={13}/></Button></DropdownMenuTrigger><DropdownMenuContent align="start" className="header-menu volume-preset-menu"><div className="volume-menu-heading">{tr('ui.3d_rendering_presets_1d0ae')}</div>{availableVolumeStyles.map(style => <DropdownMenuItem key={style.key} className={volumePreset === style.key ? 'menu-selected' : ''} onSelect={() => { setVolumePreset(style.key); setVolumeThreshold(style.threshold); setVolumeOpacity(style.opacity); setVolumeSettings(current => ({...style.lighting,quality:current.quality})); }}><span className="volume-preset-swatch" style={{ background: style.tone }}/><span className="volume-preset-copy"><strong>{style.title}</strong><small>{style.subtitle}</small></span></DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>
           <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" className="header-control" title="HU / Opacity" aria-label="3D HU / Opacity"><CircleDot size={18}/></Button></DropdownMenuTrigger><DropdownMenuContent className="header-menu volume-parameter-menu" align="start">          <label className="volume-parameter">{ctVolume ? 'HU həddi' : 'İntensivlik'} <input aria-label={ctVolume ? '3D HU həddi' : '3D intensivlik həddi'} type="range" min="-1000" max="1400" step="10" value={volumeThreshold} onChange={event => setVolumeThreshold(+event.currentTarget.value)}/><output>{ctVolume ? volumeThreshold : `${Math.round(volumeThreshold/40.95)}%`}</output></label>
           <label className="volume-parameter">{tr('ui.opacity_bc511')}<input aria-label={tr('ui.3d_opacity_9d0bc')} type="range" min="0.2" max="2" step="0.1" value={volumeOpacity} onChange={event => setVolumeOpacity(+event.currentTarget.value)}/><output>{Math.round(volumeOpacity * 100)}%</output></label>
@@ -1193,41 +1236,41 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
           <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" className="header-control volume-preset-trigger" title={tr('ui.lighting_and_quality_settings_89bd5')} aria-label={tr('ui.advanced_3d_settings_86add')}><Settings2 size={18}/></Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="header-menu volume-settings-menu"><div className="volume-menu-heading">{tr('ui.lighting_and_rendering_f92e6')}</div><VolumeRenderControls ct={ctVolume} preset={volumePreset} settings={volumeSettings} onChange={setVolumeSettings}/></DropdownMenuContent></DropdownMenu>
           <button className="mpr-reset" type="button" aria-label="TotalSegmentator" onClick={()=>setAnatomyVolumeOpen(value=>!value)}><Layers3 size={17}/><span>{tr('ui.ct_mri_anatomy_f433a')}</span></button>
           <button className="mpr-reset volume-reset" type="button" onClick={() => { const style = volumeStyles.find(item => item.key === (ctVolume ? 'bone' : 'mr'))!; setVolumePreset(style.key); setVolumeThreshold(style.threshold); setVolumeOpacity(style.opacity); setVolumeSettings(style.lighting); setVolumeResetToken(value => value+1); }} title={tr('ui.reset_3d_view_lighting_opacity_rotation_zoom_628ef')} aria-label={tr('ui.reset_3d_view_24960')}><RotateCcw size={15}/><span>{tr('ui.reset_82c50')}</span></button>
-        </div>
-        <div id="volume-edit-toolbar" className="toolbar-group volume-edit-toolbar" role="group" aria-label="3D redaktə alətləri"/>
+        </ToolbarGroup>
+        <ToolbarGroup id="volume-edit-toolbar" className="toolbar-group volume-edit-toolbar" role="group" aria-label="3D redaktə alətləri" groupId="volume-edit" order={40}/>
       </>}
       <div className="top-actions">
 
         {!limited && detachedMode !== '3d' && <div className="display-command-row">
-          <div className="toolbar-group"><Button variant="ghost" className="header-control" aria-label={tr('ui.hide_annotations_0166e')} aria-pressed={hideText} title={hideText ? 'Yazıları göstər' : tr('ui.hide_annotations_0166e')} onClick={() => setHideText(value => !value)}>{hideText ? <EyeOff size={18}/> : <Eye size={18}/>}<span>{tr('ui.annotations_ce66d')}</span></Button></div>
+          <ToolbarGroup className="toolbar-group" groupId="annotations" order={45}><Button variant="ghost" className="header-control" aria-label={tr('ui.hide_annotations_0166e')} aria-pressed={hideText} title={hideText ? 'Yazıları göstər' : tr('ui.hide_annotations_0166e')} onClick={() => setHideText(value => !value)}>{hideText ? <EyeOff size={18}/> : <Eye size={18}/>}<span>{tr('ui.annotations_ce66d')}</span></Button></ToolbarGroup>
           <ViewerDisplayControls panel={workspace === 'mpr' ? mprActive : active} imageId={currentImages[workspace === 'mpr' ? mprActive : active]} defaultImageId={workspace === 'mpr' ? seriesList.find(item => item.id === mprData?.sourceId)?.imageIds[0] : undefined} onStatus={setStatus}/>
 
         </div>}
-        {!limited&&workspace!=='3d'&&<div className="toolbar-group"><Button variant="ghost" className="header-control anatomy-trigger" aria-label="TotalSegmentator" title="TotalSegmentator · CT / MR" onClick={()=>setAnatomyVolumeOpen(value=>!value)}><Layers3 size={18}/><span>{tr('ui.ct_mri_anatomy_f433a')}</span></Button></div>}
-        {!limited && detachedMode !== '3d' && <div className="toolbar-group" role="group" aria-label={tr('ui.navigation_and_measurement_e7a8e')}>{viewTools.map(t => <Button key={t.id} variant="ghost" className={`header-control view-tool ${tool === t.id ? 'selected-tool' : ''}`} aria-pressed={tool === t.id} title={`${t.label} · ${t.hint}`} onClick={() => setTool(t.id)}><t.icon size={17}/><span>{t.label}</span></Button>)}
+        {!limited&&workspace!=='3d'&&<ToolbarGroup className="toolbar-group" groupId="anatomy" order={60}><Button variant="ghost" className="header-control anatomy-trigger" aria-label="TotalSegmentator" title="TotalSegmentator · CT / MR" onClick={()=>setAnatomyVolumeOpen(value=>!value)}><Layers3 size={18}/><span>{tr('ui.ct_mri_anatomy_f433a')}</span></Button></ToolbarGroup>}
+        {!limited && detachedMode !== '3d' && <ToolbarGroup className="toolbar-group" role="group" aria-label={tr('ui.navigation_and_measurement_e7a8e')} groupId="measure" order={70}>{viewTools.map(t => <Button key={t.id} variant="ghost" className={`header-control view-tool ${tool === t.id ? 'selected-tool' : ''}`} aria-pressed={tool === t.id} title={`${t.label} · ${t.hint}`} onClick={() => setTool(t.id)}><t.icon size={17}/><span>{t.label}</span></Button>)}
         <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className="header-control" title={tr('ui.measurement_tools_0762c')} aria-label={tr('ui.measurement_tools_0762c')}><Ruler size={17}/><span>{tr('ui.measurements_a4480')}</span><ChevronDown size={14}/></Button></DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="header-menu">{measureTools.map(t => <DropdownMenuItem key={t.id} onSelect={() => setTool(t.id)} className={tool === t.id ? 'menu-selected' : ''}><t.icon size={16}/>{t.label}<kbd>{t.hint}</kbd></DropdownMenuItem>)}<div className="menu-separator"/><DropdownMenuItem onSelect={() => setClearToken(x => x + 1)}><Trash2 size={16}/> {tr('ui.delete_all_on_current_slice_cc1ac')}<kbd>Ctrl+D</kbd></DropdownMenuItem><div className="menu-hint">{tr('ui.select_a_measurement_delete_to_remove_7f481')}</div></DropdownMenuContent>
         </DropdownMenu>
-        </div>}
-        {!limited && detachedMode !== '3d' && <div className="toolbar-group" role="group" aria-label={tr('ui.window_and_localizer_1e413')}>
+        </ToolbarGroup>}
+        {!limited && detachedMode !== '3d' && <ToolbarGroup className="toolbar-group" role="group" aria-label={tr('ui.window_and_localizer_1e413')} groupId="window" order={80}>
         <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className="header-control" title={tr('ui.window_preset_b14ad')} aria-label={tr('ui.window_preset_menu_148b6')}><SlidersHorizontal size={17}/><span>{tr('ui.window_preset_b14ad')}</span><ChevronDown size={14}/></Button></DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="header-menu preset-menu">{presets.map(p => <DropdownMenuItem key={p.label} onSelect={() => { if (workspace === 'mpr' && mprData) { const plane = mprData.planes[{ MS:0, MC:1, MA:2 }[mprActive as 'MS'|'MC'|'MA'] || 0]; setPreset({ ...p, token: Date.now(), panel: mprActive, seriesId: plane.id, imageId: currentImages[mprActive] || '' }); } else if (assigned[active]) setPreset({ ...p, token: Date.now(), panel: active, seriesId: assigned[active], imageId: currentImages[active] || '' }); }}><span>{p.label}</span><small>WL {p.wl} · WW {p.ww}</small></DropdownMenuItem>)}</DropdownMenuContent>
         </DropdownMenu>
-        <Button variant="ghost" className={`header-control localizer-toggle ${localizers ? 'is-on' : ''}`} aria-label={tr('ui.localizer_lines_1e289')} aria-pressed={localizers} title={tr('ui.show_localizer_lines_between_compatible_serie_67285')} onClick={() => setLocalizers(value => !value)}><Crosshair size={17}/><span>{tr('ui.localizer_8c497')}</span></Button></div>}
-        {!limited && detachedMode !== '3d' && <div className="toolbar-group" role="group" aria-label={tr('ui.pane_layout_and_size_6ffc9')}>
+        <Button variant="ghost" className={`header-control localizer-toggle ${localizers ? 'is-on' : ''}`} aria-label={tr('ui.localizer_lines_1e289')} aria-pressed={localizers} title={tr('ui.show_localizer_lines_between_compatible_serie_67285')} onClick={() => setLocalizers(value => !value)}><Crosshair size={17}/><span>{tr('ui.localizer_8c497')}</span></Button></ToolbarGroup>}
+        {!limited && detachedMode !== '3d' && <ToolbarGroup className="toolbar-group" role="group" aria-label={tr('ui.pane_layout_and_size_6ffc9')} groupId="layout" order={90}>
         {workspace === 'viewer' && <DropdownMenu open={layoutOpen} onOpenChange={setLayoutOpen}><DropdownMenuTrigger asChild><Button variant="outline" className="header-control layout-trigger" title={`${layout.columns}×${layout.rows} panel düzülüşü`} aria-label={tr('ui.pane_layout_586c7')}><Grid2X2 size={18}/><span>{layout.columns}×{layout.rows}</span><ChevronDown size={14}/></Button></DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="layout-menu" onMouseLeave={() => setLayoutHover(layout)}><div className="layout-caption">{tr('ui.pane_layout_586c7')}<strong>{layoutHover.columns} × {layoutHover.rows}</strong></div><div className="layout-matrix" role="grid" aria-label={tr('ui.choose_1_to_5_rows_and_columns_2b98d')}>
-            {Array.from({ length: 25 }, (_, index) => { const rows = Math.floor(index / 5) + 1, columns = index % 5 + 1; return <button key={index} type="button" role="gridcell" aria-label={`${columns} sütun, ${rows} sətir, ${columns * rows} panel`} aria-selected={layout.rows === rows && layout.columns === columns} className={rows <= layoutHover.rows && columns <= layoutHover.columns ? 'highlighted' : ''} onMouseEnter={() => setLayoutHover({ rows, columns })} onFocus={() => setLayoutHover({ rows, columns })} onClick={() => { setLayout({ rows, columns }); setMaximizedPane(null); setActive(current => current.charCodeAt(0) - 65 < rows * columns ? current : 'A'); setLayoutOpen(false); }}/> })}
+          <DropdownMenuContent align="end" className="layout-menu" onMouseLeave={() => setLayoutHover(layout)}><div className="layout-caption">{tr('ui.pane_layout_586c7')}<strong>{layoutHover.columns} × {layoutHover.rows}</strong></div><div className="layout-matrix" role="grid" aria-label="1–6 sətir və sütun seçin">
+            {Array.from({ length: 36 }, (_, index) => { const rows = Math.floor(index / 6) + 1, columns = index % 6 + 1; return <button key={index} type="button" role="gridcell" aria-label={`${columns} sütun, ${rows} sətir, ${columns * rows} panel`} aria-selected={layout.rows === rows && layout.columns === columns} className={rows <= layoutHover.rows && columns <= layoutHover.columns ? 'highlighted' : ''} onMouseEnter={() => setLayoutHover({ rows, columns })} onFocus={() => setLayoutHover({ rows, columns })} onClick={() => { setLayout({ rows, columns }); setMaximizedPane(null); setActive(current => paneIndex(current) < rows * columns ? current : 'A'); setLayoutOpen(false); }}/> })}
           </div></DropdownMenuContent>
         </DropdownMenu>}
         <Button variant="ghost" className="header-control fit-button" onClick={() => setResetToken(x => x + 1)} title={tr('ui.fit_to_screen_827db')}><Focus size={17}/><span>{tr('ui.fit_to_screen_827db')}</span></Button>
-        </div>}
+        </ToolbarGroup>}
         {limited&&<div className="toolbar-group limited-viewer-tools" title={tr('ui.activate_licence_bd73f')}><span>{tr('ui.browse_only_a5ea2')}</span>{['Pəncərə','Yaxınlaşdır','Ölçmə','Çap','İxrac'].map(label=><Button key={label} disabled className="header-control">{label}</Button>)}</div>}
         <input hidden ref={fileRef} type="file" multiple onChange={e => { const files = Array.from(e.currentTarget.files || []); e.currentTarget.value = ''; void openSources(files); }}/>
         <input hidden ref={folderRef} type="file" multiple onChange={e => { const files = Array.from(e.currentTarget.files || []); e.currentTarget.value = ''; queueFiles(files, 'Qovluq'); }}/>
         <input hidden ref={zipRef} type="file" multiple accept=".zip,.rar,application/vnd.rar,application/x-rar-compressed,application/zip,application/x-zip-compressed" onChange={e => { const files = Array.from(e.currentTarget.files || []); e.currentTarget.value = ''; queueFiles(files, 'ZIP'); }}/>
       </div>
-      <div className="toolbar-group help-command"><AppHelpMenu/></div>
+      <ToolbarGroup className="toolbar-group help-command" groupId="help" order={100}>{workspace!=='3d'&&<DicomInfoButton imageId={currentImages[workspace==='mpr'?mprActive:active]}/>}<AppHelpMenu/></ToolbarGroup>
     </header>
     <Dialog open={importOpen} onOpenChange={open => { if (!importBusy) setImportOpen(open); }}>
       <DialogContent className="import-dialog" showCloseButton={false}>
@@ -1278,7 +1321,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         {anatomyVolumeOpen&&!limited&&<AnatomyVolumeControls editing={workspace!=='3d'} control={anatomyVolume} source={anatomyVolumeSeries} onFocus={world=>{if(workspace==='3d')setAnatomyFocus(world);else if(workspace==='mpr')moveMprIntersection(world);else if(anatomyVolumeSeries){const index=closestSlice(anatomyVolumeSeries.imageIds,world,getLocalizerGeometry);if(index!==null)void getViewer().then(({engine})=>{const pane=engine.getViewport(`panel-${active}`) as Core.Types.IStackViewport|undefined;if(pane)void pane.setImageIdIndex(index).catch(error=>setStatus(String(error)));});}}} onPick={()=>{setAnatomyLabel(null);setTool('anatomy-volume');}} onClose={()=>{setAnatomyVolumeOpen(false);if(tool==='anatomy-volume')setTool('wl');}}/>}
         {anatomyLabel&&tool==='anatomy'&&<div className="anatomy-placement" role="status"><Crosshair size={18}/><span><strong>{anatomyLabel.text.split('\n')[0]}</strong> {tr('ui._pane_b5c88')}{anatomyLabel.panel}{tr('ui._click_the_structure_once_44e32')}</span><button onClick={()=>{setAnatomyLabel(null);setTool('wl');}}>{tr('ui.cancel_esc_bd665')}</button></div>}
         {workspace === 'viewer' && <div className="viewport-grid" style={{ gridTemplateColumns: `repeat(${maximizedPane ? 1 : layout.columns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${maximizedPane ? 1 : layout.rows}, minmax(0, 1fr))` }}>
-          {Array.from({ length: layout.rows * layout.columns }, (_, index) => String.fromCharCode(65 + index)).filter(id => !maximizedPane || id === maximizedPane).map(id => { const otherImages = id !== active && assigned[active] && currentImages[active] ? [{ panel: active, imageId: currentImages[active] }] : []; return <ViewportPane anatomyControl={anatomyVolume} anatomyVolume={volumeResultFor(seriesList.find(s=>s.id===assigned[id]))} anatomyVolumeVisible={anatomyVolume.visible} anatomyVolumeOpacity={anatomyVolume.opacity} anatomyLabel={anatomyLabel?.panel===id?anatomyLabel:null} windowLevels={windowLevels} key={`${id}-${datasetVersion}-${assigned[id] || "empty"}`} id={id} initialImageId={currentImages[id]} series={seriesList.find(s => s.id === assigned[id])} selected={active === id} tool={limited ? 'scroll' : tool} cursor={cursor} onCursor={onCursor} hideText={hideText} preset={preset} resetToken={resetToken} clearToken={clearToken} ready={ready} marks={marks} selectedMarkId={selectedMarkId} localizers={localizers && id !== active} otherImages={otherImages} onImageChange={onImageChange} onMoveSource={onMoveSource} onAddMark={onAddMark} onUpdateMark={onUpdateMark} onRemoveMark={onRemoveMark} onSelectMark={markId => { setActive(id); setSelectedMarkId(markId); }} onClearImage={onClearImage} onSelect={() => { setActive(id); setSelectedMarkId(null); }} onToggleMaximize={() => { setActive(id); setMaximizedPane(current => current === id ? null : id); }} onDropSeries={sid => place(sid, id)}/>; })}
+          {Array.from({ length: layout.rows * layout.columns }, (_, index) => paneId(index)).filter(id => !maximizedPane || id === maximizedPane).map(id => { const otherImages = id !== active && assigned[active] && currentImages[active] ? [{ panel: active, imageId: currentImages[active] }] : []; return <ViewportPane anatomyControl={anatomyVolume} anatomyVolume={volumeResultFor(seriesList.find(s=>s.id===assigned[id]))} anatomyVolumeVisible={anatomyVolume.visible} anatomyVolumeOpacity={anatomyVolume.opacity} anatomyLabel={anatomyLabel?.panel===id?anatomyLabel:null} windowLevels={windowLevels} key={`${id}-${datasetVersion}-${assigned[id] || "empty"}`} id={id} initialImageId={currentImages[id]} series={seriesList.find(s => s.id === assigned[id])} selected={active === id} tool={limited ? 'scroll' : tool} cursor={cursor} onCursor={onCursor} hideText={hideText} preset={preset} resetToken={resetToken} clearToken={clearToken} ready={ready} marks={marks} selectedMarkId={selectedMarkId} localizers={localizers && id !== active} otherImages={otherImages} onImageChange={onImageChange} onMoveSource={onMoveSource} onAddMark={onAddMark} onUpdateMark={onUpdateMark} onRemoveMark={onRemoveMark} onSelectMark={markId => { setActive(id); setSelectedMarkId(markId); }} onClearImage={onClearImage} onSelect={() => { setActive(id); setSelectedMarkId(null); }} onToggleMaximize={() => { setActive(id); setMaximizedPane(current => current === id ? null : id); }} onDropSeries={sid => place(sid, id)}/>; })}
         </div>}
         {workspace === 'mpr' && <>
           {mprError && <div className="mpr-error-notice" role="alert">{mprError}</div>}
@@ -1297,5 +1340,5 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         <footer className="statusbar"><div><span className="status-led"/> {ready ? 'Cornerstone3D hazırdır' : 'Görüntüləmə hazırlanır'} <span className="status-sep">/</span> <span>{workspace === 'mpr' ? `MPR · ${mprSettings[panePlane[mprActive as keyof typeof panePlane] || 'AX'].mode}` : workspace === '3d' ? '3D görünüş' : `Aktiv panel ${active}`}</span><span className="status-sep">/</span>{status}<span className="status-sep">/</span><span aria-label={tr('ui.licence_status_2eb16')}>{licenseStatus}</span></div></footer>
       </section>
     </div>
-  </main>;
+  </main></ToolbarWorkspace>;
 }

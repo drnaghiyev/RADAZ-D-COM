@@ -788,3 +788,117 @@ body main.workstation.grouped-workstation[data-mode="3d"] .topbar .toolbar-more{
 }
 
 @media(max-width:430px){body main.workstation.grouped-workstation .topbar .brand{display:none!important}}
+
+/* Shared, screen-scaled toolbar metrics. Overflow menus retain full-size tools. */
+.toolbar-workspace{--command-size:32px;--command-icon:21px;--command-gap:6px;--group-gap:10px;--dock-width:94px;--dock-top:64px;height:100dvh;min-height:0;min-width:0;position:relative;box-sizing:border-box;overflow:hidden}
+@media(min-width:1280px){.toolbar-workspace{--command-size:36px;--command-icon:23px;--dock-width:104px}}
+@media(min-width:1600px){.toolbar-workspace{--command-size:40px;--command-icon:25px;--group-gap:12px;--dock-width:112px}}
+@media(min-width:1920px){.toolbar-workspace{--command-size:48px;--command-icon:28px;--dock-width:128px}}
+@media(min-width:2560px){.toolbar-workspace{--command-size:56px;--command-icon:32px;--command-gap:8px;--group-gap:16px;--dock-width:148px}}
+@media(min-width:3200px){.toolbar-workspace{--command-size:64px;--command-icon:36px;--dock-width:164px}}
+.toolbar-workspace.has-right-dock{padding-right:var(--dock-width)}
+.toolbar-workspace>main{height:100%;min-height:0}
+body .toolbar-workspace main.workstation.grouped-workstation .topbar{--command-size:inherit;gap:var(--group-gap)!important;padding:10px 12px!important;flex-wrap:nowrap!important;overflow:visible!important;min-height:calc(var(--command-size) + 34px)!important}
+body .toolbar-workspace main.workstation.grouped-workstation .topbar .primary-command-row{display:contents!important}
+body .toolbar-workspace main.workstation.grouped-workstation .topbar :is(.toolbar-group,.mode-controls,.display-direct-controls){padding:6px!important;gap:var(--command-gap)!important;position:relative;flex-wrap:nowrap!important;align-items:center;flex-shrink:0!important}
+body .toolbar-workspace main.workstation.grouped-workstation .topbar button:not(.toolbar-drag-handle),body .toolbar-workspace .dockable-tool-group button:not(.toolbar-drag-handle){width:var(--command-size)!important;min-width:var(--command-size)!important;height:var(--command-size)!important;min-height:var(--command-size)!important;flex:0 0 var(--command-size)!important;padding:5px!important;gap:0!important;font-size:0!important;display:inline-flex;align-items:center;justify-content:center;border-radius:5px;color:#c9e0eb}
+body .toolbar-workspace :is(.topbar,.dockable-tool-group) button:not(.toolbar-drag-handle)>span{display:none!important}
+body .toolbar-workspace main.workstation.grouped-workstation .topbar button:not(.toolbar-drag-handle) svg,body .toolbar-workspace .dockable-tool-group button:not(.toolbar-drag-handle) svg{width:var(--command-icon)!important;height:var(--command-icon)!important;flex-shrink:0}
+body .toolbar-workspace :is(.topbar,.dockable-tool-group) button>svg+svg{width:9px!important;height:9px!important;position:absolute;right:1px;bottom:3px}
+body .toolbar-workspace :is(.topbar,.dockable-tool-group) button:has(>svg+svg){position:relative}
+body .toolbar-workspace main.workstation.grouped-workstation .topbar .mpr-modes{gap:var(--command-gap)!important}
+body .toolbar-workspace main.workstation.grouped-workstation .topbar .mpr-modes button,body .toolbar-workspace .right-tool-dock .mpr-modes button{min-width:max(46px,var(--command-size))!important;width:max(46px,var(--command-size))!important;flex-basis:max(46px,var(--command-size))!important}
+body .toolbar-workspace .mode-letter-icon,body .toolbar-workspace .mpr-mode-label{display:inline!important;font-size:clamp(13px,.9vw,22px)!important;line-height:1;font-weight:700}
+body .toolbar-workspace .dockable-tool-group{border:1px solid #344956!important;border-radius:6px!important;background:linear-gradient(#172631,#111d26)!important;display:flex;align-items:center;gap:var(--command-gap)!important;padding:6px!important;position:relative;flex-shrink:0}
+body .toolbar-workspace .dockable-tool-group :is(.toolbar-group,.display-direct-controls,.volume-direct-tools){border:0!important;background:transparent!important;padding:0!important;gap:var(--command-gap)!important;position:static;display:flex}
+body .toolbar-workspace .dockable-tool-group .toolbar-drag-handle{position:absolute!important;top:-9px;left:calc(50% - 14px);width:28px!important;min-width:28px!important;height:12px!important;min-height:12px!important;flex:none!important;padding:0!important;border:0!important;border-radius:3px;background:#314959;color:#93b6ca;opacity:.55;cursor:grab;z-index:3;touch-action:none;font-size:0!important}
+body .toolbar-workspace .dockable-tool-group .toolbar-drag-handle svg{height:12px!important;width:22px!important;transform:rotate(90deg)}
+body .toolbar-workspace .dockable-tool-group:hover .toolbar-drag-handle,body .toolbar-workspace .toolbar-drag-handle:focus{opacity:1;background:#42738c}
+.toolbar-dragging .dockable-tool-group{outline:1px dashed #6abac7;outline-offset:2px}
+.right-tool-dock{position:absolute;right:0;top:var(--dock-top);bottom:0;width:var(--dock-width);z-index:40;padding:12px 7px;background:#0d1923;border-left:1px solid #355165;overflow-y:auto;overflow-x:hidden}
+.right-tool-dock[hidden]{display:none}
+.toolbar-dragging .right-tool-dock{border:2px dashed #76c4c8;background:#163340ef}
+.right-tool-groups{display:flex;flex-direction:column;gap:18px}
+body .toolbar-workspace .right-tool-dock .dockable-tool-group{display:flex!important;position:relative!important;flex-wrap:wrap!important;width:100%!important;min-width:0!important;margin:0!important;justify-content:center!important;order:var(--order)}
+body .toolbar-workspace .right-tool-dock :is(.mpr-modes,.volume-direct-tools){display:contents!important}
+body .toolbar-workspace .right-tool-dock .mpr-thickness{display:none!important}
+body .toolbar-workspace .right-tool-dock .volume-edit-toolbar{min-height:calc(var(--command-size) + 12px)}
+.dock-drop-hint{display:none;font-size:12px;color:#bce4e8;text-align:center;margin:2px 0 14px}
+.toolbar-dragging .dock-drop-hint{display:block}
+body .toolbar-workspace .records-unified-header{gap:var(--group-gap)!important;padding:12px!important;align-items:center!important;flex-wrap:nowrap!important}
+body .toolbar-workspace .records-header-actions{display:contents!important}
+body .toolbar-workspace .records-header-filters{min-width:0;flex:1;gap:8px}
+body .toolbar-workspace .records-header-filters input,body .toolbar-workspace .records-header-filters select{min-height:var(--command-size);font-size:14px}
+body .toolbar-workspace .record-action-group{border:0!important;background:transparent!important;padding:0!important;display:contents!important}
+body .toolbar-workspace .records-primary{background:#1d5165!important}
+body .toolbar-workspace .topbar .help-command{order:100!important}
+body .toolbar-workspace .topbar .toolbar-more{order:95!important}
+body .toolbar-workspace .topbar .brand{order:-10}
+body .toolbar-workspace .topbar .mode-identity{order:-5}
+.layout-matrix{grid-template-columns:repeat(6,1fr)!important}
+.dicom-info-dialog{width:min(1000px,95vw)!important;max-width:1000px!important;max-height:90dvh;display:flex!important;flex-direction:column;gap:12px}
+.dicom-info-dialog>input{border:1px solid #3a596b;padding:9px 12px;border-radius:5px;background:#0d1b24}
+.dicom-info-dialog>p{font-size:13px;color:#acc7d7;margin:0}
+.dicom-info-table{overflow:auto;min-height:0}
+.dicom-info-table table{width:100%;font-size:14px;border-collapse:collapse}
+.dicom-info-table th{position:sticky;top:0;background:#193040;text-align:left}
+.dicom-info-table td,.dicom-info-table th{padding:8px 10px;border-bottom:1px solid #2b4352;vertical-align:top}
+.dicom-info-table td:first-child{white-space:nowrap;font-family:monospace}
+.dicom-info-table td:last-child{overflow-wrap:anywhere;max-width:500px}
+@media(min-width:1800px){body .toolbar-workspace main.workstation.grouped-workstation .topbar .top-actions{display:contents!important}}
+@media(max-width:1799px){
+ body .toolbar-workspace main.workstation.grouped-workstation .topbar .toolbar-more{display:flex!important}
+ body .toolbar-workspace main.workstation.grouped-workstation[data-mode="3d"] .topbar .toolbar-more{display:none!important}
+ body .toolbar-workspace main.workstation.grouped-workstation .topbar .top-actions{display:none!important}
+ body .toolbar-workspace main.workstation.grouped-workstation .topbar.toolbar-more-open .top-actions{display:flex!important;position:absolute;top:100%;right:8px;width:min(650px,calc(100vw - 16px));flex-wrap:wrap!important;gap:16px!important;padding:18px 12px!important;background:#11212e;box-shadow:0 8px 24px #000a;border:1px solid #405465;border-radius:7px;z-index:100;max-height:70vh;overflow:auto}
+}
+@media(max-width:650px){
+ body .toolbar-workspace main.workstation.grouped-workstation .topbar{padding:8px 4px!important;gap:5px!important}
+ body .toolbar-workspace main.workstation.grouped-workstation .topbar :is(.toolbar-group,.mode-controls,.display-direct-controls){padding:3px!important;gap:4px!important}
+ body .toolbar-workspace main.workstation.grouped-workstation .topbar .help-command button[aria-label="DICOM məlumatları"]{display:none!important}
+ body .toolbar-workspace main.workstation.grouped-workstation .topbar .brand{display:none!important}
+}
+
+body .toolbar-workspace .dockable-tool-group{order:var(--group-order)!important;margin-left:0!important}
+/* The overflow menu is based on measured group widths, including a docked sidebar. */
+body .toolbar-workspace main.workstation.grouped-workstation .topbar .top-actions,body .toolbar-workspace main.workstation.grouped-workstation .topbar .display-command-row{display:contents!important}
+body .toolbar-workspace main.workstation.grouped-workstation .topbar .output-command-group{display:flex!important;position:relative!important;top:auto!important;right:auto!important;width:auto!important}
+.toolbar-overflow{display:contents}
+body .toolbar-workspace .toolbar-overflow-trigger{order:99!important;width:var(--command-size)!important;height:var(--command-size)!important;min-width:var(--command-size)!important;border:1px solid #385163!important;border-radius:5px!important;display:inline-flex;align-items:center;justify-content:center}
+.toolbar-overflow-popup{position:fixed;left:-10000px;top:-10000px;visibility:hidden;display:flex;flex-wrap:wrap;gap:18px 12px;width:650px;max-width:calc(100vw - 24px);padding:18px 12px;background:#11212e;border:1px solid #405465;border-radius:7px;z-index:100;box-shadow:0 8px 24px #000a;max-height:75dvh;overflow:auto}
+.toolbar-overflow-popup.is-open{left:auto;right:12px;top:calc(var(--dock-top) + 2px);visibility:visible}
+.has-right-dock .toolbar-overflow-popup.is-open{right:calc(var(--dock-width) + 12px)}
+body .toolbar-workspace .toolbar-overflow-popup .dockable-tool-group{display:flex!important;flex-wrap:nowrap!important;width:max-content!important;max-width:none!important;margin:0!important}
+body .toolbar-workspace .toolbar-overflow-popup .mpr-modes{display:flex;gap:var(--command-gap)}
+body .toolbar-workspace .toolbar-overflow-popup .volume-direct-tools{position:static}
+body .toolbar-workspace main.workstation.grouped-workstation .topbar .help-command button[aria-label="DICOM məlumatları"]{display:inline-flex!important}
+
+
+body .toolbar-workspace main.workstation.grouped-workstation .topbar .dockable-tool-group button.toolbar-drag-handle{width:28px!important;min-width:28px!important;height:10px!important;min-height:10px!important;flex:none!important;padding:0!important;border:0!important;background:#31495955!important;top:-7px!important}
+body .toolbar-workspace main.workstation.grouped-workstation .topbar .dockable-tool-group button.toolbar-drag-handle svg{width:20px!important;height:10px!important}
+body .toolbar-workspace .right-tool-dock .mpr-thickness{display:flex!important;flex:1 0 100%;flex-direction:column;max-width:100%;gap:4px}
+body .toolbar-workspace .right-tool-dock .mpr-thickness input{width:100%;min-width:0}
+
+/* Search fields shrink independently of the movable PACS action groups. */
+body .toolbar-workspace .pacs-unified-header .pacs-query{flex:1 1 0!important;min-width:0!important;padding:0!important;flex-wrap:nowrap!important;height:auto!important;gap:8px!important}
+body .toolbar-workspace .pacs-query :is(.pacs-server,.pacs-patient,.pacs-token){flex:1 1 140px!important;width:auto!important;min-width:80px!important;max-width:240px}
+body .toolbar-workspace .pacs-query .study-filter-controls{flex:0 1 560px!important;min-width:0;gap:8px;flex-wrap:nowrap!important}
+body .toolbar-workspace .pacs-query :is(input,select){width:100%;min-width:0;max-width:100%;box-sizing:border-box}
+body .toolbar-workspace .pacs-query .study-filter-controls>label{flex:1 1 110px;min-width:0}
+body .toolbar-workspace .pacs-query .study-filter-controls .today-filter{flex:0 0 auto}
+body .toolbar-workspace .pacs-query .today-filter input{width:14px}
+body .toolbar-workspace .pacs-query .date-preset>svg{display:none}
+body .toolbar-workspace .pacs-query .modality-trigger{flex:0 0 auto!important;min-width:36px!important;width:36px!important;padding:6px!important}
+body .toolbar-workspace .pacs-query .modality-trigger span{display:none}
+
+body .toolbar-workspace .records-header .dockable-tool-group{flex-wrap:nowrap!important;flex-shrink:0!important;min-width:max-content}
+body .toolbar-workspace .archive-unified-header .records-header-filters{flex:1 1 0!important;min-width:0!important;padding:0!important;flex-wrap:nowrap!important;height:auto!important;gap:8px!important}
+body .toolbar-workspace .archive-unified-header .records-search{flex:1 1 150px!important;min-width:100px!important;max-width:300px}
+@media(max-width:1440px){
+ body .toolbar-workspace .archive-unified-header .study-filter-controls{gap:6px!important}
+ body .toolbar-workspace .archive-unified-header .date-preset>svg{display:none}
+ body .toolbar-workspace .archive-unified-header .date-preset select{width:100px!important;font-size:12px!important}
+ body .toolbar-workspace .archive-unified-header .compact-date input{width:116px!important;font-size:12px!important}
+ body .toolbar-workspace .archive-unified-header .modality-trigger{min-width:36px!important;width:36px!important;padding:6px!important}
+ body .toolbar-workspace .archive-unified-header .modality-trigger span{display:none}
+}

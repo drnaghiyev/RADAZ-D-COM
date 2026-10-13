@@ -1,3 +1,4 @@
+import {dicomSeriesName} from './dicom-description';
 import { deleteDiskStudies, diskFiles, diskStudies, diskStudyOpened, receiverStatus, saveDiskFiles, hasLocalArchiveEndpoint } from './disk-archive';
 import { parseDicomFile } from './dicom-file';
 
@@ -140,7 +141,7 @@ export async function saveArchiveFiles(files: File[], onProgress?: (done: number
       group.instances.push({ id: `${studyUID}|${sopUID}`, studyUID, seriesUID, sopUID,
         number: Number(tag('x00200013')) || 0, filename: file.name, file, size: file.size });
       group.series.set(seriesUID, { uid: seriesUID, number: tag('x00200011') || '—',
-        modality: tag('x00080060') || 'DICOM', description: tag('x0008103e') || 'Adsız seriya',
+        modality: tag('x00080060') || 'DICOM', description: dicomSeriesName(tag),
         protocol: tag('x00181030'), imageCount: 0, addedAt: now });
     } catch { /* Other files in an imported folder are ignored. */ }
     if (index % 20 === 0) onProgress?.(index + 1, files.length);

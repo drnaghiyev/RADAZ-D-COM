@@ -1,4 +1,4 @@
-export type PrintFrame = { id: string; name: string; blob: Blob; width: number; height: number };
+export type PrintFrame = { id: string; name: string; blob: Blob; overlay?: Blob; width: number; height: number };
 export type OutputJob = { id: string; created: number; frames?: PrintFrame[]; files?: File[]; title: string };
 export const outputId = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
 
