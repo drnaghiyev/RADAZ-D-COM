@@ -40,6 +40,14 @@ try {
   await page.locator('.series-card').filter({hasText:'JPEG compressed CD'}).locator('img').waitFor();
   assert.equal(await page.locator('.series-card img').count(),2,'Both thumbnails appear without any series click');
   await page.screenshot({path:'outputs/media/unopened-series-thumbnails.png'});
+  // A newly opened patient replaces the CD list, including late media watcher events.
+  await control('window-study');
+  await page.evaluate(()=>{const c=new BroadcastChannel('radaz-viewer-open-v2');c.postMessage({kind:'OPEN',target:window.name,request:'test-new-patient',studies:['2.25.301']});c.close();});
+  await page.locator('.series-card').filter({hasText:'Window isolation'}).waitFor();
+  await page.waitForTimeout(2500);
+  assert.equal(await page.locator('.series-card').count(),1,'Prior CD patient is removed from the Viewer');
+  const status=await (await fetch(`http://127.0.0.1:${archivePort}/status`)).json();
+  assert.ok(status.instanceCount>3,'Previously imported CD remains in Local Archive');
   assert.deepEqual(errors,[]);console.log('PASS: disk CD and compressed JPEG series thumbnails appear before series selection');
 } catch(error) {
   for (const [i,p] of (browser?.contexts()[0]?.pages() || []).entries()) {

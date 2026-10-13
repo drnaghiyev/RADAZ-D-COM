@@ -902,3 +902,24 @@ body .toolbar-workspace .archive-unified-header .records-search{flex:1 1 150px!i
  body .toolbar-workspace .archive-unified-header .modality-trigger{min-width:36px!important;width:36px!important;padding:6px!important}
  body .toolbar-workspace .archive-unified-header .modality-trigger span{display:none}
 }
+
+/* Compact icons leave every desktop command visible at 1920 px. Grips sit on the right. */
+.toolbar-workspace{--command-size:32px;--command-icon:20px;--command-gap:7px;--group-gap:10px}
+@media(min-width:1600px){.toolbar-workspace{--command-size:34px;--command-icon:21px;--command-gap:8px;--group-gap:12px}}
+@media(min-width:1920px){.toolbar-workspace{--command-size:36px;--command-icon:22px;--command-gap:8px;--group-gap:12px}}
+@media(min-width:2560px){.toolbar-workspace{--command-size:44px;--command-icon:26px;--command-gap:9px;--group-gap:16px}}
+@media(min-width:3200px){.toolbar-workspace{--command-size:52px;--command-icon:30px;--command-gap:10px;--group-gap:18px}}
+body .toolbar-workspace .dockable-tool-group,body .toolbar-workspace main.workstation.grouped-workstation .topbar .dockable-tool-group{padding:5px 16px 5px 4px!important;gap:var(--command-gap)!important}
+body .toolbar-workspace .dockable-tool-group button.toolbar-drag-handle,body .toolbar-workspace main.workstation.grouped-workstation .topbar .dockable-tool-group button.toolbar-drag-handle{top:4px!important;bottom:4px!important;left:auto!important;right:1px!important;width:12px!important;min-width:12px!important;height:auto!important;min-height:0!important;padding:0!important;display:flex;align-items:center;justify-content:center;background:transparent!important;border:0!important;cursor:ew-resize}
+body .toolbar-workspace .dockable-tool-group button.toolbar-drag-handle svg,body .toolbar-workspace main.workstation.grouped-workstation .topbar .dockable-tool-group button.toolbar-drag-handle svg{width:12px!important;height:22px!important;transform:none!important}
+body .toolbar-workspace .right-tool-dock button.toolbar-drag-handle{cursor:move}
+.toolbar-dragging{user-select:none;cursor:grabbing}
+.measurement-settings fieldset{display:flex;gap:18px;flex-wrap:wrap;padding:16px;border:1px solid #375363;border-radius:6px}
+/* Saved/live group order takes precedence over the older fixed header positions. */
+body .toolbar-workspace main.workstation.grouped-workstation .topbar .dockable-tool-group,
+body .toolbar-workspace .right-tool-dock .dockable-tool-group,
+body .toolbar-workspace .records-header .dockable-tool-group{order:var(--group-order)!important}
+.measurement-settings legend{padding:0 8px;font-weight:600}
+.measurement-settings label{display:flex;align-items:center;gap:8px;cursor:pointer}
+.measurement-settings input{width:18px;height:18px;accent-color:#65cad8}
+.measurement-settings p{font-size:13px;color:#a8bdc9}

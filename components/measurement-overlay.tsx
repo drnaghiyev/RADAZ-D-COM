@@ -6,6 +6,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import type * as Core from '@cornerstonejs/core';
 import { getMeasurementUnit, getLocalizerGeometry, sampleLocalDicom } from '@/lib/cornerstone';
+import {useMeasurementUnit} from './measurement-settings';
+import {displayMeasurement} from '@/lib/measurement-units';
 import { measureArch } from '@/lib/arch-measurement';
 import { measureDeviation } from '@/lib/deviation-measurement';
 
@@ -55,6 +57,7 @@ function apexArc(start: [number, number], end: [number, number], apex: [number, 
 
 export function MeasurementOverlay({ element, viewport, imageId, modality, tool, marks, onAdd, onUpdate, onRemove, selectedMarkId, onSelectMark }: Props) {
   useUiTranslation();
+  const preferredUnit=useMeasurementUnit();
   const [draft, setDraft] = useState<Point3[]>([]);
   const [cursor, setCursor] = useState<Point3 | null>(null);
   const [revision, setRevision] = useState(0);
@@ -181,12 +184,13 @@ export function MeasurementOverlay({ element, viewport, imageId, modality, tool,
         const foot = mark.kind === 'deviation' && geometry ? measureDeviation(mark.points,geometry.columnDirection,geometry.rowDirection) : null;
         const footCanvas = arch ? toCanvas(arch.foot) : foot ? toCanvas(foot.foot) : null;
         const arc = arch ? apexArc(canvas[0], canvas[1], canvas[2]) : null;
-        const heightText = arch ? `H ${arch.height.toFixed(1)} ${lengthUnit}` : '';
+        const shownHeight=displayMeasurement(arch?.height ?? foot?.height ?? NaN,lengthUnit,preferredUnit);
+        const heightText = arch ? `H ${shownHeight.value.toFixed(2)} ${shownHeight.unit}` : '';
         const heightX = footCanvas && arch ? (canvas[2][0] + footCanvas[0]) / 2 + 12 + (mark.heightLabelOffset?.[0] || 0) : 0;
         const heightY = footCanvas && arch ? (canvas[2][1] + footCanvas[1]) / 2 + (mark.heightLabelOffset?.[1] || 0) : 0;
         const title = mark.kind === 'hu' ? `${unit} ${value === null ? '—' : Math.round(value)}${mark.override === undefined ? '' : ' · əl ilə'}`
           : mark.kind === 'arch' ? `${arch?.angle.toFixed(1) ?? '—'}°`
-          : `H ${foot?.height.toFixed(1) ?? '—'} ${lengthUnit} · ${foot?.angle.toFixed(1) ?? '—'}°`;
+          : `H ${foot ? shownHeight.value.toFixed(2) : '—'} ${shownHeight.unit} · ${foot?.angle.toFixed(1) ?? '—'}°`;
         const width = Math.max(98, title.length * 9.5 + 20);
         return <g key={mark.id} data-measurement={mark.id} data-kind={mark.kind} className={selectedMarkId === mark.id ? 'themed-measurement selected-measurement' : 'themed-measurement'} onClick={e => e.stopPropagation()}>
           {mark.kind === 'deviation' && footCanvas && <g className="deviation-lines">

@@ -3,6 +3,7 @@ import {useTranslation as useUiTranslation,translate as tr} from '@/lib/i18n';
 
 import {useEffect,useRef,useState,type RefObject} from 'react';
 import type * as Core from '@cornerstonejs/core';
+import {cancelMeasurementInteraction} from '@/lib/measurement-tools';
 import {getViewer} from '@/lib/cornerstone';
 import type {LocalMark,Point3} from './measurement-overlay';
 
@@ -42,6 +43,8 @@ export function ViewportMouseControls(props:Props){
    root.dataset.suppressMaximizeUntil=String(performance.now()+750);
    event.preventDefault();event.stopPropagation();
    current.current.onSelect();
+   const tools=viewer.current?.tools;
+   if(tools)cancelMeasurementInteraction(tools.ToolGroupManager.getToolGroupForViewport(viewport.id),element);
    gesture={pointer:event.pointerId,button:event.button,x:event.clientX,y:event.clientY,scale:viewport.getCamera().parallelScale!,
     anchor:viewport.canvasToWorld(point(event)) as Point3,moved:false,target:hit(event)};
    root.setPointerCapture(event.pointerId);
@@ -74,7 +77,7 @@ export function ViewportMouseControls(props:Props){
    }
   };
   const leave=()=>{root.dataset.measurementHover='false';};
-  const blur=()=>{gesture=null;delete root.dataset.mouseGesture;leave();setMenu(null);};
+  const blur=()=>{if(gesture&&root.hasPointerCapture(gesture.pointer))root.releasePointerCapture(gesture.pointer);gesture=null;delete root.dataset.mouseGesture;leave();setMenu(null);};
   const mouseDown=(e:MouseEvent)=>{if(!current.current.disabled&&!isControl(e)&&(e.button===1||e.button===2)){e.preventDefault();e.stopPropagation();}};
   root.addEventListener('pointerdown',down,true);root.addEventListener('pointermove',move,true);
   root.addEventListener('pointerup',end,true);root.addEventListener('pointercancel',end,true);root.addEventListener('pointerleave',leave);

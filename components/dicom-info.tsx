@@ -1,6 +1,6 @@
 'use client';
 import {useEffect, useState} from 'react';
-import {FileSearch} from 'lucide-react';
+import {Info} from 'lucide-react';
 import {Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription} from './ui/dialog';
 import {getOriginalDicom} from '@/lib/cornerstone';
 import {parseDicomFile} from '@/lib/dicom-file';
@@ -54,7 +54,7 @@ export function DicomInfoButton({imageId}: {imageId?: string}) {
     return()=>{cancelled=true;};
   },[open,imageId]);
   const filter=query.trim().toLocaleLowerCase();
-  return <><button className="header-control" title="DICOM məlumatları" aria-label="DICOM məlumatları" disabled={!imageId} onClick={()=>{setQuery('');setOpen(true);}}><FileSearch/></button>
+  return <><button className="header-control" title="DICOM məlumatları" aria-label="DICOM məlumatları" disabled={!imageId} onClick={()=>{setQuery('');setOpen(true);}}><Info/></button>
     <Dialog open={open} onOpenChange={setOpen}><DialogContent className="dicom-info-dialog"><DialogHeader><DialogTitle>DICOM məlumatları</DialogTitle><DialogDescription>Aktiv görüntünün faylında qeyd olunan metadata</DialogDescription></DialogHeader>
       <input aria-label="DICOM teqlərində axtar" placeholder="Teq, ad və ya dəyər üzrə axtar" value={query} onChange={e=>setQuery(e.target.value)}/>
       <p role="status">{status}</p><div className="dicom-info-table"><table><thead><tr><th>Teq</th><th>Ad</th><th>VR</th><th>Dəyər</th></tr></thead><tbody>{rows.filter(row=>Object.values(row).join(' ').toLocaleLowerCase().includes(filter)).map(row=><tr key={row.tag}><td>{row.tag}</td><td>{row.name}</td><td>{row.vr}</td><td>{row.value}</td></tr>)}</tbody></table></div>

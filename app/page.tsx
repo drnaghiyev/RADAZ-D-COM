@@ -8,6 +8,8 @@ import { importFromRadazSite } from '@/lib/site-import';
 import { VolumeRenderControls } from '@/components/volume-render-controls';
 import { WorkProgress } from '@/components/work-progress';
 import { type WorkProgress as LoadingProgress, yieldToBrowser } from '@/lib/work-progress';
+import {cancelMeasurementInteraction} from '@/lib/measurement-tools';
+import {MeasurementSettings,useMeasurementUnit} from '@/components/measurement-settings';
 import { measurementVariables } from '@/lib/measurement-theme';
 import { RadazLogo, RadazTagline } from '@/components/radaz-logo';
 import { AppHelpMenu, useViewerLicense } from '@/components/app-product';
@@ -193,6 +195,7 @@ function ViewportPane({ anatomyControl, anatomyVolume, anatomyVolumeVisible, ana
       resizeObserver.observe(element);
       const stopWindowing = bindWindowing(viewer.engine.getViewport(viewportId) as Core.Types.IStackViewport,
         id, windowLevels, viewer.core.Enums.Events, getDefaultWindow, () => windowingScope.current);
+      const cancelInteraction = () => cancelMeasurementInteraction(group, element);
       const sync = () => {
         const vp = viewer.engine.getViewport(viewportId) as Core.Types.IStackViewport;
         setSlice(vp.getCurrentImageIdIndex());
@@ -213,6 +216,7 @@ function ViewportPane({ anatomyControl, anatomyVolume, anatomyVolumeVisible, ana
         const range = vp.getProperties().voiRange;
         if (range) { setWW(Math.round(range.upper - range.lower)); setWL(Math.round((range.upper + range.lower) / 2)); }
       };
+      element.addEventListener(viewer.core.Enums.Events.STACK_NEW_IMAGE, cancelInteraction);
       element.addEventListener(viewer.core.Enums.Events.STACK_NEW_IMAGE, sync);
       element.addEventListener(viewer.core.Enums.Events.VOI_MODIFIED, sync);
       element.addEventListener(viewer.core.Enums.Events.IMAGE_RENDERED, sync);
@@ -236,9 +240,18 @@ function ViewportPane({ anatomyControl, anatomyVolume, anatomyVolumeVisible, ana
       };
       // Capture on the whole panel so drawing/localizer overlays use the same controls.
       const panel = element.parentElement!;
+      const activatePane = (event: PointerEvent) => {
+        if (event.button > 2 || (event.target instanceof Element && event.target.closest('button,input,textarea,select'))) return;
+        for (const other of viewer.engine.getViewports()) if (other.id !== viewportId)
+          cancelMeasurementInteraction(viewer.tools.ToolGroupManager.getToolGroupForViewport(other.id, viewer.engine.id), other.element);
+      };
+      panel.addEventListener('pointerdown', activatePane, true);
+      window.addEventListener('blur', cancelInteraction);
       panel.addEventListener('wheel', wheel, { passive: false, capture: true });
       (element as any).__cleanup = () => {
         stopWindowing(); resizeObserver.disconnect();
+        panel.removeEventListener('pointerdown', activatePane, true); window.removeEventListener('blur', cancelInteraction);
+        element.removeEventListener(viewer.core.Enums.Events.STACK_NEW_IMAGE, cancelInteraction);
         element.removeEventListener(viewer.core.Enums.Events.STACK_NEW_IMAGE, sync);
         element.removeEventListener(viewer.core.Enums.Events.VOI_MODIFIED, sync);
         element.removeEventListener(viewer.core.Enums.Events.IMAGE_RENDERED, sync);
@@ -250,7 +263,7 @@ function ViewportPane({ anatomyControl, anatomyVolume, anatomyVolumeVisible, ana
     return () => {
       disposed = true; requestRef.current++;
       (element as any).__cleanup?.();
-      if (group) viewer.tools.cancelActiveManipulations(element);
+      if (group) cancelMeasurementInteraction(group, element);
       if (group) viewer.tools.ToolGroupManager.destroyToolGroup(`group-${id}`);
       if (viewer?.engine.getViewport(viewportId)) viewer.engine.disableElement(viewportId);
       groupRef.current = null; setEnabled(false); setViewport(null); setImageId('');
@@ -274,7 +287,7 @@ function ViewportPane({ anatomyControl, anatomyVolume, anatomyVolumeVisible, ana
       const properties = extending ? vp.getProperties() : null;
       const previousIds = vp.getImageIds();
       if (previousIds.length === series.imageIds.length && previousIds.every((value, index) => value === series.imageIds[index])) return;
-      if (elementRef.current) (await getViewer()).tools.cancelActiveManipulations(elementRef.current);
+      if (elementRef.current) cancelMeasurementInteraction(groupRef.current, elementRef.current);
       await vp.setStack(series.imageIds, initialIndex >= 0 ? initialIndex : 0);
       if (token !== requestRef.current) return;
       stackSeries.current = series.id;
@@ -316,6 +329,7 @@ function ViewportPane({ anatomyControl, anatomyVolume, anatomyVolumeVisible, ana
       };
       const group = groupRef.current;
       if (!group) return;
+      if (elementRef.current) cancelMeasurementInteraction(group, elementRef.current);
       Object.values(mapping).filter(Boolean).forEach(name => limited ? group.setToolDisabled(name) : group.setToolPassive(name));
       if (limited) return;
       if (mapping[tool]) group.setToolActive(mapping[tool], { bindings: [{ mouseButton: tools.Enums.MouseBindings.Primary }, { numTouchPoints: 1 }] });
@@ -410,6 +424,11 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   const [layoutHover, setLayoutHover] = useState({ rows: 1, columns: 1 });
   const [layoutOpen, setLayoutOpen] = useState(false);
   const [tool, setTool] = useState<Tool>('wl');
+  const [measurementSettingsOpen,setMeasurementSettingsOpen] = useState(false);
+  const measurementUnit = useMeasurementUnit();
+  useEffect(()=>{void getViewer().then(({engine,tools})=>{
+    tools.utilities.triggerAnnotationRenderForViewportIds(engine.getViewports().map(v=>v.id));
+  });},[measurementUnit]);
   const [toolbarMore,setToolbarMore]=useState(false);
   const [anatomyLabel,setAnatomyLabel]=useState<AnatomyLabel|null>(null);
   const [hideText, setHideText] = useState(false);
@@ -459,6 +478,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   const sourceSerial = useRef(0);
   const openedFiles = useRef<File[]>([]);
   const mediaFiles = useRef(new Set<string>());
+  const dismissedMedia = useRef(new Set<string>());
   const mediaSeries = useRef(new Map<string, Series>());
   const mergeMedia = (items: Series[]) => {
     const copies = [...mediaSeries.current.values()];
@@ -536,14 +556,21 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
 
   useEffect(() => {
     if (!ready || !mediaEnabled) return;
-    const selectionEpoch = importEpoch.current, initialSelection = selectedIdRef.current;
+    const selectionEpoch = importEpoch.current;
     return watchRemovableMedia({
       discovered(session, images) {
+        if (dismissedMedia.current.has(session)) return;
         const first = !mediaFiles.current.has(session);
         // A slow first disc read must not replace a study opened after import began.
-        const showDisc = first && importEpoch.current === selectionEpoch && selectedIdRef.current === initialSelection;
+        const showDisc = first && importEpoch.current === selectionEpoch;
         if (first) mediaFiles.current.add(session);
         if (showDisc) {
+          const oldIds=listRef.current.flatMap(s=>s.imageIds);
+          for(const prior of mediaFiles.current)if(prior!==session)dismissedMedia.current.add(prior);
+          mediaSeries.current.clear();mediaOrder.current.clear();listRef.current=[];setMarks([]);
+          mprBuildEpoch.current++;setMprProgress(null);const oldMpr=mprDataRef.current;
+          if(oldMpr)oldIds.push(...oldMpr.owned);mprDataRef.current=null;setMprData(null);
+          if(oldIds.length)window.setTimeout(()=>releaseLocalDicoms(oldIds),100);
           setLayout({ rows: 1, columns: 1 }); setLayoutOpen(false); setMaximizedPane(null); setMaximizedMprPane(null);
           setActive('A'); setCurrentImages({}); setSelectedMarkId(null); setPreset(null);
           setWorkspace(detachedMode || 'viewer'); setDatasetVersion(v => v + 1);
@@ -566,6 +593,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
 
       },
       async image(session, item, url, signal) {
+        if (dismissedMedia.current.has(session)) return;
         const imageId = registerDiskDicom(item.tags, url, item.archived ? new AbortController().signal : signal);
         if (signal.aborted) { releaseLocalDicoms([imageId]); return; }
         const id = mediaId(session, item);
@@ -609,6 +637,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         window.setTimeout(() => releaseLocalDicoms([...ids]), 100);
       },
       progress(progress) {
+        if (importEpoch.current !== selectionEpoch) return;
         setMediaProgress(progress);
         if (progress.sessions && (!selectedIdRef.current || mediaSeries.current.has(selectedIdRef.current))) setStatus(`CD/DVD · ${progress.loaded} / ${progress.discovered} görüntü${progress.scanning ? ' · Local arxivə köçürülür…' : progress.loaded + progress.skipped < progress.discovered ? ' · yüklənir…' : ' · Local arxivdən oxunur'}${progress.skipped ? ` · ${progress.skipped} oxunmadı` : ''}`);
         if (!progress.scanning && progress.loaded + progress.skipped >= progress.discovered) {
@@ -672,7 +701,11 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       if (!imported.length) return;
       if (!published) {
         mprBuildEpoch.current++; setMprProgress(null);
-        const previousIds = listRef.current.filter(s => !mediaSeries.current.has(s.id)).flatMap(s => s.imageIds);
+        const previousIds = listRef.current.flatMap(s => s.imageIds);
+        // A new explicit study replaces the Viewer, including retained CD copies.
+        // Only the Viewer references are cleared; Local Archive files are preserved.
+        for (const session of mediaFiles.current) dismissedMedia.current.add(session);
+        mediaSeries.current.clear(); mediaOrder.current.clear(); setMediaProgress(null); setMediaEnabled(false);
         viewer.tools.annotation.state.removeAllAnnotations();
         setMarks([]); setSelectedMarkId(null); setMaximizedPane(null); setMaximizedMprPane(null);
         setLayout({ rows: 1, columns: 1 }); setLayoutOpen(false);
@@ -1205,7 +1238,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         </DropdownMenu></ToolbarGroup>}
         {!detachedMode && <ToolbarGroup groupId="cd" order={15} aria-label="CD / DVD"><Button variant="outline" className={`header-control cd-import-command ${mediaEnabled ? 'active' : ''}`} aria-label={tr('ui.import_cd_dvd_b673d')} aria-pressed={mediaEnabled}
           title={mediaEnabled ? 'CD/DVD importunu dayandır; köçürülmüş görüntülər arxivdə qalır' : 'CD/DVD-ni avtomatik aşkar et və aç'} disabled={limited}
-          onClick={() => { setMediaEnabled(enabled => !enabled); setRailHidden(false); }}>
+          onClick={() => { if(!mediaEnabled){dismissedMedia.current.clear();mediaFiles.current.clear();} setMediaEnabled(enabled => !enabled); setRailHidden(false); }}>
           <Disc3 size={18}/><span>{tr('ui.import_cd_dvd_b673d')}</span>{mediaEnabled && <span className="status-led"/>}
         </Button></ToolbarGroup>}
       {!detachedMode && <ToolbarGroup className="workspace-launch toolbar-group" role="group" aria-label={tr('ui.view_mode_a87b2')} groupId="workspace" order={20}>
@@ -1249,7 +1282,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         {!limited&&workspace!=='3d'&&<ToolbarGroup className="toolbar-group" groupId="anatomy" order={60}><Button variant="ghost" className="header-control anatomy-trigger" aria-label="TotalSegmentator" title="TotalSegmentator · CT / MR" onClick={()=>setAnatomyVolumeOpen(value=>!value)}><Layers3 size={18}/><span>{tr('ui.ct_mri_anatomy_f433a')}</span></Button></ToolbarGroup>}
         {!limited && detachedMode !== '3d' && <ToolbarGroup className="toolbar-group" role="group" aria-label={tr('ui.navigation_and_measurement_e7a8e')} groupId="measure" order={70}>{viewTools.map(t => <Button key={t.id} variant="ghost" className={`header-control view-tool ${tool === t.id ? 'selected-tool' : ''}`} aria-pressed={tool === t.id} title={`${t.label} · ${t.hint}`} onClick={() => setTool(t.id)}><t.icon size={17}/><span>{t.label}</span></Button>)}
         <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className="header-control" title={tr('ui.measurement_tools_0762c')} aria-label={tr('ui.measurement_tools_0762c')}><Ruler size={17}/><span>{tr('ui.measurements_a4480')}</span><ChevronDown size={14}/></Button></DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="header-menu">{measureTools.map(t => <DropdownMenuItem key={t.id} onSelect={() => setTool(t.id)} className={tool === t.id ? 'menu-selected' : ''}><t.icon size={16}/>{t.label}<kbd>{t.hint}</kbd></DropdownMenuItem>)}<div className="menu-separator"/><DropdownMenuItem onSelect={() => setClearToken(x => x + 1)}><Trash2 size={16}/> {tr('ui.delete_all_on_current_slice_cc1ac')}<kbd>Ctrl+D</kbd></DropdownMenuItem><div className="menu-hint">{tr('ui.select_a_measurement_delete_to_remove_7f481')}</div></DropdownMenuContent>
+          <DropdownMenuContent align="end" className="header-menu">{measureTools.map(t => <DropdownMenuItem key={t.id} onSelect={() => setTool(t.id)} className={tool === t.id ? 'menu-selected' : ''}><t.icon size={16}/>{t.label}<kbd>{t.hint}</kbd></DropdownMenuItem>)}<div className="menu-separator"/><DropdownMenuItem onSelect={() => setClearToken(x => x + 1)}><Trash2 size={16}/> {tr('ui.delete_all_on_current_slice_cc1ac')}<kbd>Ctrl+D</kbd></DropdownMenuItem><div className="menu-separator"/><DropdownMenuItem onSelect={()=>setMeasurementSettingsOpen(true)}><Settings2 size={16}/>Ölçü ayarları <kbd>{measurementUnit==='cm'?'sm':'mm'}</kbd></DropdownMenuItem><div className="menu-hint">{tr('ui.select_a_measurement_delete_to_remove_7f481')}</div></DropdownMenuContent>
         </DropdownMenu>
         </ToolbarGroup>}
         {!limited && detachedMode !== '3d' && <ToolbarGroup className="toolbar-group" role="group" aria-label={tr('ui.window_and_localizer_1e413')} groupId="window" order={80}>
@@ -1272,6 +1305,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       </div>
       <ToolbarGroup className="toolbar-group help-command" groupId="help" order={100}>{workspace!=='3d'&&<DicomInfoButton imageId={currentImages[workspace==='mpr'?mprActive:active]}/>}<AppHelpMenu/></ToolbarGroup>
     </header>
+    <MeasurementSettings open={measurementSettingsOpen} onOpenChange={setMeasurementSettingsOpen}/>
     <Dialog open={importOpen} onOpenChange={open => { if (!importBusy) setImportOpen(open); }}>
       <DialogContent className="import-dialog" showCloseButton={false}>
         <DialogHeader><DialogTitle>{tr('ui.folder_and_zip_rar_import_a1225')}</DialogTitle><DialogDescription>{tr('ui.select_multiple_sources_and_open_them_togethe_b9a18')}</DialogDescription></DialogHeader>

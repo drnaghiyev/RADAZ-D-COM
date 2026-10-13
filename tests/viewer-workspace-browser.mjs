@@ -32,9 +32,19 @@ try {
   await page.getByRole('textbox',{name:'DICOM teqlərində axtar'}).fill('0028,0010');assert.equal(await page.locator('.dicom-info-table tbody tr').count(),1);
   await page.keyboard.press('Escape');
   console.log('PASS thumbnails, clinic, keyboard and metadata');
+  assert.equal(await page.locator('.toolbar-overflow-trigger').count(),0,'All commands visible at 1920 px');
+  for(const group of await page.locator('.topbar [data-toolbar-group]').all()) {
+    const g=await group.boundingBox(),h=await group.locator('.toolbar-drag-handle').boundingBox();
+    assert.ok(h.x>g.x+g.width/2&&h.x+h.width<=g.x+g.width+1,'Grip on right edge');
+  }
   // Reorder real HTML drag handles, then dock and return to the header.
   const grip=page.locator('[data-toolbar-group="import"] .toolbar-drag-handle');
-  await grip.dragTo(page.locator('[data-toolbar-group="workspace"]'));
+  const start=await grip.boundingBox(),target=await page.locator('[data-toolbar-group="workspace"]').boundingBox();
+  const oldX=start.x;await page.mouse.move(start.x+start.width/2,start.y+start.height/2);await page.mouse.down();
+  await page.mouse.move(target.x+target.width*.75,target.y+target.height/2,{steps:15});
+  await page.waitForFunction(x=>document.querySelector('[data-toolbar-group="import"] .toolbar-drag-handle').getBoundingClientRect().x!==x,oldX);
+  assert.ok(Number(await page.locator('[data-toolbar-group="import"]').evaluate(n=>n.style.order))<5,'Reorder stays beside pointer instead of jumping to end');
+  await page.mouse.up();console.log('PASS live reorder before mouse release');
   let box=await grip.boundingBox();await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();
   await page.mouse.move(1900,200,{steps:25});await page.mouse.up();
   await page.locator('.right-tool-dock [data-toolbar-group="import"]').waitFor();
@@ -50,6 +60,29 @@ try {
   console.log('PASS dock persistence and return');
   // A split layout and a series replacement must keep native length tools usable.
   await page.locator('[data-panel="A"] .institution-name').waitFor();
+  // Switching tools after an unfinished angle must release Cornerstone's drawing lock.
+  const a=await page.locator('[data-panel="A"] .dicom-canvas').boundingBox();
+  await page.keyboard.press('a');await page.mouse.click(a.x+a.width*.25,a.y+a.height*.25);
+  await page.keyboard.press('l');
+  async function draw(panel){
+    const c=await page.locator(`[data-panel="${panel}"] .dicom-canvas`).boundingBox();
+    await page.mouse.move(c.x+c.width*.35,c.y+c.height*.4);await page.mouse.down();await page.mouse.move(c.x+c.width*.65,c.y+c.height*.6,{steps:10});await page.mouse.up();
+  }
+  await draw('A');await paneA.locator('.dicom-canvas svg').getByText(/mm/).first().waitFor();
+  const metric=await paneA.locator('.dicom-canvas svg').getByText(/mm/).first().textContent();
+  await page.getByRole('button',{name:'Ölçmə alətləri',exact:true}).click();
+  await page.getByRole('menuitem',{name:/Ölçü ayarları/}).click();
+  await page.getByRole('radio',{name:'sm — santimetr'}).check();await page.keyboard.press('Escape');
+  const converted=await paneA.locator('.dicom-canvas svg').getByText(/sm/).first().textContent();
+  assert.ok(Math.abs(parseFloat(metric)/10-parseFloat(converted))<.03,`${metric} -> ${converted}`);
+  await page.getByRole('button',{name:'Ölçmə alətləri',exact:true}).click();await page.getByRole('menuitem',{name:/Ölçü ayarları/}).click();
+  await page.getByRole('radio',{name:'mm — millimetr'}).check();await page.keyboard.press('Escape');
+  // Middle-button pan moves the image without changing its window or slice.
+  const before=await paneA.locator('canvas').first().screenshot(),windowBefore=await paneA.locator('.bottom-left').textContent(),sliceBefore=await count();
+  await page.mouse.move(a.x+a.width*.6,a.y+a.height*.5);await page.mouse.down({button:'middle'});await page.mouse.move(a.x+a.width*.6+65,a.y+a.height*.5+40,{steps:10});await page.mouse.up({button:'middle'});
+  assert.notDeepEqual(await paneA.locator('canvas').first().screenshot(),before);
+  assert.equal(await paneA.locator('.bottom-left').textContent(),windowBefore);assert.equal(await count(),sliceBefore);
+  console.log('PASS interrupted measurement, unit conversion and middle pan');
   await page.keyboard.press('2');await page.locator('[data-panel="B"]').waitFor();
   await page.locator('.series-card').filter({hasText:'CT PROTOCOL TEST'}).dragTo(page.locator('[data-panel="B"]'));
   await page.locator('[data-panel="B"][data-has-image="true"]').waitFor();

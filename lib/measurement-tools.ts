@@ -1,14 +1,38 @@
 import * as tools from '@cornerstonejs/tools';
 import { getEnabledElement } from '@cornerstonejs/core';
 import { measurementState, measurementTheme } from './measurement-theme';
+import {displayMeasurement} from './measurement-units';
 const hoverEvents=new WeakMap<HTMLElement,{event:unknown;uid?:string}>();
 const leaveListeners=new WeakSet<HTMLElement>();
+
+/** Cancel by tool instance: image-filtered cancellation misses a draft after scrolling. */
+export function cancelMeasurementInteraction(group: any, element: HTMLElement) {
+  for (const instance of Object.values(group?.getToolInstances() || {}) as any[]) instance.cancel?.(element);
+}
 
 /** Keep Cornerstone hit testing/geometry; apply one theme to every annotation state. */
 export function themedMeasurement(Base: any) {
   return class extends Base {
     constructor(...args: any[]) {
       super(...args);
+      const cancel = this.cancel?.bind(this);
+      if (cancel) this.cancel = (element: HTMLElement) => {
+        const draft = this.editData?.newAnnotation;
+        const uid = cancel(element);
+        if (draft && uid) tools.annotation.state.removeAnnotation(uid);
+        return uid;
+      };
+      if ([tools.LengthTool.toolName, tools.EllipticalROITool.toolName].includes(Base.toolName)) {
+        const text = this.configuration.getTextLines;
+        this.configuration.getTextLines = (data: any, target: string, ...rest: any[]) => {
+          const cached = data.cachedStats?.[target];
+          if (!cached) return text(data, target, ...rest);
+          const stat = {...cached};
+          if (Number.isFinite(stat.length)) { const shown = displayMeasurement(stat.length, stat.unit || ''); stat.length=shown.value; stat.unit=shown.unit; }
+          if (Number.isFinite(stat.area)) { const shown = displayMeasurement(stat.area, stat.areaUnit || ''); stat.area=shown.value; stat.areaUnit=shown.unit; }
+          return text({...data,cachedStats:{...data.cachedStats,[target]:stat}},target,...rest);
+        };
+      }
       // Screen-pixel hit targets stay easy to catch regardless of image zoom.
       const near = this.isPointNearTool.bind(this);
       this.isPointNearTool = (element:any, annotation:any, point:any, proximity:number, ...rest:any[]) => {

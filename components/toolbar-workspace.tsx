@@ -21,7 +21,7 @@ export function ToolbarWorkspace({scope,children}:{scope:string;children:ReactNo
   const [loaded,setLoaded]=useState('');
   const [overflow,setOverflow]=useState<string[]>([]),[popup,setPopup]=useState<HTMLDivElement|null>(null);
   const root=useRef<HTMLDivElement>(null);
-  const gesture=useRef<{id:string;pointer:number;handle:HTMLButtonElement;x:number;y:number}|null>(null);
+  const gesture=useRef<{id:string;pointer:number;handle:HTMLButtonElement;x:number;y:number;last?:string}|null>(null);
   useEffect(()=>{
     let next:Layout={};
     try {
@@ -36,7 +36,7 @@ export function ToolbarWorkspace({scope,children}:{scope:string;children:ReactNo
     setRegistry(current=>({...current,[id]:order}));
     return()=>setRegistry(current=>{const next={...current};delete next[id];return next;});
   }).current;
-  const move=(id:string,side:'top'|'right',before?:string)=>{
+  const move=(id:string,side:'top'|'right',before?:string,live=false)=>{
     if(!(id in registry))return;
     setLayout(current=>{
       const peers=Object.keys(registry).filter(key=>key!==id&&(current[key]?.side||'top')===side)
@@ -44,7 +44,7 @@ export function ToolbarWorkspace({scope,children}:{scope:string;children:ReactNo
       const at=before?peers.indexOf(before):-1;peers.splice(at<0?peers.length:at,0,id);
       const next={...current};peers.forEach((key,index)=>next[key]={side,order:index});return next;
     });
-    setDrag(null);
+    if(!live)setDrag(null);
   };
   const hasRight=Object.keys(registry).some(id=>layout[id]?.side==='right');
   const moveRef=useRef(move);moveRef.current=move;
@@ -55,21 +55,31 @@ export function ToolbarWorkspace({scope,children}:{scope:string;children:ReactNo
     event.currentTarget.setPointerCapture(event.pointerId);setDrag(id);
   };
   useEffect(()=>{
+    const slide=(event:PointerEvent)=>{
+      const current=gesture.current;if(!current||current.pointer!==event.pointerId||Math.hypot(event.clientX-current.x,event.clientY-current.y)<=4)return;
+      const target=document.elementFromPoint(event.clientX,event.clientY);
+      const dock=target?.closest('.right-tool-dock'),header=target?.closest('.topbar,.records-header,.toolbar-overflow-popup');
+      const side=dock?'right':header?'top':null;if(!side)return;
+      const group=target?.closest<HTMLElement>('[data-toolbar-group]');
+      if(group?.dataset.toolbarGroup===current.id)return;
+      // Resolve the insertion point through gaps too; a gap must not send the group to the end.
+      const container=dock||header!;
+      const peers=[...container.querySelectorAll<HTMLElement>(`[data-dock="${side}"]`)]
+        .filter(n=>n.dataset.toolbarGroup!==current.id).sort((a,b)=>Number(a.style.order)-Number(b.style.order));
+      const before=peers.find(n=>{const b=n.getBoundingClientRect();return side==='right'?event.clientY<b.top+b.height/2:event.clientX<b.left+b.width/2;})?.dataset.toolbarGroup;
+      const key=`${side}:${before||'end'}`;if(current.last===key)return;current.last=key;
+      moveRef.current(current.id,side,before,true);
+    };
     const finish=(event:PointerEvent)=>{
       const current=gesture.current;if(!current||current.pointer!==event.pointerId)return;
+      if(event.type==='pointerup')slide(event);
       gesture.current=null;
       if(current.handle.hasPointerCapture(event.pointerId))current.handle.releasePointerCapture(event.pointerId);
-      const target=document.elementFromPoint(event.clientX,event.clientY);
-      if(event.type==='pointerup'&&Math.hypot(event.clientX-current.x,event.clientY-current.y)>4){
-        const side=target?.closest('.right-tool-dock')?'right':target?.closest('.topbar,.records-header,.toolbar-overflow-popup')?'top':null;
-        const before=target?.closest<HTMLElement>('[data-toolbar-group]')?.dataset.toolbarGroup;
-        if(side)moveRef.current(current.id,side,before);
-      }
       setDrag(null);
     };
     const cancel=()=>{gesture.current=null;setDrag(null);};
-    window.addEventListener('pointerup',finish,true);window.addEventListener('pointercancel',finish,true);window.addEventListener('blur',cancel);
-    return()=>{window.removeEventListener('pointerup',finish,true);window.removeEventListener('pointercancel',finish,true);window.removeEventListener('blur',cancel);};
+    window.addEventListener('pointermove',slide,true);window.addEventListener('pointerup',finish,true);window.addEventListener('pointercancel',finish,true);window.addEventListener('blur',cancel);
+    return()=>{window.removeEventListener('pointermove',slide,true);window.removeEventListener('pointerup',finish,true);window.removeEventListener('pointercancel',finish,true);window.removeEventListener('blur',cancel);};
   },[]);
   useEffect(()=>{
     const header=root.current?.querySelector<HTMLElement>('.topbar,.records-header');if(!header)return;
@@ -120,7 +130,7 @@ export function ToolbarGroup({groupId,order=0,children,className='',...props}:HT
   const position=context?.layout[groupId]||{side:'top',order};
   const element=<div {...props} className={`toolbar-group dockable-tool-group ${className}`} data-toolbar-group={groupId} data-dock={position.side} style={{...props.style,order:position.order,'--group-order':position.order} as React.CSSProperties}>
     <button type="button" className="toolbar-drag-handle" onPointerDown={event=>context.begin(event,groupId)} aria-label={`${props['aria-label']||groupId} — qrupu daşı`}
-      title="Tutub üst paneldə və ya sağ kənarda yerləşdirin. İki klik: paneli dəyiş."
+      title="Sağ tutacaqdan tutub yanlara sürüşdürün və ya sağ panelə yerləşdirin."
       onDoubleClick={()=>context?.move(groupId,position.side==='top'?'right':'top')}
       onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();context?.move(groupId,position.side==='top'?'right':'top');}}}><GripVertical/></button>
     {children}
