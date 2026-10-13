@@ -1751,9 +1751,9 @@ export const uiMessages={
   "ru": "Лицензионный ключ"
  },
  "ui.radaz_act_or_radaz1_549fd": {
-  "az": "RADAZ-ACT-… və ya RADAZ1.…",
-  "en": "RADAZ-ACT-… or RADAZ1.…",
-  "ru": "RADAZ-ACT-… или RADAZ1.…"
+  "az": "RZ-… , RADAZ-ACT-… və ya RADAZ1.…",
+  "en": "RZ-…, RADAZ-ACT-… or RADAZ1.…",
+  "ru": "RZ-…, RADAZ-ACT-… или RADAZ1.…"
  },
  "ui.describe_the_problem_steps_to_reproduce_and_e_f8ceb": {
   "az": "Problemi, təkrarlama addımlarını və gözlənilən nəticəni yazın.",

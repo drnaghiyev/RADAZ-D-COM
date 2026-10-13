@@ -14,6 +14,7 @@ from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from radaz_trial import TrialStore
+from radaz_online_license import OnlineLicense
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -70,6 +71,7 @@ class ProductService:
         self.public_path = Path(public_path or ROOT/'public/license-public.json')
         self.lock = RLock(); self.cached_update = None; self.last_check = 0
         self.device = device or self.machine_id()
+        self.online = OnlineLicense(self.root, self.device)
         self.trial = TrialStore(self.device, trial_root)
         self.anatomy_trial = TrialStore(self.device, trial_root, namespace='anatomy_ai')
         self.policy = None; self.policy_check = 0; self.policy_busy = False
@@ -112,6 +114,10 @@ class ProductService:
         self.refresh_policy()
         with self.lock:
             result = dict(valid=False,required=bool(self.config.get('licenseRequired',True)),deviceId=self.device,message='Lisenziya açarını daxil edin.')
+            if self.online.exists:
+                result.update(self.online.status())
+                result['modules'] = self.module_entitlements()
+                return result
             days=self.policy['trialDays'] if self.policy else 30 if self.config.get('trialDays') in (7,30) else 0
             trial = self.trial.status(days=days)
             path = self.root/'license.json'
@@ -170,6 +176,9 @@ class ProductService:
 
     def activate(self, key):
         with self.lock:
+            if isinstance(key, str) and key.strip().startswith('RZ-'):
+                self.online.activate(key.strip())
+                return self.status()
             if not self.public_path.is_file(): raise ValueError('İstehsalçının açıq imza açarı quraşdırılmayıb.')
             now = int(time.time())
             # Activation must not reset the rollback guard from an existing installation.
@@ -187,6 +196,7 @@ class ProductService:
                 saved['keys'][claims['moduleId']]=key.strip();saved['lastSeen']=now;atomic_json(path,saved)
                 return {**self.status(),'activatedModule':claims['moduleId'],'message':'Ödənilmiş modul aktivləşdirildi.'}
             atomic_json(saved_path,dict(key=key.strip(),lastSeen=now))
+            self.online.clear()
             return self.status()
 
     def billing_call(self, path, body=None, token=None):
