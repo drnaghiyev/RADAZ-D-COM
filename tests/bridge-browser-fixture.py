@@ -5,6 +5,7 @@ import time
 from urllib.parse import urlsplit, parse_qs
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from threading import Event
 from bridge_send_test import Archive, handler_for, AE, evt, CTImageStorage, Verification, StudyRootQueryRetrieveInformationModelGet, ExplicitVRLittleEndian, image, encoded, port
 
 parser = argparse.ArgumentParser(); parser.add_argument('--root', type=Path, required=True); args = parser.parse_args()
@@ -13,12 +14,18 @@ first = image(); images = [first, image(first.StudyInstanceUID), image(first.Stu
 for i, ds in enumerate(images):
     ds.StudyDate = time.strftime('%Y%m%d'); ds.InstanceNumber = i + 1
     archive.store(encoded(ds), ds)
-received = []; rejected = False
+other = image(); other.PatientName = 'OTHER^BRIDGE'; other.StudyDate = first.StudyDate
+archive.store(encoded(other), other)
+received = []; rejected = False; warned = False
+release_store = Event(); release_store.set(); hold_after = None
 ae = AE(ae_title='RADAZBRIDGE'); ae.require_called_aet = True; ae.require_calling_aet = ['RADAZ']
 ae.add_supported_context(Verification); ae.add_supported_context(CTImageStorage, ExplicitVRLittleEndian)
 def store(event):
+    if hold_after is not None and len(received) >= hold_after:
+        release_store.wait(30)
+    time.sleep(.7)  # Observe intermediate acknowledgement progress in the UI.
     if rejected: return 0xA700
-    received.append(str(event.dataset.SOPInstanceUID)); return 0
+    received.append(str(event.dataset.SOPInstanceUID)); return 0xB006 if warned else 0
 destination = port(); receiver = ae.start_server(('127.0.0.1',destination), block=False, evt_handlers=[(evt.EVT_C_STORE,store)])
 source_ae = AE(ae_title='SOURCE'); source_ae.add_supported_context(StudyRootQueryRetrieveInformationModelGet)
 source_ae.add_supported_context(CTImageStorage, ExplicitVRLittleEndian, scu_role=True, scp_role=True)
@@ -49,8 +56,12 @@ class Handler(Base):
             ds=next(d for d in images if str(d.SOPInstanceUID)==p.split('/')[-1]); self.binary(encoded(ds),'application/dicom','synthetic.dcm'); return
         return super().do_GET()
     def do_POST(self):
-        global rejected
+        global rejected, warned, hold_after
         if self.path=='/_test/reject': rejected=True; self.respond({'ok':True}); return
+        if self.path=='/_test/warn': rejected=False; warned=True; self.respond({'ok':True}); return
+        if self.path=='/_test/reset': rejected=False; warned=False; self.respond({'ok':True}); return
+        if self.path=='/_test/hold': hold_after=len(received)+1; release_store.clear(); self.respond({'ok':True}); return
+        if self.path=='/_test/release': release_store.set(); hold_after=None; self.respond({'ok':True}); return
         return super().do_POST()
 http=ThreadingHTTPServer(('127.0.0.1',0),Handler)
 print(json.dumps({'port':http.server_port,'destination':destination,'source':source_port,'study':str(first.StudyInstanceUID)}),flush=True)

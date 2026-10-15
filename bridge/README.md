@@ -17,9 +17,9 @@ Körpü idarəetmə sorğuları üçün yalnız `127.0.0.1` ünvanında dinləyi
 
 ## RADAZBRIDGE-ə müayinə göndərmək
 
-RADAZ Desktop-da Local Arxiv və ya PACS-dən müayinəni seçib **RADAZBRIDGE-ə göndər** düyməsinə basın. Bir neçə müayinəni checkbox ilə seçmək olar; checkbox seçilməyibsə aktiv sətir göndərilir. Bu əməliyyat bütün müayinəyə aiddir.
+RADAZ Desktop-da Local Arxiv və ya PACS siyahısında müayinə sətrinin sağındakı **RADAZBRIDGE-ə göndər** düyməsinə basın. Yalnız həmin sətirdəki bütün müayinə göndərilir; digər checkbox seçimləri bu göndərişə daxil edilmir. Sətrin sağında qəbul edilmiş faylların sayı və faizli progressbar, sonunda **Göndərildi**, xəbərdarlıq və ya xəta göstərilir. Göndərişi eyni yerdə dayandırmaq olar.
 
-Qəbul edən kompüterin lokal IP-sini, portunu (standart `11112`), Called AE (`RADAZBRIDGE`) və bu Viewer-in Calling AE adını (standart `RADAZ`) yazın. Bridge-in cihaz icazələrinə Viewer kompüterinin IP-si və həmin Calling AE əlavə olunmalıdır. **Bağlantını yoxla**, sonra **Göndər** düyməsini basın. Ünvan bu kompüterdə saxlanılır və hər iki pəncərədə istifadə olunur.
+Əvvəl yuxarı paneldə ayrıca **RADAZBRIDGE ayarları** bölməsini açın. Qəbul edən kompüterin lokal IP-sini, portunu (standart `11112`), Called AE (`RADAZBRIDGE`) və bu Viewer-in Calling AE adını (standart `RADAZ`) yazın. Bridge-in cihaz icazələrinə Viewer kompüterinin IP-si və həmin Calling AE əlavə olunmalıdır. **Saxla və bağlantını yoxla** düyməsinə basın. Ünvan bu kompüterdə saxlanılır və hər iki pəncərədə istifadə olunur; göndərmə düyməsi ayar pəncərəsi açmır.
 
 Fayllar DICOM C-STORE ilə ötürülür; say yalnız qəbul təsdiqindən sonra artır. Dayandırma əvvəl qəbul edilmiş faylları geri silmir. Şəbəkə təsdiqi itərsə avtomatik təkrar göndəriş edilmir. C-GET işləmirsə C-MOVE üçün Viewer-in qəbul AE/IP/port qeydiyyatı PACS-də olmalıdır; RADAZBRIDGE eyni kompüterdədirsə Viewer-in C-MOVE listener portu Bridge portundan fərqli olmalıdır.
 
