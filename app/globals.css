@@ -941,3 +941,12 @@ body .toolbar-workspace .mpr-thickness output{white-space:nowrap;font-variant-nu
 .assistant-providers{display:flex;gap:8px;margin:12px 0}
 .assistant-providers button{flex:1;padding:9px;border:1px solid #375464;border-radius:6px}
 .assistant-providers button[aria-pressed=true]{background:#1d4858;border-color:#77cdd9}
+
+/* Full-study delivery uses a portal so toolbar icon-only rules never hide fields. */
+.radazbridge-dialog{width:min(600px,calc(100vw - 32px));max-height:calc(100vh - 40px);margin:auto;inset:0;overflow:auto;border:1px solid #3e5968;border-radius:12px;padding:24px;background:#101d29;color:#e4edf5;box-shadow:0 24px 90px #0009}
+.radazbridge-dialog::backdrop{background:#02070bb8}
+.radazbridge-heading{display:flex;align-items:center;justify-content:space-between;gap:16px}.radazbridge-heading h2{font-size:20px;margin:0}
+.radazbridge-dialog button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:6px 12px;border:1px solid #3e5968;border-radius:6px;background:#1c2d3b;color:inherit;cursor:pointer}.radazbridge-dialog button:disabled{opacity:.45;cursor:default}
+.radazbridge-dialog .records-primary{background:#1d576d}.radazbridge-dialog p{margin:14px 0}.radazbridge-studies{max-height:120px;overflow:auto;padding:0;list-style:none}.radazbridge-studies li{display:flex;justify-content:space-between;gap:12px;padding:5px 0}.radazbridge-studies small{white-space:nowrap;color:#a3b7c7}
+.radazbridge-fields{border:0;margin:18px 0;padding:0;display:grid;grid-template-columns:2fr 1fr;gap:14px}.radazbridge-fields label{display:grid;gap:6px;font-size:13px;color:#b8cbd8}.radazbridge-fields input{box-sizing:border-box;width:100%;min-width:0;border:1px solid #3e5968;border-radius:5px;background:#08121d;color:#eef7ff;padding:9px;font-size:15px}
+.radazbridge-hint{font-size:13px;line-height:1.6;color:#a3b7c7}.radazbridge-result{display:grid;gap:8px;padding:14px;border-radius:8px;background:#09131d;overflow-wrap:anywhere}.radazbridge-result[role=alert]{color:#ffb5ac}.radazbridge-result span{font-size:14px;color:#bbd9e2}.radazbridge-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:10px;margin-top:20px}

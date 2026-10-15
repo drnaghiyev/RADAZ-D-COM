@@ -246,6 +246,7 @@ def negotiated(association, choices) -> object | None:
 
 def get_images(payload: dict, identifier: Dataset, collector: ImageCollector) -> bool:
     ae, host, port, called = connection(payload)
+    ae.dimse_timeout = ae.network_timeout = getattr(collector, 'timeout', 15)
     models = (StudyRootQueryRetrieveInformationModelGet, PatientRootQueryRetrieveInformationModelGet)
     for model in models:
         ae.add_requested_context(model)
@@ -285,6 +286,7 @@ def get_images(payload: dict, identifier: Dataset, collector: ImageCollector) ->
 
 def move_images(payload: dict, identifier: Dataset, collector: ImageCollector) -> None:
     ae, host, port, called = connection(payload)
+    ae.dimse_timeout = ae.network_timeout = getattr(collector, 'timeout', 15)
     calling = ae.ae_title
     try:
         listener_port = int(payload.get("listenerPort"))

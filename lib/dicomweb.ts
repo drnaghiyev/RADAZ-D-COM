@@ -21,7 +21,7 @@ function baseURL(raw: string): string {
 
 async function request(url: string, token: string, accept: string): Promise<Response> {
   try {
-    const response = await fetch(url, { headers: { Accept: accept, ...(token ? { Authorization: `Bearer ${token}` } : {}) }, cache: 'no-store' });
+    const response = await fetch(url, { headers: { Accept: accept, ...(token ? { Authorization: `Bearer ${token}` } : {}) }, cache: 'no-store', signal: AbortSignal.timeout(120000) });
     if (!response.ok) throw new Error(`PACS HTTP ${response.status}: ${response.statusText || 'sorğu alınmadı'}`);
     return response;
   } catch (error) {
@@ -107,4 +107,31 @@ export async function retrieveRemoteStudy(endpoint: string, token: string, study
     }));
   }
   return files;
+}
+
+/** Full-study export: paginated metadata, then one original instance at a time. */
+export async function* streamRemoteStudy(endpoint: string, token: string, studyUID: string, expected: number): AsyncGenerator<File> {
+  const base = `${baseURL(endpoint)}/studies/${encodeURIComponent(studyUID)}`;
+  const catalog: { sop: string; series: string }[] = [], seen = new Set<string>();
+  for (let offset = 0; ; offset += 200) {
+    const response = await request(`${base}/instances?limit=200&offset=${offset}&includefield=0020000E`, token, 'application/dicom+json');
+    const page: DicomObject[] = response.status === 204 ? [] : await response.json();
+    if (!Array.isArray(page)) throw Error('PACS DICOM JSON siyahısı qaytarmadı');
+    for (const item of page) {
+      const sop = field(item, '00080018'), series = field(item, '0020000E');
+      if (!sop || !series || seen.has(sop)) throw Error('PACS tam və təkrarsız görüntü siyahısı qaytarmadı; göndəriş başlanmadı.');
+      seen.add(sop); catalog.push({ sop, series });
+    }
+    if (catalog.length > 1000000) throw Error('PACS görüntü siyahısı həddən böyükdür');
+    if (page.length < 200) {
+      if (response.headers.get('warning')?.includes('299')) throw Error('PACS nəticəni məhdudlaşdırıb; müayinənin tam siyahısı alınmadı.');
+      break;
+    }
+  }
+  if (!catalog.length || catalog.length < expected) throw Error('PACS-dən müayinənin bütün DICOM fayllarının siyahısı alınmadı');
+  for (const item of catalog) {
+    const response = await request(`${base}/series/${encodeURIComponent(item.series)}/instances/${encodeURIComponent(item.sop)}`, token, 'multipart/related; type="application/dicom"; transfer-syntax=*');
+    const bytes = dicomPart(await response.arrayBuffer(), response.headers.get('content-type') || '');
+    yield new File([Uint8Array.from(bytes)], `${item.sop}.dcm`, { type: 'application/dicom' });
+  }
 }

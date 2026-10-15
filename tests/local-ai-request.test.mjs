@@ -11,3 +11,11 @@ test('saved API credentials accept only local same-origin app requests',()=>{
  const get=request();get.method='GET';delete get.headers.origin;assert.equal(localAiRequest(get),true);
  get.method='DELETE';assert.equal(localAiRequest(get),false);
 });
+
+test('DICOM uploads opt into binary content without permitting remote or cross-origin requests',()=>{
+ const req=request();req.headers['content-type']='application/dicom';
+ assert.equal(localAiRequest(req),false);
+ assert.equal(localAiRequest(req,['application/json','application/dicom']),true);
+ req.headers.origin='https://other.example';assert.equal(localAiRequest(req,['application/dicom']),false);
+ req.headers.origin='http://localhost:5173';req.socket.remoteAddress='192.168.1.20';assert.equal(localAiRequest(req,['application/dicom']),false);
+});
