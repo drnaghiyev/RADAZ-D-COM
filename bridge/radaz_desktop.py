@@ -638,6 +638,12 @@ def watch(root):
     missed_health = 0
     own_version = read_json(SOURCE / 'public/product.json')['version']
     try:
+        # A legacy Watch may itself have applied the update and still own
+        # update.lock while blocked in its next network check. Wait until its
+        # launch transaction is over, then retire only out-of-version watchers.
+        with lock(root, 'launch', 90):
+            if read_json(root / 'active.json')['version'] == own_version:
+                runtime_processes(root, 'RetireWatch', own_version)
         with lock(root, 'update'):
             while True:
                 active = read_json(root / 'active.json')['version']

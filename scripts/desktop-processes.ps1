@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory=$true)][string]$InstallRoot,
-  [ValidateSet('Quiesce','StopRuntime','Owner')][string]$Action = 'Quiesce',
+  [ValidateSet('Quiesce','StopRuntime','Owner','RetireWatch')][string]$Action = 'Quiesce',
   [string]$Version,
   [int]$Port = 5173
 )
@@ -8,7 +8,8 @@ $ErrorActionPreference = 'Stop'
 $installation = [IO.Path]::GetFullPath($InstallRoot).TrimEnd('\')
 $versions = Join-Path $installation 'versions'
 if ($Version -and $Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid runtime version' }
-$scope = if ($Version) { Join-Path $versions $Version } else { $versions }
+$scopedVersion = $Version -and $Action -ne 'RetireWatch'
+$scope = if ($scopedVersion) { Join-Path $versions $Version } else { $versions }
 $processes = @(Get-CimInstance Win32_Process)
 # Never stop this controller, its invoking watcher, or any ancestor. In
 # particular a gateway may have parented the detached update controller.
@@ -23,11 +24,11 @@ function Has-Script($process, [string]$relative) {
   if (-not $process.CommandLine) { return $false }
   $prefix = [regex]::Escape($scope + '\')
   $suffix = [regex]::Escape($relative)
-  $middle = if ($Version) { '' } else { '\d+\.\d+\.\d+\\' }
+  $middle = if ($scopedVersion) { '' } else { '\d+\.\d+\.\d+\\' }
   return $process.CommandLine -match ('(?:^|["\s])' + $prefix + $middle + $suffix + '(?:["\s]|$)')
 }
-function Stop-Snapshot($snapshot) {
-  if ($ancestors.ContainsKey([int]$snapshot.ProcessId)) { return }
+function Stop-Snapshot($snapshot, [switch]$RetireAncestor) {
+  if ($ancestors.ContainsKey([int]$snapshot.ProcessId) -and -not $RetireAncestor) { return }
   $current = Get-CimInstance Win32_Process -Filter "ProcessId = $($snapshot.ProcessId)"
   if (-not $current) { return }
   if ($current.CreationDate -ne $snapshot.CreationDate -or $current.ExecutablePath -ne $snapshot.ExecutablePath -or $current.CommandLine -ne $snapshot.CommandLine) {
@@ -53,6 +54,14 @@ if ($Action -eq 'Owner') {
 # trees, Electron windows, archive receivers, or another installation's services.
 foreach ($process in $processes) {
   $watch = $process.Name -eq 'python.exe' -and (Has-Script $process 'bridge\radaz_desktop.py') -and $process.CommandLine -match 'radaz_desktop\.py"?\s+watch(?:\s|$)'
+  if ($Action -eq 'RetireWatch') {
+    # The new Watch owns launch.lock at this point. An old Watch which was
+    # itself the applying controller has now left the activation transaction;
+    # it is safe to retire even if it parented us. Never kill its child tree.
+    $keep = [regex]::Escape((Join-Path $versions "$Version\bridge\radaz_desktop.py"))
+    if ($watch -and $Version -and $process.CommandLine -notmatch $keep) { Stop-Snapshot $process -RetireAncestor }
+    continue
+  }
   $starter = $process.Name -in @('powershell.exe','pwsh.exe') -and ((Has-Script $process 'scripts\start-radaz.ps1') -or (Has-Script $process 'scripts\start-archive.ps1') -or (Has-Script $process 'scripts\stop-web-server.ps1'))
   if ($starter -or ($Action -eq 'Quiesce' -and $watch)) { Stop-Snapshot $process }
 }
