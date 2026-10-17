@@ -9,8 +9,15 @@ $candidate = Get-CimInstance Win32_Process -Filter "ProcessId = $($owners[0])"
 if (-not $candidate -or $candidate.Name -ne 'node.exe' -or $candidate.CommandLine -notmatch '(?:[\\/]|["\s])scripts[\\/]start-release\.mjs(?:["\s]|$)') {
   throw "Port $Port is not a recognized RADAZ web server. Close the old server window manually."
 }
-$identity = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/product.json" -TimeoutSec 5
-if ($identity.name -ne 'RADAZ' -or $identity.version -notmatch '^\d+\.\d+\.\d+$') { throw 'The running application did not identify itself as RADAZ. No process was stopped.' }
+if ($env:RADAZ_INSTALL_ROOT) {
+  $prefix = [regex]::Escape(([IO.Path]::GetFullPath($env:RADAZ_INSTALL_ROOT).TrimEnd('\') + '\versions\'))
+  if ($candidate.ExecutablePath -notmatch ('^' + $prefix + '\d+\.\d+\.\d+\\runtime\\node\\node\.exe$') -or $candidate.CommandLine -notmatch ('(?:^|["\s])' + $prefix + '\d+\.\d+\.\d+\\scripts\\start-release\.mjs(?:["\s]|$)')) {
+    throw 'Port belongs to another installation. No process was stopped.'
+  }
+} else {
+  $identity = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/product.json" -TimeoutSec 5
+  if ($identity.name -ne 'RADAZ' -or $identity.version -notmatch '^\d+\.\d+\.\d+$') { throw 'The running application did not identify itself as RADAZ. No process was stopped.' }
+}
 Write-Host "Kohne RADAZ veb-serveri dayandirilir (PID $($candidate.ProcessId))..."
 # The gateway can also parent the detached Python updater. Killing its whole
 # process tree would kill the update controller and its replacement launcher.

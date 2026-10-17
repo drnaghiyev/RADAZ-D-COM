@@ -164,7 +164,7 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
         digest=hashlib.sha256(package.read_bytes()).hexdigest()
         script=f"from pathlib import Path;import radaz_desktop;radaz_desktop.stage_package(Path({str(install)!r}),Path({str(package)!r}),{VERSION!r},{digest!r},{package.stat().st_size})"
         run([folder/'runtime/python/python.exe','-c',script])
-        stop_test_watchers()
+        # Keep the old watcher alive: removing it used to mask activation races.
         with urlopen(Request(base+'/radaz-update',data=json.dumps({'action':'apply','confirmed':True,'version':VERSION}).encode(),headers={'Origin':base,'Content-Type':'application/json'}),timeout=5) as response:assert response.status==202
         for _ in range(180):
             try:
@@ -176,6 +176,19 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
         assert get('/radaz-installation.json')['activeVersion']==VERSION
         folder=install/'versions'/VERSION
         print(f'Actual installed {base_version} controller -> {VERSION} activation passed without Setup',flush=True)
+    # A delayed startup from a superseded controller must fail before it can
+    # stop the healthy gateway or switch the archive back to another version.
+    before_stale=get('/radaz-runtime.json')['startedAt']
+    lease_file=install/'runtime-launch.json'
+    legacy_lease=not lease_file.exists()
+    if legacy_lease:lease_file.write_text(json.dumps({'version':VERSION,'launchId':'current-test-lease','controllerPid':os.getpid()}))
+    stale_env={**env,'RADAZ_INSTALL_ROOT':str(install),'RADAZ_LAUNCH_ID':'superseded-test-launch',
+               'RADAZ_STARTUP_CONTROLLER':str(os.getpid())}
+    rejected=subprocess.run([str(PS),'-NoProfile','-ExecutionPolicy','Bypass','-File',str(folder/'scripts/start-radaz.ps1'),'-NoBrowser'],env=stale_env,capture_output=True,timeout=30,creationflags=0x08000000)
+    assert rejected.returncode!=0 and b'Superseded RADAZ startup attempt' in rejected.stderr
+    assert get('/radaz-runtime.json')['startedAt']==before_stale
+    if legacy_lease:lease_file.unlink()
+    print('Superseded startup rejected before touching the healthy runtime',flush=True)
     if os.environ.get('RADAZ_TEST_ELECTRON') == '1':
         print(run([folder/'runtime/node/node.exe', ROOT/'tests/native-electron-browser.mjs', install]), flush=True)
     # The background watcher restores an unexpectedly stopped runtime without
@@ -192,7 +205,7 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
     assert get('/radaz-runtime.json')['startedAt']!=before_recovery
     print('Background watcher restored stopped server; active version and archive preserved',flush=True)
     variant('99.0.1')
-    stop_test_watchers()
+    # Exercise HTTP apply with a live watcher as well as a detached controller.
     with urlopen(Request(base+'/radaz-update',data=json.dumps({'action':'apply','confirmed':True,'version':'99.0.1'}).encode(),headers={'Origin':base,'Content-Type':'application/json'}),timeout=5) as response:
         assert response.status==202
     for _ in range(150):

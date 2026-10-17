@@ -52,6 +52,9 @@ class DesktopUpdates(unittest.TestCase):
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.root = Path(self.temp.name)
+        # Windows process ownership itself is exercised by the integration test.
+        process_patch = patch.object(desktop, 'runtime_processes')
+        self.processes = process_patch.start(); self.addCleanup(process_patch.stop)
         desktop.atomic_json(self.root / 'active.json', {'version':'0.2.8'})
         self.target = '0.2.9'
         self.files = {
@@ -229,6 +232,7 @@ class DesktopUpdates(unittest.TestCase):
             desktop.launch(self.root,no_browser=True)
         self.assertEqual(desktop.read_json(self.root/'active.json'),{'version':'0.2.9','previousVersion':'0.2.8'})
         self.assertFalse((self.root/'pending.json').exists())
+        self.processes.assert_any_call(self.root, 'Quiesce')
 
     def test_apply_does_not_wait_for_a_release_check_or_update_lock(self):
         self.stage()
@@ -295,6 +299,42 @@ class DesktopUpdates(unittest.TestCase):
         self.assertEqual(detail['message'],'bad runtime')
         self.assertEqual(detail['phase'],'startup-health')
         self.assertIn('bad runtime',(self.root/'logs/update-errors.jsonl').read_text())
+        self.processes.assert_any_call(self.root, 'StopRuntime', self.target)
+
+    def test_listener_from_other_installation_cannot_pass_health(self):
+        self.stage()
+        calls = []
+        class Child:
+            returncode = 1
+            def poll(self): return 1
+            def wait(self, timeout): return 1
+        def status(url, timeout):
+            if url.endswith('/status'): return {'version':1,'desktopManaged':True,'appVersion':self.target}
+            return {'name':'RADAZ','version':self.target,'buildId':'synthetic'}
+        def process(root, action, target=None):
+            calls.append(action)
+            if action=='Owner': raise RuntimeError('Port belongs to another installation')
+        with patch.object(desktop,'get_json',side_effect=status),patch.object(desktop,'runtime_processes',side_effect=process),patch.object(desktop,'run_hidden',return_value=Child()):
+            with self.assertRaisesRegex(RuntimeError,'launcher exited'):
+                desktop.open_version(self.root,self.target)
+        self.assertEqual(calls,['Owner','Quiesce','StopRuntime'])
+
+    def test_build_mismatch_remains_a_hard_failure(self):
+        self.stage()
+        class Child:
+            returncode = 1
+            polls = 0
+            def poll(self):
+                self.polls += 1
+                return None if self.polls<=2 else 1
+            def wait(self, timeout): return 1
+        def status(url, timeout):
+            if url.endswith('/status'): return {'version':1,'desktopManaged':True,'appVersion':self.target}
+            return {'name':'RADAZ','version':self.target,'buildId':'wrong-build'}
+        with patch.object(desktop,'get_json',side_effect=status),patch.object(desktop,'run_hidden',return_value=Child()),patch.object(desktop.time,'sleep'):
+            with self.assertRaisesRegex(RuntimeError,'Runtime build mismatch: expected synthetic; received wrong-build'):
+                desktop.open_version(self.root,self.target)
+        self.assertEqual([call.args[1] for call in self.processes.call_args_list],['Quiesce','StopRuntime'])
 
     def test_failed_release_is_discoverable_and_explicit_retry_is_allowed(self):
         release=self.release()

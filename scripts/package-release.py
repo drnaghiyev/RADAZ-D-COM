@@ -25,6 +25,7 @@ explicit.extend(['bridge/radaz_removable.py','bridge/radaz_windows.py'])
 explicit.extend(['bridge/radaz_online_license.py','public/online-license-public.json'])
 explicit.append('bridge/radaz_send.py')
 explicit.append('scripts/release-health.mjs')
+explicit.append('scripts/desktop-processes.ps1')
 explicit.extend(['scripts/local-ai-request.mjs', 'bridge/radaz_ai.py', 'bridge/radiology-profile.json'])
 explicit.extend(['scripts/local-anatomy-volume.mjs','scripts/anatomy-access.mjs','bridge/anatomy-models.json','bridge/anatomy_providers.py','bridge/radaz_anatomy_volume.py'])
 files={p:ROOT/p for p in explicit}

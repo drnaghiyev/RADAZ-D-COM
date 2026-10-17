@@ -359,14 +359,35 @@ def environment(root):
     env = dict(os.environ, RADAZ_INSTALL_ROOT=str(root), RADAZ_DESKTOP_TOKEN=(root / 'control-token').read_text())
     return env
 
-def run_hidden(args, root):
+def run_hidden(args, root, extra_env=None):
     logs = root / 'logs'; logs.mkdir(exist_ok=True)
     with (logs / 'desktop.log').open('ab', buffering=0) as log:
-        return subprocess.Popen(args, cwd=root, env=environment(root), stdin=subprocess.DEVNULL, stdout=log, stderr=log, creationflags=NO_WINDOW)
+        return subprocess.Popen(args, cwd=root, env={**environment(root), **(extra_env or {})}, stdin=subprocess.DEVNULL, stdout=log, stderr=log, creationflags=NO_WINDOW)
 
 def powershell(script, *args):
     system = Path(os.environ.get('SystemRoot', 'C:/Windows')) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
     return [str(system), '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(script), *map(str, args)]
+
+
+def runtime_processes(root, action, target=None):
+    args = ['-InstallRoot', root, '-Action', action]
+    if target: args += ['-Version', target]
+    args += ['-Port', os.environ.get('RADAZ_PORT', '5173')]
+    result = subprocess.run(powershell(SOURCE / 'scripts/desktop-processes.ps1', *args),
+                            creationflags=NO_WINDOW, capture_output=True, timeout=45)
+    if result.returncode:
+        raise RuntimeError('Desktop process ownership: ' + result.stderr.decode('utf-8', errors='replace')[-2000:])
+    if action == 'Owner': return json.loads(result.stdout.decode('utf-8-sig'))
+
+
+def quiesce(root):
+    # Caller owns launch.lock, also used by older watch recovery. Stopping
+    # startup producers closes the gap left by an abandoned launcher's children.
+    runtime_processes(root, 'Quiesce')
+
+
+def stop_runtime(root, target):
+    runtime_processes(root, 'StopRuntime', target)
 
 def app_browser():
     """Use the default Chromium profile, preserving existing localhost storage."""
@@ -410,11 +431,16 @@ def open_version(root, target):
     build = identity['buildId']
     port = int(os.environ.get('RADAZ_PORT', '5173'))
     base = f'http://127.0.0.1:{port}'
+    launch_id = None
     def healthy():
         served = get_json(base + '/radaz-runtime.json', 2)
         receiver = get_json(f'http://127.0.0.1:{os.environ.get("RADAZ_ARCHIVE_PORT", "8766")}/status', 2)
         if served.get('buildId') != build:
             raise RuntimeError(f'Runtime build mismatch: expected {build}; received {served.get("buildId")}')
+        if (served.get('candidateVersion') or served.get('version')) != target:
+            raise RuntimeError('Runtime version mismatch: expected ' + target)
+        if launch_id and served.get('lifecycleProtocol') == 1 and served.get('launchId') != launch_id:
+            raise RuntimeError('Runtime launch identity mismatch')
         if receiver.get('version') != 1:
             raise RuntimeError('Archive status protocol mismatch')
         if receiver.get('desktopManaged') and receiver.get('appVersion') != target:
@@ -426,26 +452,40 @@ def open_version(root, target):
                 raise RuntimeError(f'Client health HTTP {error.code}: {detail}') from error
             if not health.get('ready') or health.get('buildId') != build:
                 raise RuntimeError('Client resources not healthy for build ' + build)
+        owner = runtime_processes(root, 'Owner', target)
+        if served.get('pid') is not None and served['pid'] != owner['pid']:
+            raise RuntimeError('Runtime listener changed during health check')
         with urlopen(base + '/', timeout=3) as response:
             return response.status == 200
     try:
         if healthy(): return build
     except Exception: pass
+    quiesce(root)
     (root / f'startup-error-{target}.json').unlink(missing_ok=True)
-    child = run_hidden(powershell(folder / 'scripts/start-radaz.ps1', '-NoBrowser'), root)
+    launch_id = secrets.token_hex(24)
+    atomic_json(root / 'runtime-launch.json', {'version': target, 'launchId': launch_id, 'controllerPid': os.getpid()})
+    child = run_hidden(powershell(folder / 'scripts/start-radaz.ps1', '-NoBrowser'), root,
+                       {'RADAZ_LAUNCH_ID': launch_id, 'RADAZ_STARTUP_CONTROLLER': str(os.getpid())})
     until = time.monotonic() + 120
     last_error = 'No health response'
-    while time.monotonic() < until:
-        if child.poll() == 17: raise ArchiveBusy('Archive is receiving images; apply the update on a later launch')
-        if child.poll() not in (None, 0): raise RuntimeError(f'RADAZ launcher exited ({child.returncode}); last health failure: {last_error}. See logs/desktop.log')
-        try:
-            if healthy(): return build
-        except Exception as error: last_error = f'{type(error).__name__}: {error}'
-        time.sleep(.4)
-    # Stop only this launcher's gateway, preserving the independently running archive.
-    subprocess.run(powershell(folder / 'scripts/stop-web-server.ps1', '-Port', port), creationflags=NO_WINDOW, capture_output=True)
-    if child.poll() is None: child.terminate()
-    raise RuntimeError('RADAZ startup timed out; last health failure: ' + last_error)
+    try:
+        while time.monotonic() < until:
+            if child.poll() == 17: raise ArchiveBusy('Archive is receiving images; apply the update on a later launch')
+            if child.poll() not in (None, 0): raise RuntimeError(f'RADAZ launcher exited ({child.returncode}); last health failure: {last_error}. See logs/desktop.log')
+            try:
+                if healthy(): return build
+            except Exception as error: last_error = f'{type(error).__name__}: {error}'
+            time.sleep(.4)
+        raise RuntimeError('RADAZ startup timed out; last health failure: ' + last_error)
+    except ArchiveBusy:
+        raise  # The old gateway/archive are still serving an examination.
+    except Exception:
+        # Includes early exits, not just timeout. Stop scoped startup children
+        # before rollback, even when no HTTP endpoint responds (WinError 10061).
+        stop_runtime(root, target)
+        if child.poll() is None: child.terminate()
+        child.wait(timeout=10)
+        raise
 
 def launch(root, no_browser=False):
     with lock(root, 'launch', 90):
@@ -458,6 +498,9 @@ def launch(root, no_browser=False):
         try:
             if target != current: state(root, 'activating', f'RADAZ {target} açılışı və resursları yoxlanılır…', target)
             if target != current: validate_directory(version_dir(root, target), target)
+            if target != current:
+                quiesce(root)
+                state(root, 'activating', f'RADAZ {target} açılışı və resursları yoxlanılır…', target)
             phase = 'startup-health'
             build = open_version(root, target)
             if target != current:
@@ -473,7 +516,9 @@ def launch(root, no_browser=False):
             (root / 'pending.json').unlink(missing_ok=True)
             state(root, 'rolling-back', 'Yeni versiya açılmadı. Əvvəlki versiya bərpa edilir…', target, diagnostic=diagnostic)
             target = current
-            try: build = open_version(root, current)
+            try:
+                stop_runtime(root, read_json(root / 'failed-update.json')['version'])
+                build = open_version(root, current)
             except Exception as rollback_error:
                 diagnostic['rollback'] = failure(root, rollback_error, 'rollback', current)
                 state(root, 'error', 'Əvvəlki versiyanın faylları qorunur, açılışı təsdiqlənmədi. RADAZ qısayolundan yenidən başladın.', diagnostic=diagnostic)
@@ -570,6 +615,24 @@ def recover_server(root):
         current = read_json(root / 'active.json')['version']
         return open_version(root, current)
 
+
+def repair_update(root, target):
+    """Apply an already installed, verified release with the fixed controller.
+
+    Used for 0.2.37 -> 0.2.39 without rewriting either immutable package.
+    A failed legacy attempt may have removed pending.json; restore only the
+    explicitly requested target after checking its complete manifest again.
+    """
+    version(target)
+    with lock(root, 'launch', 90):
+        current = read_json(root / 'active.json')['version']
+        if version(target) < version(current): raise ValueError('Repair cannot downgrade the active installation')
+        validate_directory(version_dir(root, target), target)
+        if target != current: atomic_json(root / 'pending.json', {'version': target})
+    launch(root, no_browser=True)
+    if read_json(root / 'active.json')['version'] != target:
+        raise RuntimeError('Requested repair did not activate; the previous version was preserved. See logs/update-errors.jsonl')
+
 def watch(root):
     handoff = None
     missed_health = 0
@@ -577,9 +640,17 @@ def watch(root):
     try:
         with lock(root, 'update'):
             while True:
+                active = read_json(root / 'active.json')['version']
+                if active != own_version:
+                    handoff = version_dir(root, active)
+                    break
                 retry_delay = 15 * 60
                 try: apply_update(root)
                 except OperationBusy: pass
+                active = read_json(root / 'active.json')['version']
+                if active != own_version:
+                    handoff = version_dir(root, active)
+                    break
                 try: check_update(root, consume_update_request(root))
                 except Exception as error:
                     saved = read_json(root / 'update-state.json')
@@ -601,7 +672,9 @@ def watch(root):
                     if tick % 10: continue
                     try:
                         served = get_json(f'http://127.0.0.1:{os.environ.get("RADAZ_PORT", "5173")}/radaz-runtime.json', 3)
-                        if served.get('name') != 'RADAZ': raise RuntimeError('Port belongs to another application')
+                        expected = read_json(version_dir(root, active) / 'dist/server/radaz-build.json')['buildId']
+                        if served.get('name') != 'RADAZ' or served.get('version') != active or served.get('buildId') != expected:
+                            raise RuntimeError('Runtime does not belong to the active version')
                         missed_health = 0
                     except Exception:
                         missed_health += 1
@@ -619,7 +692,8 @@ def watch(root):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['initialize', 'install', 'launch', 'watch', 'check', 'apply'])
+    parser.add_argument('command', choices=['initialize', 'install', 'launch', 'watch', 'check', 'apply', 'repair'])
+    parser.add_argument('--target-version')
     parser.add_argument('--install-root', type=Path, default=Path(os.environ.get('LOCALAPPDATA', Path.home())) / 'Programs/RADAZ')
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--no-shortcuts', action='store_true')
@@ -632,6 +706,7 @@ def main():
         # not opened. Installing an update must never interrupt an examination.
         if fresh and args.start_background: launch(root, no_browser=True)
     elif args.command == 'launch': launch(root, args.no_browser)
+    elif args.command == 'repair': repair_update(root, args.target_version)
     elif args.command == 'check':
         with lock(root, 'update'): check_update(root)
     elif args.command == 'apply':

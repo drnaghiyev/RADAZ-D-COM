@@ -17,6 +17,23 @@ trap {
 }
 $buildPath = Join-Path $projectRoot 'dist\server\radaz-build.json'
 $expectedBuild = if (Test-Path -LiteralPath $buildPath) { Get-Content -Raw -LiteralPath $buildPath | ConvertFrom-Json } else { $null }
+if ($env:RADAZ_INSTALL_ROOT) {
+  $parentId = (Get-CimInstance Win32_Process -Filter "ProcessId = $PID").ParentProcessId
+  if ($env:RADAZ_LAUNCH_ID -and $env:RADAZ_STARTUP_CONTROLLER -eq [string]$parentId) {
+    $lease = Get-Content -Raw -LiteralPath (Join-Path $env:RADAZ_INSTALL_ROOT 'runtime-launch.json') | ConvertFrom-Json
+    if ($lease.version -ne $expected.version -or $lease.launchId -ne $env:RADAZ_LAUNCH_ID -or -not (Get-Process -Id $lease.controllerPid -ErrorAction SilentlyContinue)) {
+      throw 'Superseded RADAZ startup attempt'
+    }
+  } else {
+    # Legacy controllers inherit the gateway environment. A previous launch's
+    # nonce is not a new controller lease and must not be reused.
+    Remove-Item Env:RADAZ_LAUNCH_ID -ErrorAction SilentlyContinue
+    Remove-Item Env:RADAZ_STARTUP_CONTROLLER -ErrorAction SilentlyContinue
+  }
+  # Also protects upgrades initiated by the unmodified 0.2.37/0.2.39 controller.
+  # Its launch.lock is held; exclude that controller's ancestor chain.
+  & (Join-Path $PSScriptRoot 'desktop-processes.ps1') -InstallRoot $env:RADAZ_INSTALL_ROOT -Action Quiesce
+}
 Set-Location -LiteralPath $projectRoot
 $privateNode = Join-Path $projectRoot 'runtime\node\node.exe'
 if (Test-Path -LiteralPath $privateNode) {
@@ -38,7 +55,9 @@ function Test-RadazServer {
   try {
     if (-not $expectedBuild -or $needsBuild) { return $false }
     $served = Invoke-RestMethod -Uri "${probeUrl}radaz-runtime.json" -TimeoutSec 5
-    if ($served.name -ne 'RADAZ' -or $served.version -ne $expected.version -or $served.buildId -ne $expectedBuild.buildId) { return $false }
+    $servedVersion = if ($served.candidateVersion) { $served.candidateVersion } else { $served.version }
+    if ($served.name -ne 'RADAZ' -or $servedVersion -ne $expected.version -or $served.buildId -ne $expectedBuild.buildId) { return $false }
+    if ($env:RADAZ_LAUNCH_ID -and $served.launchId -ne $env:RADAZ_LAUNCH_ID) { return $false }
     $response = Invoke-WebRequest -UseBasicParsing -Uri $probeUrl -TimeoutSec 5
     return $response.StatusCode -eq 200
   } catch { return $false }

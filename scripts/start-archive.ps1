@@ -15,12 +15,15 @@ if ($status.version -eq 1) {
     Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$archivePort/_desktop/stop" -Headers @{'X-RADAZ-Desktop'=$env:RADAZ_DESKTOP_TOKEN} -TimeoutSec 20 | Out-Null
   } catch {
     if ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 409) { exit 17 }
-    throw
+    # The receiver may already have finished its graceful shutdown after the
+    # status probe. Connection refused is harmless only once its port is free.
+    if (Get-NetTCPConnection -State Listen -LocalPort $archivePort -ErrorAction SilentlyContinue) { throw }
   }
   foreach ($attempt in 1..60) {
     if (-not (Get-NetTCPConnection -State Listen -LocalPort $archivePort -ErrorAction SilentlyContinue)) { break }
     Start-Sleep -Milliseconds 200
   }
+  if (Get-NetTCPConnection -State Listen -LocalPort $archivePort -ErrorAction SilentlyContinue) { throw 'Previous archive did not release its port; no replacement was started.' }
 }
 $pythonPath = Join-Path $projectRoot 'runtime\python\python.exe'
 if (-not (Test-Path -LiteralPath $pythonPath)) {

@@ -12,7 +12,7 @@ if(!existsSync(path.join(root,'dist/server/index.js')))throw new Error('Built ap
 const build=JSON.parse(readFileSync(path.join(root,'dist/server/radaz-build.json'),'utf8'));
 const product=JSON.parse(readFileSync(path.join(root,'public/product.json'),'utf8'));
 if(build.product.version!==product.version)throw new Error('RADAZ files belong to different versions. Extract the complete release ZIP into a new folder.');
-const runtime={name:'RADAZ',version:build.product.version,buildId:build.buildId,healthProtocol:1,startedAt:new Date().toISOString()};
+const runtime={name:'RADAZ',version:build.product.version,buildId:build.buildId,healthProtocol:1,lifecycleProtocol:1,pid:process.pid,launchId:process.env.RADAZ_LAUNCH_ID||null,startedAt:new Date().toISOString()};
 const installRoot=process.env.RADAZ_INSTALL_ROOT;
 const anatomyVolume=anatomyVolumeService(root,installRoot,product);
 function activeVersion(){try{return JSON.parse(readFileSync(path.join(installRoot,'active.json'),'utf8')).version;}catch{return null;}}

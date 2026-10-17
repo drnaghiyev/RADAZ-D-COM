@@ -1,0 +1,65 @@
+param(
+  [Parameter(Mandatory=$true)][string]$InstallRoot,
+  [ValidateSet('Quiesce','StopRuntime','Owner')][string]$Action = 'Quiesce',
+  [string]$Version,
+  [int]$Port = 5173
+)
+$ErrorActionPreference = 'Stop'
+$installation = [IO.Path]::GetFullPath($InstallRoot).TrimEnd('\')
+$versions = Join-Path $installation 'versions'
+if ($Version -and $Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid runtime version' }
+$scope = if ($Version) { Join-Path $versions $Version } else { $versions }
+$processes = @(Get-CimInstance Win32_Process)
+# Never stop this controller, its invoking watcher, or any ancestor. In
+# particular a gateway may have parented the detached update controller.
+$ancestors = @{}
+$next = $PID
+while ($next -and -not $ancestors.ContainsKey([int]$next)) {
+  $ancestors[[int]$next] = $true
+  $parent = $processes | Where-Object ProcessId -eq $next | Select-Object -First 1
+  $next = if ($parent) { $parent.ParentProcessId } else { 0 }
+}
+function Has-Script($process, [string]$relative) {
+  if (-not $process.CommandLine) { return $false }
+  $prefix = [regex]::Escape($scope + '\')
+  $suffix = [regex]::Escape($relative)
+  $middle = if ($Version) { '' } else { '\d+\.\d+\.\d+\\' }
+  return $process.CommandLine -match ('(?:^|["\s])' + $prefix + $middle + $suffix + '(?:["\s]|$)')
+}
+function Stop-Snapshot($snapshot) {
+  if ($ancestors.ContainsKey([int]$snapshot.ProcessId)) { return }
+  $current = Get-CimInstance Win32_Process -Filter "ProcessId = $($snapshot.ProcessId)"
+  if (-not $current) { return }
+  if ($current.CreationDate -ne $snapshot.CreationDate -or $current.ExecutablePath -ne $snapshot.ExecutablePath -or $current.CommandLine -ne $snapshot.CommandLine) {
+    throw 'Process identity changed; replacement process was not stopped.'
+  }
+  try { Stop-Process -Id $current.ProcessId -Force -ErrorAction Stop }
+  catch { if (Get-CimInstance Win32_Process -Filter "ProcessId = $($current.ProcessId)") { throw } }
+  Wait-Process -Id $current.ProcessId -Timeout 10 -ErrorAction SilentlyContinue
+  $remaining = Get-Process -Id $current.ProcessId -ErrorAction SilentlyContinue
+  if ($remaining -and -not $remaining.HasExited) { throw "Runtime process did not stop: $($current.Name) PID $($current.ProcessId)" }
+}
+if ($Action -eq 'Owner') {
+  $owners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique)
+  if ($owners.Count -ne 1) { throw 'Expected exactly one runtime listener' }
+  $owner = $processes | Where-Object ProcessId -eq $owners[0] | Select-Object -First 1
+  if (-not $Version -or $owner.Name -ne 'node.exe' -or -not (Has-Script $owner 'scripts\start-release.mjs') -or $owner.ExecutablePath -ine (Join-Path $scope 'runtime\node\node.exe')) {
+    throw 'Port is not owned by the requested installed runtime'
+  }
+  @{pid=$owner.ProcessId; version=$Version; created=$owner.CreationDate.ToString('o')} | ConvertTo-Json -Compress
+  exit 0
+}
+# Stop startup producers before their children. Do not kill arbitrary process
+# trees, Electron windows, archive receivers, or another installation's services.
+foreach ($process in $processes) {
+  $watch = $process.Name -eq 'python.exe' -and (Has-Script $process 'bridge\radaz_desktop.py') -and $process.CommandLine -match 'radaz_desktop\.py"?\s+watch(?:\s|$)'
+  $starter = $process.Name -in @('powershell.exe','pwsh.exe') -and ((Has-Script $process 'scripts\start-radaz.ps1') -or (Has-Script $process 'scripts\start-archive.ps1') -or (Has-Script $process 'scripts\stop-web-server.ps1'))
+  if ($starter -or ($Action -eq 'Quiesce' -and $watch)) { Stop-Snapshot $process }
+}
+if ($Action -eq 'StopRuntime') {
+  foreach ($process in $processes) {
+    $runtimeNode = $Version -and $process.ExecutablePath -ieq (Join-Path $scope 'runtime\node\node.exe')
+    $worker = $runtimeNode -and $process.CommandLine -match '(?:["\s])dist[\\/]runtime[\\/]web-server\.mjs(?:["\s]|$)'
+    if ($process.Name -eq 'node.exe' -and ((Has-Script $process 'scripts\start-release.mjs') -or (Has-Script $process 'dist\runtime\web-server.mjs') -or $worker)) { Stop-Snapshot $process }
+  }
+}

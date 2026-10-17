@@ -1,4 +1,24 @@
-# Desktop updater investigation — 0.2.24
+# Desktop updater investigation
+
+## 0.2.40 — Watch/startup ownership during activation
+
+Reported transition: 0.2.37 to 0.2.39, expected build `c54f9af987cbf591e1a03352503d74ff34db76ee5c77b65368fe7970d1ac0727`, received `159e45c31ba26a9f3b8beb7afeb4f3db8d99e1e0e6f13a75b37261d0b6afb6fa`, followed by connection refused during rollback. At investigation time this workstation already served the correct 0.2.39 on 5173; its available error log did not contain that exact failed transaction. The changes address the reproduced lifecycle gap, not a claim to have recovered the other workstation's complete process history.
+
+`launch.lock` serializes Python controllers, including Watch recovery, but does not revoke a PowerShell startup already spawned by an earlier controller. Early launcher failure did not clean up candidate children, and timeout cleanup depended on a working HTTP endpoint. An abandoned old launcher could consequently replace the candidate on the shared port after the Python transaction ended. Watch accepted any endpoint named RADAZ, even a different build, and only handed off to a changed active version after another possibly slow GitHub check.
+
+The controller now quiesces installation-scoped Watch/startup producers before switching. Process matching uses exact installation/version script paths, snapshots and creation-time rechecks; it excludes the invoking controller and ancestors and never kills an entire gateway process tree. Candidate health still requires the original build ID, client asset health, archive protocol/version and root page; it additionally requires the TCP listener to be the bundled Node executable running that version's gateway. New gateways also report a per-launch nonce and PID. A delayed new launcher rejects a superseded controller lease. Legacy controllers activating 0.2.40 use the same quiescing helper through its startup script.
+
+Every failed candidate startup, including an early process exit, stops that candidate's starters, gateway and renderers before rollback. The archive is stopped only through its existing authenticated, busy-aware graceful lifecycle; no DICOM receiver is force-killed by the process helper. Connection refused after a shutdown probe is benign only if the old archive port is actually free. A restored runtime must pass health before recovery is reported. Watch checks the active version before any release-feed request and rejects a mismatched runtime build.
+
+The immutable published 0.2.37/0.2.39 ZIPs are not patched or rehashed. `tests/desktop-watch-migration.py` verifies both release SHA-256 values and every manifest entry, starts real 0.2.37 services and Watch, introduces a suspended obsolete startup, and activates the exact 0.2.39 with the repaired controller. It checks the new Watch, listener/build, a synthetic C-STORE study and unchanged hashes for DICOM, license, encrypted credential and user configuration. `--reproduce-legacy` exercises the original controller and resumes the obsolete launcher after commit, then runs repair. The normal offline package smoke additionally covers early-startup failure and missing-client-asset rollback while a Watch is alive.
+
+### Repairing an already downloaded 0.2.39
+
+Extract `RADAZ-Updater-Repair-0.2.40.zip` into a separate folder and run `REPAIR-UPDATE.cmd` after finishing the examination. It uses RADAZ's bundled Python, validates the existing `versions/0.2.39` manifest, restores the pending pointer if the failed legacy attempt removed it, and applies through the repaired controller. It does not replace files inside either published version, reset licensing, delete an archive, or clear browser/Electron profiles. If 0.2.39 is absent or corrupt, validation fails before stopping services; install/download a verified complete release first.
+
+For a custom installation: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/repair-desktop-update.ps1 -InstallRoot "D:\RADAZ" -TargetVersion 0.2.39`. This targeted repair cannot downgrade a newer active version. The permanent lifecycle changes ship in 0.2.40; the small repair is for computers still using older controllers.
+
+## 0.2.24
 
 ## Evidence before changes
 
