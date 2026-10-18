@@ -2,6 +2,7 @@
 import {createContext, useContext, useEffect, useRef, useState, type HTMLAttributes, type ReactNode} from 'react';
 import {createPortal} from 'react-dom';
 import {GripVertical, MoreHorizontal} from 'lucide-react';
+import {ToolbarCustomization,CustomizableGroup,ToolbarCustomizeButton,useCustomToolbarGroups} from './toolbar-customization';
 
 type Position = {side: 'top'|'right'; order: number};
 type Layout = Record<string, Position>;
@@ -16,11 +17,17 @@ const Context=createContext<{
 
 /** React owns both docks. Moving a group never manually reparents application DOM. */
 export function ToolbarWorkspace({scope,children}:{scope:string;children:ReactNode}) {
+  return <ToolbarCustomization scope={scope}><ToolbarWorkspaceBody scope={scope}>{children}</ToolbarWorkspaceBody></ToolbarCustomization>;
+}
+function ToolbarWorkspaceBody({scope,children}:{scope:string;children:ReactNode}) {
   const [layout,setLayout]=useState<Layout>({}),[registry,setRegistry]=useState<Registry>({});
   const [drag,setDrag]=useState<string|null>(null),[dock,setDock]=useState<HTMLDivElement|null>(null);
   const [loaded,setLoaded]=useState('');
   const [overflow,setOverflow]=useState<string[]>([]),[popup,setPopup]=useState<HTMLDivElement|null>(null);
   const root=useRef<HTMLDivElement>(null);
+  const customGroups=useCustomToolbarGroups();
+  const [headerHost,setHeaderHost]=useState<HTMLElement|null>(null);
+  useEffect(()=>setHeaderHost(root.current?.querySelector<HTMLElement>('.topbar,.records-header')||null),[scope]);
   const ghost=useRef<HTMLElement|null>(null);
   const ghostOffset=useRef({x:0,y:0});
   const clearGhost=()=>{ghost.current?.remove();ghost.current=null;};
@@ -35,6 +42,7 @@ export function ToolbarWorkspace({scope,children}:{scope:string;children:ReactNo
     setLayout(next);setLoaded(scope);
   },[scope]);
   useEffect(()=>{if(loaded===scope)try{localStorage.setItem(`radaz-toolbar-v1:${scope}`,JSON.stringify(layout));}catch{}},[layout,loaded,scope]);
+  useEffect(()=>{const reset=(event:Event)=>{if((event as CustomEvent).detail===scope)setLayout({});};window.addEventListener('radaz-toolbar-reset',reset);return()=>window.removeEventListener('radaz-toolbar-reset',reset);},[scope]);
   const register=useRef((id:string,order:number)=>{
     setRegistry(current=>({...current,[id]:order}));
     return()=>setRegistry(current=>{const next={...current};delete next[id];return next;});
@@ -113,7 +121,7 @@ export function ToolbarWorkspace({scope,children}:{scope:string;children:ReactNo
         const node=root.current?.querySelector<HTMLElement>(`[data-toolbar-group="${id}"]`);
         return {id,width:(node?.getBoundingClientRect().width||0)+gap};
       });
-      const fixed=[...header.querySelectorAll<HTMLElement>('.brand,.mode-identity,.records-header-filters')]
+      const fixed=[...header.querySelectorAll<HTMLElement>('.brand,.mode-identity,.records-header-filters,.toolbar-customize-trigger')]
         .reduce((sum,node)=>sum+(node.matches('.records-header-filters')?Math.min(680,header.clientWidth*.6):node.getBoundingClientRect().width)+gap,0);
       const available=header.clientWidth-fixed-(parseFloat(style.paddingLeft)||0)-(parseFloat(style.paddingRight)||0);
       let used=groups.reduce((sum,group)=>sum+group.width,0);
@@ -138,6 +146,7 @@ export function ToolbarWorkspace({scope,children}:{scope:string;children:ReactNo
   return <Context.Provider value={{layout,drag,dock,overflow,popup,setPopup,register,move,begin}}>
     <div ref={root} className={`toolbar-workspace ${hasRight?'has-right-dock':''} ${drag?'toolbar-dragging':''}`} data-toolbar-scope={scope}>
       {children}
+      {headerHost&&createPortal(<>{customGroups.map((group,index)=><ToolbarGroup key={group.id} groupId={group.id} order={95+index/100} aria-label={group.name} title={group.name}/>)}</>,headerHost)}
       <aside className="right-tool-dock" aria-label="Sağ alət paneli" hidden={!hasRight&&!drag}>
         <div className="dock-drop-hint">Sağ panelə yerləşdir</div><div ref={setDock} className="right-tool-groups"/>
       </aside>
@@ -155,7 +164,7 @@ export function ToolbarGroup({groupId,order=0,children,className='',...props}:HT
       title="Sağ tutacaqdan tutub yanlara sürüşdürün və ya sağ panelə yerləşdirin."
       onDoubleClick={()=>context?.move(groupId,position.side==='top'?'right':'top')}
       onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();context?.move(groupId,position.side==='top'?'right':'top');}}}><GripVertical/></button>
-    {children}
+    <CustomizableGroup id={groupId} label={props['aria-label']||groupId}>{children}</CustomizableGroup>
   </div>;
   const target=position.side==='right'?context.dock:context.overflow.includes(groupId)?context.popup:null;
   return target?createPortal(element,target,groupId):element;
@@ -172,6 +181,7 @@ export function ToolbarOverflow() {
   },[open]);
   if(!context)return null;
   return <div className="toolbar-overflow" ref={ref}>
+    <ToolbarCustomizeButton onReset={()=>{localStorage.removeItem(`radaz-toolbar-v1:${ref.current?.closest('[data-toolbar-scope]')?.getAttribute('data-toolbar-scope')}`);window.dispatchEvent(new CustomEvent('radaz-toolbar-reset',{detail:ref.current?.closest('[data-toolbar-scope]')?.getAttribute('data-toolbar-scope')}));}}/>
     {!!context.overflow.length&&<button className="toolbar-overflow-trigger" aria-label="Əlavə alətlər" title="Əlavə alətlər" aria-expanded={open} onClick={()=>setOpen(value=>!value)}><MoreHorizontal/></button>}
     <div ref={context.setPopup} className={`toolbar-overflow-popup ${open&&context.overflow.length?'is-open':''}`} inert={!open||!context.overflow.length} aria-hidden={!open||!context.overflow.length}/>
   </div>;

@@ -1,6 +1,7 @@
 import vinext from "vinext";
 import { defineConfig } from "vite";
 import hostingConfig from "./.openai/hosting.json";
+import product from './public/product.json';
 import { readExecutionProfile } from "./scripts/execution-profile.mjs";
 import { sites } from "./build/sites-vite-plugin";
 import { localAiRequest } from './scripts/local-ai-request.mjs';
@@ -59,6 +60,7 @@ export default defineConfig(async () => {
   })] : [];
 
   return {
+    define: {__RADAZ_VERSION__: JSON.stringify(product.version)},
     server: {
       ...(!managedLinux ? {
         host: '0.0.0.0',

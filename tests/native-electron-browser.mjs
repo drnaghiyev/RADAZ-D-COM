@@ -16,6 +16,26 @@ try{
  await page.evaluate(()=>window.open('/report?archive-study=2.25.111&provider=chatgpt','radaz-system-report'));
  assert.deepEqual(await electron.evaluate(()=>globalThis.radazTestExternal),[`http://localhost:${process.env.RADAZ_PORT}/report?archive-study=2.25.111&provider=chatgpt`]);
  assert.equal(await electron.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().length),1);
- mkdirSync('outputs/native-electron',{recursive:true});await page.screenshot({path:'outputs/native-electron/boot.png'});
+ const token='RADAZ_RECORDS_'+ 'a'.repeat(32);
+ const popupPromise=electron.waitForEvent('window');
+ const registration=electron.context().waitForEvent('response',{predicate:r=>r.url().endsWith('/window/register-records'),timeout:45000});
+ await page.evaluate(token=>window.open('/mpr?records='+token,token,'popup=yes,resizable=yes,width=1100,height=740'),token);
+ const mpr=await popupPromise;await mpr.waitForLoadState('domcontentloaded');
+ await mpr.waitForFunction(()=>document.title.includes('RADAZ DICOM Viewer'));
+ assert.equal((await registration).status(),200);
+ const before=await electron.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().length);
+ await electron.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().includes('/mpr')).minimize());
+ await page.evaluate(()=>new Promise((resolve,reject)=>{const c=new BroadcastChannel('radaz-records-windows-v1'),timer=setTimeout(()=>{c.close();reject(Error('MPR focus acknowledgment missing'));},10000);c.onmessage=event=>{if(event.data?.kind==='FOCUSED'&&event.data.request==='native-maximize'){clearTimeout(timer);c.close();resolve(true);}};c.postMessage({kind:'FOCUS',page:'mpr',request:'native-maximize'});}));
+ for(let n=0;n<100;n++){
+   if(await electron.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().includes('/mpr')).isMaximized()))break;
+   await new Promise(r=>setTimeout(r,100));
+ }
+ assert.equal(await electron.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().includes('/mpr')).isMaximized()),true);
+ assert.equal(await electron.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().length),before);
+ // A minimized Electron renderer can suspend screenshots independently of
+ // the native window state; the HWND maximize/restore assertions above are required.
+ mkdirSync('outputs/native-electron',{recursive:true});await mpr.screenshot({path:'outputs/native-electron/mpr-maximized.png',timeout:5000}).catch(()=>console.log('Optional native screenshot unavailable'));
+ await mpr.close();
+ console.log('PASS native MPR window restores maximized without duplication');
  console.log('PASS packaged Electron version, sandboxed hidden launch and explicit system-browser report handoff');
 }finally{await electron.close();}

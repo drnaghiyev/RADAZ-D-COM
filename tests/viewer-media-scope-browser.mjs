@@ -68,6 +68,7 @@ try {
     if (request.url().includes('/removable/')) mediaRequests.push({ page: request.frame().page(), url: request.url() });
     if (request.url().includes('/test-pacs/')) pacsRequests.push(request.url());
   });
+  let discMounted=true,discArchived=false;
   await context.route('**/local-archive-api/**', async route => {
     const path = new URL(route.request().url()).pathname.slice('/local-archive-api'.length);
     const json = body => route.fulfill({ json: body });
@@ -78,8 +79,8 @@ try {
     if (path === '/instances') return json([{ uid: route.request().url().includes(disc.uid)?disc.sopUID:archived.sopUID }]);
     if (path.startsWith('/file/')) return route.fulfill({ contentType: 'application/dicom', body: path.includes(disc.sopUID)?disc.bytes:archived.bytes });
     if (path === '/opened' || path === '/import' || path === '/removable/close') return json({ ok: true });
-    if (path === '/removable/watch') return json({ sessions: [{ id: 'synthetic-cd', label: 'Synthetic disc', stage: 'ready', scanned: 1, total: 1, error: '', dicomdir: false }] });
-    if (path === '/removable/entries') return json({ next: 1, items: [{ id: 'image-1', tags:disc.tags, studyId: disc.uid, seriesUID: disc.seriesUID,
+    if (path === '/removable/watch') return json({ sessions: discMounted?[{ id: 'synthetic-cd', label: 'Synthetic disc', stage: 'ready', scanned: 1, total: 1, error: '', dicomdir: false }]:[] });
+    if (path === '/removable/entries') return json({ next: 1, items: [{ id: 'image-1', archived:discArchived, tags:disc.tags, studyId: disc.uid, seriesUID: disc.seriesUID,
       sopUID: disc.sopUID, name: disc.name, modality: disc.modality, patient: disc.patient, patientId: disc.patientId,
       birth: disc.birth, date: disc.date, number: disc.number, instance: 1, size: disc.bytes.length, decodedBytes: 524288 }] });
     if (path.startsWith('/removable/file/')) return route.fulfill({ contentType: 'application/dicom', body: disc.bytes });
@@ -127,6 +128,15 @@ try {
   const discReads=mediaRequests.filter(r=>r.url.includes('/removable/file/')).length;
   await archivePage.waitForTimeout(250);assert.ok(maximizeRequests.length>=1);assert.match(maximizeRequests[0].token,/^RADAZ_VIEWER_[a-f0-9]{32}$/);assert.equal(await archivePage.title(),'RADAZ · Local arxiv');
   console.log('PASS: archive reuses Viewer and keeps its explicit disc import running.');
+  discMounted=false;
+  await archiveViewer.waitForFunction(()=>document.querySelectorAll('.series-card').length===1);
+  assert.ok((await archiveViewer.locator('.patient-group').innerText()).includes(archived.patient));
+  await button(archiveViewer).click();discMounted=true;discArchived=true;await button(archiveViewer).click();
+  await archiveViewer.waitForFunction(()=>document.querySelectorAll('.series-card').length===2);
+  discMounted=false;await archiveViewer.waitForTimeout(2400);
+  assert.equal(await archiveViewer.locator('.series-card').count(),2,'Archived CD survives eject with other patients');
+  console.log('PASS: eject removes only temporary CD; archived CD and other patients survive');
+
 
   const pacsPage = await context.newPage();
   await pacsPage.goto(base + '/pacs');

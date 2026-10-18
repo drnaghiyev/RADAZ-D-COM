@@ -5,6 +5,8 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
+import time
 from pathlib import Path
 from urllib.request import Request, urlopen
 from zipfile import ZipFile, ZIP_DEFLATED
@@ -86,11 +88,22 @@ def main():
     compiler = ROOT / 'outputs/inno/ISCC.exe'
     if not compiler.exists():
         subprocess.run([str(inputs['inno']), '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/CURRENTUSER','/NOICONS','/TASKS=',f'/DIR={compiler.parent}'], check=True, creationflags=0x08000000)
-    compiled = subprocess.run([str(compiler), f'/DProductVersion={version}', str(ROOT / 'installer/radaz.iss')],
-                              cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=0x08000000)
-    if compiled.returncode:
-        raise RuntimeError(compiled.stdout.decode('utf-8', errors='replace')[-5000:])
-    installer = OUT / f'RADAZ-{version}-Setup.exe'; checksum(installer)
+    installer = OUT / f'RADAZ-Setup-v{version}.exe'
+    # A scanner may briefly lock Inno's resource-update scratch file. Retry in
+    # a fresh output directory; never publish a partial EXE or disable scanning.
+    for attempt in range(3):
+        temporary_root=OUT if attempt<2 else Path(tempfile.gettempdir())
+        with tempfile.TemporaryDirectory(prefix='radaz-setup-',dir=temporary_root) as temporary:
+            output=Path(temporary).resolve()
+            assert output.parent==temporary_root.resolve()
+            compiled = subprocess.run([str(compiler), f'/O{output}', f'/DProductVersion={version}', str(ROOT / 'installer/radaz.iss')],
+                                      cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=0x08000000)
+            if not compiled.returncode:
+                os.replace(output/installer.name,installer);break
+            detail=compiled.stdout.decode('utf-8',errors='replace')
+            if attempt==2 or 'EndUpdateResource' not in detail:raise RuntimeError(detail[-5000:])
+        time.sleep(1+attempt)
+    checksum(installer)
     print(f'Offline package: {archive.stat().st_size/1024**2:.1f} MiB; {len(manifest)} verified files; Setup: {installer.name}', flush=True)
 
 if __name__ == '__main__': main()

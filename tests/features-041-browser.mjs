@@ -1,0 +1,120 @@
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {spawnSync} from 'node:child_process';
+import {readFileSync,readdirSync,mkdirSync} from 'node:fs';
+import dicomParser from 'dicom-parser';
+const {chromium}=createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE||'playwright');
+const fixture=spawnSync('python',['tests/features-041-fixture.py'],{windowsHide:true,encoding:'utf8'});assert.equal(fixture.status,0,fixture.stderr);
+const files=readdirSync('outputs/features-041-fixture').map(name=>{const body=readFileSync('outputs/features-041-fixture/'+name),ds=dicomParser.parseDicom(new Uint8Array(body));return {body,study:ds.string('x0020000d'),sop:ds.string('x00080018')};});
+const base=process.env.RADAZ_TEST_URL||'http://localhost:5317',browser=await chromium.launch({channel:'msedge',headless:true});
+const context=await browser.newContext({viewport:{width:1920,height:1080}});context.setDefaultTimeout(45000);
+const errors=[],windowActions=[];context.on('page',p=>p.on('pageerror',error=>errors.push(error.message)));
+await context.route('**/local-archive-api/**',route=>{
+  const u=new URL(route.request().url()),path=u.pathname;
+  if(path.endsWith('/license'))return route.fulfill({json:{valid:true,required:true,kind:'owner'}});
+  if(path.endsWith('/instances'))return route.fulfill({json:files.filter(f=>u.search.includes(f.study)).map(f=>({uid:f.sop}))});
+  if(path.includes('/file/'))return route.fulfill({contentType:'application/dicom',body:files.find(f=>f.sop===decodeURIComponent(path.split('/').at(-1))).body});
+  if(path.includes('/window/'))windowActions.push(path.split('/').at(-1));
+  return route.fulfill({json:[]});
+});
+const page=await context.newPage();mkdirSync('outputs/features-041-qa',{recursive:true});
+const api=(p,fn,arg)=>Promise.race([new Promise((_,reject)=>setTimeout(()=>reject(Error('Viewport API timeout')),15000)),p.evaluate(async({fn,arg})=>{
+  const url=performance.getEntriesByType('resource').find(e=>e.name.includes('/lib/cornerstone.ts'))?.name;
+  if(!url)throw Error('Development module URL unavailable');
+  const module=await import(url),viewer=await module.getViewer();return new Function('viewer','module','arg',`return (${fn})(viewer,module,arg)`)(viewer,module,arg);
+},{fn:fn.toString(),arg})]);
+const load=async uid=>{await page.evaluate(uid=>{const c=new BroadcastChannel('radaz-viewer-open-v2');c.postMessage({kind:'OPEN',request:crypto.randomUUID(),target:window.name,studies:[uid]});setTimeout(()=>c.close(),50);},uid);await page.locator('.statusbar').filter({hasText:'DICOM görüntüsü yükləndi'}).waitFor();};
+try{
+  await page.goto(base+'/#archive-study=2.25.410',{timeout:120000});
+  await page.waitForFunction(()=>document.querySelectorAll('.series-card').length===2&&!document.querySelector('.series-work-progress [role="progressbar"]'));
+  await page.locator('[data-panel="A"][data-has-image="true"]').waitFor();
+  assert.match(await page.title(),/RADAZ DICOM Viewer — v\d+\.\d+\.\d+/);
+  await page.getByRole('button',{name:'Alət panelini fərdiləşdir',exact:true}).click();
+  await page.getByRole('textbox',{name:'Yeni qrupun adı'}).fill('My tools');await page.getByRole('button',{name:'Qrup yarat',exact:true}).click();
+  const choose=page.locator('.toolbar-editor-item').filter({has:page.locator('span').filter({hasText:/^Uzunluq$/})});
+  await choose.locator('select').selectOption({label:'My tools'});
+  await page.getByRole('button',{name:'Bağla',exact:true}).click();
+  const custom=page.locator('[data-toolbar-group^="custom-"]');await custom.getByRole('button',{name:'Uzunluq',exact:true}).click();
+  await page.getByRole('button',{name:'Ölçmə alətləri',exact:true}).click();
+  assert.equal(await page.getByRole('menuitem',{name:/Uzunluq/}).count(),0,'Pinned command removed from original menu');await page.keyboard.press('Escape');
+  await custom.getByRole('button',{name:'Uzunluq',exact:true}).click();
+  await page.reload();await page.locator('[data-panel="A"][data-has-image="true"]').waitFor();await custom.getByRole('button',{name:'Uzunluq',exact:true}).waitFor();
+  console.log('PASS custom group and persistent menu command');
+  // Native drag reorder and cross-group placement with a real drag payload.
+  await page.getByRole('button',{name:'Alət panelini fərdiləşdir',exact:true}).click();await page.getByRole('button',{name:'Sürüşdürərək düzəlt',exact:true}).click();
+  await page.locator('[data-toolbar-item="measure/menu:length"]').dragTo(page.locator('[data-item-group="annotations"]'));
+  await page.locator('[data-toolbar-group="annotations"] [data-toolbar-item="measure/menu:length"]').waitFor();
+  await page.getByRole('button',{name:'Düzülüşü bitir ✓'}).click();
+  console.log('PASS toolbar command drag between groups');
+  // Two real DICOM stacks with different slice spacing and counts.
+  console.log('STEP layout');await page.getByRole('button',{name:'Panel düzülüşü',exact:true}).click();await page.getByRole('gridcell',{name:'2 sütun, 1 sətir, 2 panel',exact:true}).click();
+  console.log('STEP MR drag');await page.locator('.series-card').filter({hasText:'SYNTHETIC MR'}).dragTo(page.locator('[data-panel="B"]'));
+  await page.locator('[data-panel="B"][data-has-image="true"]').waitFor();
+  console.log('STEP sync toggle');await page.locator('[data-panel="A"]').click({position:{x:70,y:70}});await page.getByRole('button',{name:'Sync Scroll',exact:true}).click();
+  console.log('STEP API scroll');await api(page,async({engine})=>{await engine.getViewport('panel-A').setImageIdIndex(10);});console.log('STEP API done');
+  await page.waitForTimeout(350);assert.equal(await api(page,({engine})=>engine.getViewport('panel-B').getCurrentImageIdIndex()),5);
+  await page.getByRole('button',{name:'Sync Scroll',exact:true}).click();await api(page,async({engine})=>engine.getViewport('panel-A').setImageIdIndex(16));await page.waitForTimeout(250);
+  assert.equal(await api(page,({engine})=>engine.getViewport('panel-B').getCurrentImageIdIndex()),5);
+  console.log('PASS physical CT/MR Sync Scroll ON/OFF');
+  await load('2.25.411');await page.locator('.series-card').filter({hasText:'SYNTHETIC CR'}).waitFor();
+  assert.equal(await page.locator('.patient-group').count(),2,'New patient retains previous studies');
+  await page.locator('.series-card').filter({hasText:'SYNTHETIC CR'}).click();
+  await api(page,async({engine})=>{const v=engine.getViewport('panel-A');await v.setImageIdIndex(0);v.setZoom(2);v.setPan([31,17]);v.render();});
+  await api(page,async({engine})=>engine.getViewport('panel-A').setImageIdIndex(1));await page.waitForTimeout(100);
+  const second=await api(page,({engine})=>{const v=engine.getViewport('panel-A');return {zoom:v.getZoom(),pan:v.getPan()};});assert.ok(Math.abs(second.zoom-1)<.001);assert.ok(Math.hypot(...second.pan)<.01);
+  await api(page,async({engine})=>engine.getViewport('panel-A').setImageIdIndex(0));await page.waitForTimeout(100);
+  const first=await api(page,({engine})=>{const v=engine.getViewport('panel-A');return {zoom:v.getZoom(),pan:v.getPan()};});assert.ok(Math.abs(first.zoom-2)<.001);assert.ok(Math.hypot(first.pan[0]-31,first.pan[1]-17)<.01);
+  await page.getByRole('button',{name:'RADAZ XRAY — viewer-dən çıxar',exact:true}).click();assert.equal(await page.locator('.patient-group').count(),1);assert.equal(await page.locator('.series-card').count(),2);
+  console.log('PASS XR independent presentation and patient-only removal');
+  await page.locator('.series-card').filter({hasText:'SYNTHETIC CT'}).click();
+  await page.getByRole('button',{name:'MPR açılış seçimləri',exact:true}).click();await page.getByRole('menuitem',{name:'Coronal',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelectorAll('.inline-mpr-grid [data-has-image="true"]').length===2&&!document.querySelector('.viewport-loading'));
+  await page.getByRole('button',{name:'MPR açılış seçimləri',exact:true}).click();await page.getByRole('menuitem',{name:'Sagittal',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelectorAll('.inline-mpr-grid [data-has-image="true"]').length===3);
+  assert.deepEqual(await page.locator('.inline-mpr-grid [data-panel]').evaluateAll(nodes=>nodes.map(n=>n.dataset.panel)),['MA','MC','MS']);
+  assert.ok(await page.locator('.inline-mpr-grid .localizer-line').count()>=6);
+  const beforeCross=await api(page,({engine})=>['MC','MS'].map(id=>engine.getViewport('panel-'+id).getCurrentImageIdIndex()));
+  const cross=await page.locator('[data-panel="MA"] .localizer-center-hit').boundingBox();assert.ok(cross);
+  await page.mouse.move(cross.x+cross.width/2,cross.y+cross.height/2);await page.mouse.down();
+  await page.mouse.move(cross.x+cross.width/2+42,cross.y+cross.height/2+37,{steps:8});await page.mouse.up();
+  await page.waitForTimeout(300);
+  const afterCross=await api(page,({engine})=>['MC','MS'].map(id=>engine.getViewport('panel-'+id).getCurrentImageIdIndex()));
+  assert.ok(afterCross.every((index,i)=>index!==beforeCross[i]),'MPR intersection must move both linked anatomical planes');
+  await page.screenshot({path:'outputs/features-041-qa/inline-mpr.png'});
+  const popup=context.waitForEvent('page');await page.getByRole('button',{name:'MPR rekonstruksiya',exact:true}).click();const mpr=await popup;
+  await mpr.locator('[data-panel="MA"][data-has-image="true"]').waitFor();const count=context.pages().length;
+  await page.getByRole('button',{name:'MPR rekonstruksiya',exact:true}).click();await page.waitForTimeout(400);assert.equal(context.pages().length,count);assert.ok(windowActions.includes('maximize-records'));
+  console.log('PASS inline MPR planes, cross references and detached reuse/maximize request');
+  await mpr.close();
+  await page.getByRole('button',{name:'2D Viewer',exact:true}).click();
+  const sourceImages=await api(page,({engine})=>engine.getViewport('panel-A').getImageIds());
+  for(const kind of ['archive','pacs']){
+    await page.getByRole('button',{name:kind+' açılış seçimləri',exact:true}).click();
+    await page.getByRole('menuitem',{name:'Əsas viewer-də aç',exact:true}).click();
+    await page.locator('.embedded-records .grouped-records').waitFor();
+    await page.getByRole('button',{name:'Viewer-ə qayıt ×',exact:true}).click();
+    assert.deepEqual(await api(page,({engine})=>engine.getViewport('panel-A').getImageIds()),sourceImages);
+  }
+  // Reverse selection order must produce the same anatomical layout and reuse stacks.
+  await page.locator('.series-card').filter({hasText:'SYNTHETIC MR'}).click();
+  for(const plane of ['Sagittal','Coronal','Coronal']){
+    await page.getByRole('button',{name:'MPR açılış seçimləri',exact:true}).click();await page.getByRole('menuitem',{name:plane,exact:true}).click();
+    await page.waitForFunction(()=>!document.querySelector('.viewport-loading'));
+  }
+  await page.waitForFunction(()=>document.querySelectorAll('.inline-mpr-grid [data-has-image="true"]').length===3);
+  assert.deepEqual(await page.locator('.inline-mpr-grid [data-panel]').evaluateAll(nodes=>nodes.map(n=>n.dataset.panel)),['MA','MC','MS']);
+  console.log('PASS embedded archive/PACS preserve stacks and reverse MPR selection does not duplicate planes');
+  await page.getByRole('button',{name:'Alət panelini fərdiləşdir',exact:true}).click();
+  await page.getByRole('button',{name:'Bağla',exact:true}).click();
+  await page.getByRole('button',{name:'2D Viewer',exact:true}).click();
+  await page.getByRole('button',{name:'Alət panelini fərdiləşdir',exact:true}).click();
+  await page.getByRole('textbox',{name:'Qrupun adı',exact:true}).fill('Renamed tools');
+  await page.getByRole('button',{name:'Renamed tools qrupunu sil',exact:true}).click();
+  assert.equal(await page.locator('[data-toolbar-group^="custom-"]').count(),0);
+  await page.getByRole('button',{name:'Standart düzülüşü bərpa et',exact:true}).click();
+  await page.getByRole('button',{name:'Bağla',exact:true}).click();
+  assert.equal(await page.locator('[data-toolbar-group="annotations"] [data-toolbar-item="measure/menu:length"]').count(),0);
+  await page.getByRole('button',{name:'Ölçmə alətləri',exact:true}).click();await page.getByRole('menuitem',{name:/Uzunluq/}).waitFor();
+  console.log('PASS group rename/delete/reset and menu restoration');
+  assert.deepEqual(errors,[]);console.log('PASS feature regression');
+}catch(error){await page.screenshot({path:'outputs/features-041-qa/failure.png'}).catch(()=>{});console.error(errors);throw error;}finally{await browser.close();}

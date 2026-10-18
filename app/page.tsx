@@ -1,5 +1,9 @@
 'use client';
 import {ToolbarWorkspace, ToolbarGroup, ToolbarOverflow} from '@/components/toolbar-workspace';
+import {bindProjectionPresentation,isProjection,synchronizedSlice,type ImagePresentation} from '@/lib/viewer-navigation';
+import {viewerTitle,releaseVersion} from '@/lib/product-version';
+import ArchivePage from './archive/page';
+import PacsPage from './pacs/page';
 import {useTranslation as useUiTranslation,translate as tr} from '@/lib/i18n';
 
 import { dicomSeriesName, paneId, paneIndex } from '@/lib/dicom-description';
@@ -13,7 +17,7 @@ import {MeasurementSettings,useMeasurementUnit} from '@/components/measurement-s
 import { measurementVariables } from '@/lib/measurement-theme';
 import { RadazLogo, RadazTagline } from '@/components/radaz-logo';
 import { AppHelpMenu, useViewerLicense } from '@/components/app-product';
-import { openRecordsWindow, registerViewer, requestedStudies } from '@/lib/viewer-session';
+import { openRecordsWindow, registerRecordsWindow, registerViewer, requestedStudies } from '@/lib/viewer-session';
 import {publishDetachedSource,readDetachedSource} from '@/lib/detached-viewer';
 import {ViewportMouseControls} from '@/components/viewport-mouse-controls';
 import {AnatomyVolumeControls,AnatomyVolumeOverlay,useAnatomyVolume} from '@/components/anatomy-volume-control';
@@ -107,7 +111,8 @@ function age(birth: string, study: string) {
   return `${+study.slice(0, 4) - +birth.slice(0, 4) - Number(study.slice(4) < birth.slice(4))} yaş`;
 }
 
-function ViewportPane({ anatomyControl, anatomyVolume, anatomyVolumeVisible, anatomyVolumeOpacity, anatomyLabel, windowLevels, windowingSourceId, cursor, onCursor, hideText, id, series, initialImageId, selected, tool, preset, resetToken, clearToken, ready, marks, selectedMarkId, localizers, otherImages, reconstruction, viewAnchor, expanded, concealed, onImageChange, onMoveSource, onMoveIntersection, loadingProgress, onRotateSource, onRotateStart, onPreviewRotateSource, onAddMark, onUpdateMark, onRemoveMark, onSelectMark, onClearImage, onSelect, onToggleMaximize, onDropSeries }: {
+function ViewportPane({ projectionViews, anatomyControl, anatomyVolume, anatomyVolumeVisible, anatomyVolumeOpacity, anatomyLabel, windowLevels, windowingSourceId, cursor, onCursor, hideText, id, series, initialImageId, selected, tool, preset, resetToken, clearToken, ready, marks, selectedMarkId, localizers, otherImages, reconstruction, viewAnchor, expanded, concealed, onImageChange, onMoveSource, onMoveIntersection, loadingProgress, onRotateSource, onRotateStart, onPreviewRotateSource, onAddMark, onUpdateMark, onRemoveMark, onSelectMark, onClearImage, onSelect, onToggleMaximize, onDropSeries }: {
+  projectionViews?: Map<string,ImagePresentation>;
   anatomyControl?:ReturnType<typeof useAnatomyVolume>; anatomyVolume?: AnatomyVolumeResult|null; anatomyVolumeVisible?:boolean; anatomyVolumeOpacity?:number;
   anatomyLabel?: AnatomyLabel | null;
   windowLevels: WindowLevels; windowingSourceId?: string;
@@ -195,6 +200,10 @@ function ViewportPane({ anatomyControl, anatomyVolume, anatomyVolumeVisible, ana
       resizeObserver.observe(element);
       const stopWindowing = bindWindowing(viewer.engine.getViewport(viewportId) as Core.Types.IStackViewport,
         id, windowLevels, viewer.core.Enums.Events, getDefaultWindow, () => windowingScope.current);
+      const stopProjection = bindProjectionPresentation(viewer.engine.getViewport(viewportId) as Core.Types.IStackViewport,
+        projectionViews || new Map(), viewer.core.Enums.Events,
+        image=>viewer.core.metaData.get('sopCommonModule',image)?.sopInstanceUID,
+        ()=>!windowingScope.current.mpr&&isProjection(windowingScope.current.modality));
       const cancelInteraction = () => cancelMeasurementInteraction(group, element);
       const sync = () => {
         const vp = viewer.engine.getViewport(viewportId) as Core.Types.IStackViewport;
@@ -249,7 +258,7 @@ function ViewportPane({ anatomyControl, anatomyVolume, anatomyVolumeVisible, ana
       window.addEventListener('blur', cancelInteraction);
       panel.addEventListener('wheel', wheel, { passive: false, capture: true });
       (element as any).__cleanup = () => {
-        stopWindowing(); resizeObserver.disconnect();
+        stopProjection(); stopWindowing(); resizeObserver.disconnect();
         panel.removeEventListener('pointerdown', activatePane, true); window.removeEventListener('blur', cancelInteraction);
         element.removeEventListener(viewer.core.Enums.Events.STACK_NEW_IMAGE, cancelInteraction);
         element.removeEventListener(viewer.core.Enums.Events.STACK_NEW_IMAGE, sync);
@@ -306,7 +315,7 @@ function ViewportPane({ anatomyControl, anatomyVolume, anatomyVolumeVisible, ana
           vp.setCamera({position:nextCamera.position!.map((v,i)=>v+delta[i]) as Point3,
             focalPoint:nextCamera.focalPoint!.map((v,i)=>v+delta[i]) as Point3});
         }
-      } else if (camera) vp.setCamera(camera);
+      } else if (camera && !isProjection(series.modality)) vp.setCamera(camera);
       vp.render(); setSlice(vp.getCurrentImageIdIndex());
       const currentImageId = vp.getCurrentImageId() || '';
       setImageId(currentImageId); onImageChange(id, currentImageId); setError('');
@@ -418,6 +427,11 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   const [anatomyVolumeOpen,setAnatomyVolumeOpen]=useState(false);
   const [anatomyFocus,setAnatomyFocus]=useState<Point3|null>(null);
   const [seriesList, setSeriesList] = useState<Series[]>([]);
+  const projectionViews = useRef(new Map<string,ImagePresentation>()).current;
+  const [syncScroll,setSyncScroll]=useState(false);
+  const [recordsPage,setRecordsPage]=useState<'archive'|'pacs'|null>(null);
+  const [inlinePlanes,setInlinePlanes]=useState<('AX'|'COR'|'SAG')[]|null>(null);
+  useEffect(()=>{document.title=viewerTitle;},[]);
   const [assigned, setAssigned] = useState<Record<string, string>>({});
   const [active, setActive] = useState('A');
   const [layout, setLayout] = useState({ rows: 1, columns: 1 });
@@ -476,9 +490,9 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   const listRef = useRef<Series[]>([]);
   const importEpoch = useRef(0);
   const sourceSerial = useRef(0);
-  const openedFiles = useRef<File[]>([]);
   const mediaFiles = useRef(new Set<string>());
   const dismissedMedia = useRef(new Set<string>());
+  const dismissedMediaSeries = useRef(new Set<string>());
   const mediaSeries = useRef(new Map<string, Series>());
   const mergeMedia = (items: Series[]) => {
     const copies = [...mediaSeries.current.values()];
@@ -494,6 +508,29 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   const [mprProgress, setMprProgress] = useState<LoadingProgress | null>(null);
   const mprBuildEpoch = useRef(0);
   const mediaId = (session: string, item: MediaImage) => `media:${item.archived ? "archive" : session}:${item.studyId}/${item.seriesUID}`;
+  const removeSeries = useCallback((removed: Series[]) => {
+    const removedKeys=new Set(removed.map(s=>s.id));
+    const next=listRef.current.filter(s=>!removedKeys.has(s.id));
+    const retained=new Set(next.flatMap(s=>s.imageIds));
+    const ids=new Set(removed.flatMap(s=>s.imageIds).filter(id=>!retained.has(id)));
+    for(const s of removed){mediaSeries.current.delete(s.id);mediaOrder.current.delete(s.id);if(s.mediaSession)dismissedMediaSeries.current.add(s.id);}
+    const mpr=mprDataRef.current;
+    if(mpr&&removedKeys.has(mpr.sourceId)){
+      mprBuildEpoch.current++;setMprProgress(null);mpr.owned.forEach(id=>ids.add(id));
+      mprDataRef.current=null;setMprData(null);gestureRef.current=null;setInlinePlanes(null);setWorkspace('viewer');
+    }
+    listRef.current=next;setSeriesList(next);
+    setAssigned(current=>Object.fromEntries(Object.entries(current).filter(([,id])=>!removedKeys.has(id))));
+    setCurrentImages(current=>Object.fromEntries(Object.entries(current).filter(([,id])=>!ids.has(id))));
+    setMarks(current=>current.filter(mark=>!ids.has(mark.imageId)));setSelectedMarkId(null);
+    void getViewer().then(({tools,core})=>{
+      for(const id of ids){const sop=core.metaData.get('sopCommonModule',id)?.sopInstanceUID;if(sop)projectionViews.delete(sop);}
+      tools.annotation.state.getAllAnnotations().filter(a=>ids.has(a.metadata?.referencedImageId||''))
+        .forEach(a=>tools.annotation.state.removeAnnotation(a.annotationUID!));
+      // Allow React to detach just the affected panes before releasing their buffers.
+      window.setTimeout(()=>{const keep=new Set(listRef.current.flatMap(s=>s.imageIds));releaseLocalDicoms([...ids].filter(id=>!keep.has(id)));},100);
+    });
+  },[projectionViews]);
   const channels = useRef<Map<DetachedMode | 'report', BroadcastChannel>>(new Map());
   const detachedWindows=useRef(new Map<DetachedMode,Window>());
   const detachedSources=useRef(new Map<DetachedMode,()=>void>());
@@ -565,12 +602,9 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         const showDisc = first && importEpoch.current === selectionEpoch;
         if (first) mediaFiles.current.add(session);
         if (showDisc) {
-          const oldIds=listRef.current.flatMap(s=>s.imageIds);
-          for(const prior of mediaFiles.current)if(prior!==session)dismissedMedia.current.add(prior);
-          mediaSeries.current.clear();mediaOrder.current.clear();listRef.current=[];setMarks([]);
           mprBuildEpoch.current++;setMprProgress(null);const oldMpr=mprDataRef.current;
-          if(oldMpr)oldIds.push(...oldMpr.owned);mprDataRef.current=null;setMprData(null);
-          if(oldIds.length)window.setTimeout(()=>releaseLocalDicoms(oldIds),100);
+          mprDataRef.current=null;setMprData(null);setInlinePlanes(null);
+          if(oldMpr)window.setTimeout(()=>releaseLocalDicoms(oldMpr.owned),100);
           setLayout({ rows: 1, columns: 1 }); setLayoutOpen(false); setMaximizedPane(null); setMaximizedMprPane(null);
           setActive('A'); setCurrentImages({}); setSelectedMarkId(null); setPreset(null);
           setWorkspace(detachedMode || 'viewer'); setDatasetVersion(v => v + 1);
@@ -578,6 +612,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         let next = [...mediaSeries.current.values()];
         for (const item of images) {
           const id = mediaId(session, item), existing = next.find(s => s.id === id);
+          if(dismissedMediaSeries.current.has(id))continue;
           if (existing) next = next.map(s => s.id === id ? { ...s, mediaSession: session, discovered: (s.mediaSession === session ? s.discovered || 0 : 0) + 1, loading: true } : s);
           else next.push({ ...item, name: dicomSeriesName(tag => item.tags[tag]), institution: item.tags.x00080080, id, imageIds: [], mediaSession: session, discovered: 1, loading: true });
         }
@@ -593,7 +628,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
 
       },
       async image(session, item, url, signal) {
-        if (dismissedMedia.current.has(session)) return;
+        if (dismissedMedia.current.has(session)||dismissedMediaSeries.current.has(mediaId(session,item))) return;
         const imageId = registerDiskDicom(item.tags, url, item.archived ? new AbortController().signal : signal);
         if (signal.aborted) { releaseLocalDicoms([imageId]); return; }
         const id = mediaId(session, item);
@@ -620,16 +655,16 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         listRef.current = next; setSeriesList(next);
         setStatus('CD/DVD izləməsi bitdi. Köçürülmüş görüntülər Local arxivdə saxlanıldı.');
         if (!removed.length) return;
-        mprBuildEpoch.current++; setMprProgress(null);
         setAssigned(current => Object.fromEntries(Object.entries(current).filter(([, id]) => next.some(s => s.id === id))));
         setCurrentImages(current => Object.fromEntries(Object.entries(current).filter(([, id]) => !ids.has(id))));
         setMarks(current => current.filter(mark => !ids.has(mark.imageId))); setSelectedMarkId(null);
         const mpr = mprDataRef.current;
         if (mpr && removed.some(s => s.id === mpr.sourceId)) {
+          mprBuildEpoch.current++;setMprProgress(null);setInlinePlanes(null);setWorkspace('viewer');
           mpr.owned.forEach(id => ids.add(id)); mprDataRef.current = null; setMprData(null); gestureRef.current = null;
         }
-        setDatasetVersion(v => v + 1);
-        void getViewer().then(({ tools }) => {
+        void getViewer().then(({ tools,core }) => {
+          for(const id of ids){const sop=core.metaData.get('sopCommonModule',id)?.sopInstanceUID;if(sop)projectionViews.delete(sop);}
           tools.annotation.state.getAllAnnotations().filter(a => ids.has(a.metadata?.referencedImageId || ''))
             .forEach(a => tools.annotation.state.removeAnnotation(a.annotationUID!));
         });
@@ -637,12 +672,11 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         window.setTimeout(() => releaseLocalDicoms([...ids]), 100);
       },
       progress(progress) {
-        if (importEpoch.current !== selectionEpoch) return;
         setMediaProgress(progress);
-        if (progress.sessions && (!selectedIdRef.current || mediaSeries.current.has(selectedIdRef.current))) setStatus(`CD/DVD · ${progress.loaded} / ${progress.discovered} görüntü${progress.scanning ? ' · Local arxivə köçürülür…' : progress.loaded + progress.skipped < progress.discovered ? ' · yüklənir…' : ' · Local arxivdən oxunur'}${progress.skipped ? ` · ${progress.skipped} oxunmadı` : ''}`);
+        if (importEpoch.current === selectionEpoch && progress.sessions && (!selectedIdRef.current || mediaSeries.current.has(selectedIdRef.current))) setStatus(`CD/DVD · ${progress.loaded} / ${progress.discovered} görüntü${progress.scanning ? ' · Local arxivə köçürülür…' : progress.loaded + progress.skipped < progress.discovered ? ' · yüklənir…' : ' · Local arxivdən oxunur'}${progress.skipped ? ` · ${progress.skipped} oxunmadı` : ''}`);
         if (!progress.scanning && progress.loaded + progress.skipped >= progress.discovered) {
           let changed = false;
-          for (const [id, s] of mediaSeries.current) if (s.loading && s.discovered === s.imageIds.length) {
+          for (const [id, s] of mediaSeries.current) if (s.loading) {
             mediaSeries.current.set(id, {...s, loading: false}); changed = true;
           }
           if (changed) { const next = mergeMedia(listRef.current); listRef.current = next; setSeriesList(next); }
@@ -701,13 +735,8 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       if (!imported.length) return;
       if (!published) {
         mprBuildEpoch.current++; setMprProgress(null);
-        const previousIds = listRef.current.flatMap(s => s.imageIds);
-        // A new explicit study replaces the Viewer, including retained CD copies.
-        // Only the Viewer references are cleared; Local Archive files are preserved.
-        for (const session of mediaFiles.current) dismissedMedia.current.add(session);
-        mediaSeries.current.clear(); mediaOrder.current.clear(); setMediaProgress(null); setMediaEnabled(false);
-        viewer.tools.annotation.state.removeAllAnnotations();
-        setMarks([]); setSelectedMarkId(null); setMaximizedPane(null); setMaximizedMprPane(null);
+        // Other patients, including temporary CD references, remain in this session.
+        setSelectedMarkId(null); setMaximizedPane(null); setMaximizedMprPane(null);setInlinePlanes(null);setRecordsPage(null);
         setLayout({ rows: 1, columns: 1 }); setLayoutOpen(false);
         const chosen = imported.find(item => item.id === preferredSeriesId) || imported[0];
         const preferred = [...mediaSeries.current.values()].find(item => item.id.replace(/^media:[^:]+:/, '') === chosen.id) || chosen;
@@ -717,13 +746,14 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         mprDataRef.current = null; setMprData(null);
         setWorkspace(detachedMode || 'viewer'); setMprError('');
         setDatasetVersion(version => version + 1);
-        if (previousIds.length) window.setTimeout(() => releaseLocalDicoms(previousIds), 100);
         published = true;
       }
-      const combined = mergeMedia(imported);
-      listRef.current = combined; setSeriesList(combined); openedFiles.current = [...acceptedFiles];
+      const incoming=new Set(imported.map(s=>s.id));
+      for(const s of imported)if(mediaSeries.current.has(s.id))mediaSeries.current.set(s.id,s);
+      const combined = mergeMedia([...listRef.current.filter(s=>!incoming.has(s.id)),...imported]);
+      listRef.current = combined; setSeriesList(combined);
       setLoadProgress({label: 'DICOM yüklənir', done: decoded, total: acceptedFiles.length || files.length});
-      if (!detachedMode) document.title = `${imported[0].patient} · RADAZ Viewer`;
+      if (!detachedMode) document.title = viewerTitle;
       setStatus(`${imported.length} seriya · ${acceptedFiles.length} / ${files.length} görüntü oxunur…`);
     };
     for (const file of files) {
@@ -737,6 +767,11 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         const studyId = get('x0020000d');
         const uid = `${studyId}/${get('x0020000e') || file.name}`;
         const sopUID = get('x00080018');
+        if(!found.has(uid)){
+          const existing=listRef.current.find(s=>s.id.replace(/^media:[^:]+:/,'')===uid);
+          if(existing)found.set(uid,{...existing,ordered:existing.imageIds.map((id,n)=>({id,n:Number(viewer.core.metaData.get('generalImageModule',id)?.instanceNumber??n)})),
+            sopUIDs:new Set(existing.imageIds.map(id=>viewer.core.metaData.get('sopCommonModule',id)?.sopInstanceUID).filter(Boolean))});
+        }
         if (sopUID && found.get(uid)?.sopUIDs.has(sopUID)) { ignored++; continue; }
         const imageId = registerLocalDicom(bytes, ds);
         createdIds.push(imageId);
@@ -786,7 +821,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     finished = true; publish(); discardUnpublished(); setLoadProgress(null);
     if (published) {
       if (!detachedMode) channels.current.forEach((channel, mode) => { if (mode === 'report') return; try { channel.postMessage({ kind: 'SHARED_READY' }); } catch { /* Closed tabs reconnect on demand. */ } });
-      setStatus(`${found.size} seriya · ${files.length - rejected - ignored} DICOM görüntüsü yükləndi${rejected ? ` · ${rejected} fayl keçildi` : ''}`);
+      setStatus(`${found.size} seriya · ${[...found.values()].reduce((n,s)=>n+s.ordered.length,0)} DICOM görüntüsü yükləndi${rejected ? ` · ${rejected} fayl keçildi` : ''}`);
       return true;
     }
     releaseLocalDicoms(createdIds);
@@ -900,13 +935,15 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
 
   const openDetached = (mode: DetachedMode) => {
     const existing=detachedWindows.current.get(mode);
-    if(existing&&!existing.closed){existing.focus();return;}
+    if(existing&&!existing.closed){existing.focus();existing.dispatchEvent(new Event('radaz-maximize-window'));return;}
     const token=sessionStorage.getItem(`radaz-${mode}-handoff`)||crypto.randomUUID();
     connectHandoff(mode,token);sessionStorage.setItem(`radaz-${mode}-handoff`,token);
-    const tab=window.open(`/${mode}?handoff=${encodeURIComponent(token)}`,`radaz-${mode}-${token}`);
+    const tab=window.open(`/${mode}?handoff=${encodeURIComponent(token)}`,`radaz-${mode}-${token}`,`popup=yes,width=${Math.min(1500,screen.availWidth)},height=${Math.min(980,screen.availHeight)},resizable=yes`);
     if(tab){detachedWindows.current.set(mode,tab);tab.focus();}
     else setStatus(`${mode.toUpperCase()} səhifəsi bloklandı. Brauzerdə RADAZ üçün yeni vərəqələrə icazə verin.`);
   };
+
+  useEffect(()=>detachedMode?registerRecordsWindow(detachedMode):undefined,[detachedMode]);
 
   const openReport = () => {
     const handoff = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
@@ -992,6 +1029,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     return () => controller.abort();
   }, [seriesList, layout, limited]);
   const place = (seriesId: string, panel: string) => {
+    setInlinePlanes(null);setRecordsPage(null);
     const next = seriesList.find(series => series.id === seriesId);
     const previous = seriesList.find(series => series.id === assigned[active]) || seriesList.find(series => series.id === assigned.A);
     const changedStudy = !!next && next.studyId !== previous?.studyId;
@@ -1067,6 +1105,28 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     : seriesList.filter(s => s.studyId === currentSeries?.studyId && s.imageIds.length >= 3)
       .sort((a, b) => b.imageIds.length - a.imageIds.length)[0];
   const grouped = groupSeries(seriesList);
+  const syncEligible=workspace==='viewer'&&Object.entries(assigned).filter(([panel,id])=>paneIndex(panel)<layout.rows*layout.columns&&seriesList.some(s=>s.id===id&&['CT','MR'].includes(s.modality)&&s.imageIds.length>1)).length>=2;
+  const syncSignature=useRef('');
+  const syncRevision=useRef(0);
+  useEffect(()=>{
+    if(!syncScroll||!syncEligible){syncSignature.current='';syncRevision.current++;return;}
+    const sourceId=currentImages[active], source=seriesList.find(s=>s.id===assigned[active]);
+    if(!sourceId||!source||!['CT','MR'].includes(source.modality))return;
+    const signature=`${active}:${sourceId}:${Object.values(assigned).join(',')}`;
+    if(signature===syncSignature.current)return;
+    syncSignature.current=signature;const revision=++syncRevision.current;
+    void getViewer().then(async({engine})=>{
+      for(const [panel,id] of Object.entries(assigned)){
+        if(revision!==syncRevision.current)return;
+        if(panel===active||paneIndex(panel)>=layout.rows*layout.columns)continue;
+        const target=seriesList.find(s=>s.id===id);
+        if(!target||!['CT','MR'].includes(target.modality))continue;
+        const index=synchronizedSlice(getLocalizerGeometry(sourceId),target.imageIds.map(getLocalizerGeometry));
+        const vp=engine.getViewport(`panel-${panel}`) as Core.Types.IStackViewport|undefined;
+        if(index!==null&&vp&&vp.getCurrentImageIdIndex()!==index)await vp.setImageIdIndex(index);
+      }
+    }).catch(error=>setStatus(`Sync Scroll: ${String(error)}`));
+  },[syncScroll,syncEligible,currentImages,assigned,active,layout,seriesList]);
   const ctVolume = volumeSeries?.modality === 'CT';
   const availableVolumeStyles = volumeStyles.filter(style => ctVolume ? style.key !== 'mr' : ['mr','mip','minip'].includes(style.key));
   useEffect(() => {
@@ -1238,16 +1298,20 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         </DropdownMenu></ToolbarGroup>}
         {!detachedMode && <ToolbarGroup groupId="cd" order={15} aria-label="CD / DVD"><Button variant="outline" className={`header-control cd-import-command ${mediaEnabled ? 'active' : ''}`} aria-label={tr('ui.import_cd_dvd_b673d')} aria-pressed={mediaEnabled}
           title={mediaEnabled ? 'CD/DVD importunu dayandır; köçürülmüş görüntülər arxivdə qalır' : 'CD/DVD-ni avtomatik aşkar et və aç'} disabled={limited}
-          onClick={() => { if(!mediaEnabled){dismissedMedia.current.clear();mediaFiles.current.clear();} setMediaEnabled(enabled => !enabled); setRailHidden(false); }}>
+          onClick={() => { if(!mediaEnabled){dismissedMedia.current.clear();dismissedMediaSeries.current.clear();mediaFiles.current.clear();} setMediaEnabled(enabled => !enabled); setRailHidden(false); }}>
           <Disc3 size={18}/><span>{tr('ui.import_cd_dvd_b673d')}</span>{mediaEnabled && <span className="status-led"/>}
         </Button></ToolbarGroup>}
       {!detachedMode && <ToolbarGroup className="workspace-launch toolbar-group" role="group" aria-label={tr('ui.view_mode_a87b2')} groupId="workspace" order={20}>
-        <button type="button" aria-label={tr('ui.2d_viewer_b2533')} onClick={() => setWorkspace('viewer')}><ScanLine size={18}/></button>
-        <button type="button" disabled={limited} title={tr('ui.mpr_reconstruction_9bcc7')} aria-label={tr('ui.mpr_reconstruction_9bcc7')} onClick={() => openDetached('mpr')}><b className="mode-letter-icon">MPR</b></button>
-        <button type="button" disabled={limited} title={tr('ui.3d_volume_rendering_8b54e')} aria-label={tr('ui.3d_volume_rendering_8b54e')} onClick={() => openDetached('3d')}><b className="mode-letter-icon">3D</b></button>
+        <button type="button" aria-label={tr('ui.2d_viewer_b2533')} onClick={() => {setWorkspace('viewer');setInlinePlanes(null);setRecordsPage(null);}}><ScanLine size={18}/></button>
+        <div className="workspace-split" key="mpr"><button type="button" disabled={limited} title={tr('ui.mpr_reconstruction_9bcc7')} aria-label={tr('ui.mpr_reconstruction_9bcc7')} onClick={()=>openDetached('mpr')}><b className="mode-letter-icon">MPR</b></button><DropdownMenu><DropdownMenuTrigger asChild><button className="workspace-options" aria-label="MPR açılış seçimləri" disabled={limited}><ChevronDown/></button></DropdownMenuTrigger><DropdownMenuContent>
+ <DropdownMenuItem toolbarId="mpr-main" onSelect={()=>{setRecordsPage(null);setInlinePlanes(null);openMpr();}}>Əsas viewer-də aç</DropdownMenuItem>
+ <DropdownMenuItem toolbarId="mpr-window" onSelect={()=>openDetached('mpr')}>Ayrı pəncərədə aç</DropdownMenuItem>{(['AX','COR','SAG'] as const).map(plane=><DropdownMenuItem toolbarId={`mpr-${plane}`} key={plane} onSelect={()=>{setRecordsPage(null);setLocalizers(true);setMaximizedMprPane(null);setInlinePlanes(current=>(['AX','COR','SAG'] as const).filter(p=>p===plane||(mprDataRef.current?.sourceId===volumeSeries?.id?current||['AX']:['AX']).includes(p)));openMpr();}}>{{AX:'Axial',COR:'Coronal',SAG:'Sagittal'}[plane]}</DropdownMenuItem>)}<DropdownMenuItem toolbarId="mpr-full" onSelect={()=>{setInlinePlanes(null);setRecordsPage(null);openMpr();}}>Full MPR</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>
+        <div className="workspace-split" key="3d"><button type="button" disabled={limited} title={tr('ui.3d_volume_rendering_8b54e')} aria-label={tr('ui.3d_volume_rendering_8b54e')} onClick={()=>openDetached('3d')}><b className="mode-letter-icon">3D</b></button><DropdownMenu><DropdownMenuTrigger asChild><button className="workspace-options" aria-label="3D açılış seçimləri" disabled={limited}><ChevronDown/></button></DropdownMenuTrigger><DropdownMenuContent>
+ <DropdownMenuItem toolbarId="3d-main" onSelect={()=>{setRecordsPage(null);setInlinePlanes(null);setWorkspace('3d');}}>Əsas viewer-də aç</DropdownMenuItem>
+ <DropdownMenuItem toolbarId="3d-window" onSelect={()=>openDetached('3d')}>Ayrı pəncərədə aç</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>
         <button type="button" disabled={limited} title={tr('ui.ai_assistant_eb79d')} aria-label={tr('ui.ai_assistant_eb79d')} onClick={openReport}><Sparkles size={18}/><span>{tr('ui.ai_assistant_eb79d')}</span></button>
-        <button type="button" title={tr('ui.local_archive_c13fe')} aria-label={tr('ui.local_archive_c13fe')} onClick={async () => { if (!await openRecordsWindow('archive')) setStatus('Local arxiv vərəqəsi açıla bilmədi'); }}><Database size={18}/><span>{tr('ui.local_archive_c13fe')}</span></button>
-        <button type="button" title={tr('ui.pacs_studies_d77a3')} aria-label={tr('ui.pacs_studies_d77a3')} onClick={async () => { if (!await openRecordsWindow('pacs')) setStatus('PACS vərəqəsi açıla bilmədi'); }}><ServerCog size={18}/><span>PACS</span></button>
+        <div className="workspace-split" key="archive"><button type="button" title={tr('ui.local_archive_c13fe')} aria-label={tr('ui.local_archive_c13fe')} onClick={async () => { if (!await openRecordsWindow('archive')) setStatus('Local arxiv vərəqəsi açıla bilmədi'); }}><Database size={18}/><span>{tr('ui.local_archive_c13fe')}</span></button><DropdownMenu><DropdownMenuTrigger asChild><button className="workspace-options" aria-label="archive açılış seçimləri"><ChevronDown/></button></DropdownMenuTrigger><DropdownMenuContent><DropdownMenuItem toolbarId="archive-main" onSelect={()=>setRecordsPage('archive')}>Əsas viewer-də aç</DropdownMenuItem><DropdownMenuItem toolbarId="archive-window" onSelect={()=>void openRecordsWindow('archive')}>Ayrı pəncərədə aç</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>
+        <div className="workspace-split" key="pacs"><button type="button" title={tr('ui.pacs_studies_d77a3')} aria-label={tr('ui.pacs_studies_d77a3')} onClick={async () => { if (!await openRecordsWindow('pacs')) setStatus('PACS vərəqəsi açıla bilmədi'); }}><ServerCog size={18}/><span>PACS</span></button><DropdownMenu><DropdownMenuTrigger asChild><button className="workspace-options" aria-label="pacs açılış seçimləri"><ChevronDown/></button></DropdownMenuTrigger><DropdownMenuContent><DropdownMenuItem toolbarId="pacs-main" onSelect={()=>setRecordsPage('pacs')}>Əsas viewer-də aç</DropdownMenuItem><DropdownMenuItem toolbarId="pacs-window" onSelect={()=>void openRecordsWindow('pacs')}>Ayrı pəncərədə aç</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>
       </ToolbarGroup>}
         {!limited && detachedMode !== '3d' && <ViewerOutputControls panes={Object.entries(currentImages).map(([panel, imageId]) => ({ panel, imageId, series: [...seriesList, ...(mprData?.planes || [])].find(item => item.imageIds.includes(imageId)) }))} panel={workspace === 'mpr' ? mprActive : active} imageId={currentImages[workspace === 'mpr' ? mprActive : active]} series={workspace === 'mpr' ? mprData?.planes.find(item => item.imageIds.includes(currentImages[mprActive])) : currentSeries} allSeries={seriesList} datasetVersion={datasetVersion} onStatus={setStatus}/>}
       </div>
@@ -1282,14 +1346,14 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         {!limited&&workspace!=='3d'&&<ToolbarGroup className="toolbar-group" groupId="anatomy" order={60}><Button variant="ghost" className="header-control anatomy-trigger" aria-label="TotalSegmentator" title="TotalSegmentator · CT / MR" onClick={()=>setAnatomyVolumeOpen(value=>!value)}><Layers3 size={18}/><span>{tr('ui.ct_mri_anatomy_f433a')}</span></Button></ToolbarGroup>}
         {!limited && detachedMode !== '3d' && <ToolbarGroup className="toolbar-group" role="group" aria-label={tr('ui.navigation_and_measurement_e7a8e')} groupId="measure" order={70}>{viewTools.map(t => <Button key={t.id} variant="ghost" className={`header-control view-tool ${tool === t.id ? 'selected-tool' : ''}`} aria-pressed={tool === t.id} title={`${t.label} · ${t.hint}`} onClick={() => setTool(t.id)}><t.icon size={17}/><span>{t.label}</span></Button>)}
         <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className="header-control" title={tr('ui.measurement_tools_0762c')} aria-label={tr('ui.measurement_tools_0762c')}><Ruler size={17}/><span>{tr('ui.measurements_a4480')}</span><ChevronDown size={14}/></Button></DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="header-menu">{measureTools.map(t => <DropdownMenuItem key={t.id} onSelect={() => setTool(t.id)} className={tool === t.id ? 'menu-selected' : ''}><t.icon size={16}/>{t.label}<kbd>{t.hint}</kbd></DropdownMenuItem>)}<div className="menu-separator"/><DropdownMenuItem onSelect={() => setClearToken(x => x + 1)}><Trash2 size={16}/> {tr('ui.delete_all_on_current_slice_cc1ac')}<kbd>Ctrl+D</kbd></DropdownMenuItem><div className="menu-separator"/><DropdownMenuItem onSelect={()=>setMeasurementSettingsOpen(true)}><Settings2 size={16}/>Ölçü ayarları <kbd>{measurementUnit==='cm'?'sm':'mm'}</kbd></DropdownMenuItem><div className="menu-hint">{tr('ui.select_a_measurement_delete_to_remove_7f481')}</div></DropdownMenuContent>
+          <DropdownMenuContent align="end" className="header-menu">{measureTools.map(t => <DropdownMenuItem key={t.id} toolbarId={t.id} onSelect={() => setTool(t.id)} className={tool === t.id ? 'menu-selected' : ''}><t.icon size={16}/>{t.label}<kbd>{t.hint}</kbd></DropdownMenuItem>)}<div className="menu-separator"/><DropdownMenuItem onSelect={() => setClearToken(x => x + 1)}><Trash2 size={16}/> {tr('ui.delete_all_on_current_slice_cc1ac')}<kbd>Ctrl+D</kbd></DropdownMenuItem><div className="menu-separator"/><DropdownMenuItem onSelect={()=>setMeasurementSettingsOpen(true)}><Settings2 size={16}/>Ölçü ayarları <kbd>{measurementUnit==='cm'?'sm':'mm'}</kbd></DropdownMenuItem><div className="menu-hint">{tr('ui.select_a_measurement_delete_to_remove_7f481')}</div></DropdownMenuContent>
         </DropdownMenu>
         </ToolbarGroup>}
         {!limited && detachedMode !== '3d' && <ToolbarGroup className="toolbar-group" role="group" aria-label={tr('ui.window_and_localizer_1e413')} groupId="window" order={80}>
         <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className="header-control" title={tr('ui.window_preset_b14ad')} aria-label={tr('ui.window_preset_menu_148b6')}><SlidersHorizontal size={17}/><span>{tr('ui.window_preset_b14ad')}</span><ChevronDown size={14}/></Button></DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="header-menu preset-menu">{presets.map(p => <DropdownMenuItem key={p.label} onSelect={() => { if (workspace === 'mpr' && mprData) { const plane = mprData.planes[{ MS:0, MC:1, MA:2 }[mprActive as 'MS'|'MC'|'MA'] || 0]; setPreset({ ...p, token: Date.now(), panel: mprActive, seriesId: plane.id, imageId: currentImages[mprActive] || '' }); } else if (assigned[active]) setPreset({ ...p, token: Date.now(), panel: active, seriesId: assigned[active], imageId: currentImages[active] || '' }); }}><span>{p.label}</span><small>WL {p.wl} · WW {p.ww}</small></DropdownMenuItem>)}</DropdownMenuContent>
         </DropdownMenu>
-        <Button variant="ghost" className={`header-control localizer-toggle ${localizers ? 'is-on' : ''}`} aria-label={tr('ui.localizer_lines_1e289')} aria-pressed={localizers} title={tr('ui.show_localizer_lines_between_compatible_serie_67285')} onClick={() => setLocalizers(value => !value)}><Crosshair size={17}/><span>{tr('ui.localizer_8c497')}</span></Button></ToolbarGroup>}
+        <Button variant="ghost" className={`header-control sync-scroll ${syncScroll?'is-on':''}`} disabled={!syncEligible} aria-label="Sync Scroll" aria-pressed={syncScroll} title="Sync Scroll · uyğun KT/MRT kəsiklərini sinxron vərəqlə" onClick={()=>setSyncScroll(value=>!value)}><MoveVertical size={17}/><b className="sync-symbol">↔</b></Button><Button variant="ghost" className={`header-control localizer-toggle ${localizers ? 'is-on' : ''}`} aria-label={tr('ui.localizer_lines_1e289')} aria-pressed={localizers} title={tr('ui.show_localizer_lines_between_compatible_serie_67285')} onClick={() => setLocalizers(value => !value)}><Crosshair size={17}/><span>{tr('ui.localizer_8c497')}</span></Button></ToolbarGroup>}
         {!limited && detachedMode !== '3d' && <ToolbarGroup className="toolbar-group" role="group" aria-label={tr('ui.pane_layout_and_size_6ffc9')} groupId="layout" order={90}>
         {workspace === 'viewer' && <DropdownMenu open={layoutOpen} onOpenChange={setLayoutOpen}><DropdownMenuTrigger asChild><Button variant="outline" className="header-control layout-trigger" title={`${layout.columns}×${layout.rows} panel düzülüşü`} aria-label={tr('ui.pane_layout_586c7')}><Grid2X2 size={18}/><span>{layout.columns}×{layout.rows}</span><ChevronDown size={14}/></Button></DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="layout-menu" onMouseLeave={() => setLayoutHover(layout)}><div className="layout-caption">{tr('ui.pane_layout_586c7')}<strong>{layoutHover.columns} × {layoutHover.rows}</strong></div><div className="layout-matrix" role="grid" aria-label="1–6 sətir və sütun seçin">
@@ -1326,7 +1390,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         <div className="rail-heading"><div><span className="eyebrow">{tr('ui.patient_and_series_list_cba5e')}</span><h2>{tr('ui.studies_b5e01')}<em>{grouped.reduce((count, p) => count + p.studies.length, 0)}</em></h2></div></div>
         <div className="series-list" role="region" aria-label={tr('ui.series_by_patient_and_study_aa453')} tabIndex={0}>
           {grouped.map(patient => <section className="patient-group" key={patient.id}>
-            <div className="patient-group-heading"><span className="group-heading-label">{tr('ui.patient_name_d4d6d')}</span><h3>{patient.name}</h3>
+            <div className="patient-group-heading"><button className="patient-close" disabled={!!loadProgress} aria-label={`${patient.name} — viewer-dən çıxar`} title="Yalnız viewer siyahısından çıxar" onClick={()=>removeSeries(patient.studies.flatMap(study=>study.modalities.flatMap(m=>m.series.map(s=>s.item))))}>×</button><span className="group-heading-label">{tr('ui.patient_name_d4d6d')}</span><h3>{patient.name}</h3>
               {patient.studies.map(study => <div className="patient-study-summary" key={study.id}><span><span className="group-heading-label">{tr('ui.study_date_dda53')}</span><strong>{formatDate(study.date)}</strong></span><div className="study-modality-summary">{study.modalities.map(modality => <span key={modality.code}><b>{modalityLabel(modality.code)}</b><small>{modality.series.length} {tr('ui.series_1ebd2')}</small></span>)}</div></div>)}
             </div>
             {patient.studies.map(study => <div className="study-group" key={study.id}>
@@ -1351,19 +1415,19 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
           } : null}/>
         </div>}
       </aside>}
-      <section className="main-area">
+      <section className="main-area">{recordsPage&&<section className="embedded-records" aria-label={recordsPage==='archive'?'Local arxiv':'PACS'}><button className="embedded-close" onClick={()=>setRecordsPage(null)}>Viewer-ə qayıt ×</button>{recordsPage==='archive'?<ArchivePage embedded/>:<PacsPage embedded/>}</section>}
         {anatomyVolumeOpen&&!limited&&<AnatomyVolumeControls editing={workspace!=='3d'} control={anatomyVolume} source={anatomyVolumeSeries} onFocus={world=>{if(workspace==='3d')setAnatomyFocus(world);else if(workspace==='mpr')moveMprIntersection(world);else if(anatomyVolumeSeries){const index=closestSlice(anatomyVolumeSeries.imageIds,world,getLocalizerGeometry);if(index!==null)void getViewer().then(({engine})=>{const pane=engine.getViewport(`panel-${active}`) as Core.Types.IStackViewport|undefined;if(pane)void pane.setImageIdIndex(index).catch(error=>setStatus(String(error)));});}}} onPick={()=>{setAnatomyLabel(null);setTool('anatomy-volume');}} onClose={()=>{setAnatomyVolumeOpen(false);if(tool==='anatomy-volume')setTool('wl');}}/>}
         {anatomyLabel&&tool==='anatomy'&&<div className="anatomy-placement" role="status"><Crosshair size={18}/><span><strong>{anatomyLabel.text.split('\n')[0]}</strong> {tr('ui._pane_b5c88')}{anatomyLabel.panel}{tr('ui._click_the_structure_once_44e32')}</span><button onClick={()=>{setAnatomyLabel(null);setTool('wl');}}>{tr('ui.cancel_esc_bd665')}</button></div>}
         {workspace === 'viewer' && <div className="viewport-grid" style={{ gridTemplateColumns: `repeat(${maximizedPane ? 1 : layout.columns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${maximizedPane ? 1 : layout.rows}, minmax(0, 1fr))` }}>
-          {Array.from({ length: layout.rows * layout.columns }, (_, index) => paneId(index)).filter(id => !maximizedPane || id === maximizedPane).map(id => { const otherImages = id !== active && assigned[active] && currentImages[active] ? [{ panel: active, imageId: currentImages[active] }] : []; return <ViewportPane anatomyControl={anatomyVolume} anatomyVolume={volumeResultFor(seriesList.find(s=>s.id===assigned[id]))} anatomyVolumeVisible={anatomyVolume.visible} anatomyVolumeOpacity={anatomyVolume.opacity} anatomyLabel={anatomyLabel?.panel===id?anatomyLabel:null} windowLevels={windowLevels} key={`${id}-${datasetVersion}-${assigned[id] || "empty"}`} id={id} initialImageId={currentImages[id]} series={seriesList.find(s => s.id === assigned[id])} selected={active === id} tool={limited ? 'scroll' : tool} cursor={cursor} onCursor={onCursor} hideText={hideText} preset={preset} resetToken={resetToken} clearToken={clearToken} ready={ready} marks={marks} selectedMarkId={selectedMarkId} localizers={localizers && id !== active} otherImages={otherImages} onImageChange={onImageChange} onMoveSource={onMoveSource} onAddMark={onAddMark} onUpdateMark={onUpdateMark} onRemoveMark={onRemoveMark} onSelectMark={markId => { setActive(id); setSelectedMarkId(markId); }} onClearImage={onClearImage} onSelect={() => { setActive(id); setSelectedMarkId(null); }} onToggleMaximize={() => { setActive(id); setMaximizedPane(current => current === id ? null : id); }} onDropSeries={sid => place(sid, id)}/>; })}
+          {Array.from({ length: layout.rows * layout.columns }, (_, index) => paneId(index)).filter(id => !maximizedPane || id === maximizedPane).map(id => { const otherImages = id !== active && assigned[active] && currentImages[active] ? [{ panel: active, imageId: currentImages[active] }] : []; return <ViewportPane projectionViews={projectionViews} anatomyControl={anatomyVolume} anatomyVolume={volumeResultFor(seriesList.find(s=>s.id===assigned[id]))} anatomyVolumeVisible={anatomyVolume.visible} anatomyVolumeOpacity={anatomyVolume.opacity} anatomyLabel={anatomyLabel?.panel===id?anatomyLabel:null} windowLevels={windowLevels} key={`${id}-${datasetVersion}-${assigned[id] || "empty"}`} id={id} initialImageId={currentImages[id]} series={seriesList.find(s => s.id === assigned[id])} selected={active === id} tool={limited ? 'scroll' : tool} cursor={cursor} onCursor={onCursor} hideText={hideText} preset={preset} resetToken={resetToken} clearToken={clearToken} ready={ready} marks={marks} selectedMarkId={selectedMarkId} localizers={localizers && id !== active} otherImages={otherImages} onImageChange={onImageChange} onMoveSource={onMoveSource} onAddMark={onAddMark} onUpdateMark={onUpdateMark} onRemoveMark={onRemoveMark} onSelectMark={markId => { setActive(id); setSelectedMarkId(markId); }} onClearImage={onClearImage} onSelect={() => { setActive(id); setSelectedMarkId(null); }} onToggleMaximize={() => { setActive(id); setMaximizedPane(current => current === id ? null : id); }} onDropSeries={sid => place(sid, id)}/>; })}
         </div>}
         {workspace === 'mpr' && <>
           {mprError && <div className="mpr-error-notice" role="alert">{mprError}</div>}
-          <div className={`mpr-grid ${maximizedMprPane ? 'maximized' : ''}`}>
-            {(['SAG','COR','AX'] as const).map((plane,index)=>({plane,index,id:['MS','MC','MA'][index]})).map(({plane,index,id})=>{
+          <div className={`mpr-grid ${inlinePlanes?'inline-mpr-grid':''} ${maximizedMprPane ? 'maximized' : ''}`} style={inlinePlanes?{gridTemplateColumns:`repeat(${maximizedMprPane?1:inlinePlanes.length},minmax(0,1fr))`,gridTemplateRows:'1fr'}:undefined}>
+            {(inlinePlanes||(['SAG','COR','AX'] as const)).map(plane=>({plane,index:{SAG:0,COR:1,AX:2}[plane],id:{SAG:'MS',COR:'MC',AX:'MA'}[plane]})).map(({plane,index,id})=>{
               const shown=mprData?.planes[index] || (plane==='AX'?mprPreview:undefined);
               const progress=!shown?.imageIds.length ? mprProgress || sourceLoading : null;
-              return <ViewportPane anatomyControl={anatomyVolume} anatomyVolume={volumeResultFor(seriesList.find(s=>s.id===mprData?.sourceId))} anatomyVolumeVisible={anatomyVolume.visible} anatomyVolumeOpacity={anatomyVolume.opacity} windowLevels={windowLevels} windowingSourceId={mprData?.sourceId || mprPreview?.id} key={`${id}-${mprData?.sourceId || mprPreview?.id || 'waiting'}`} id={id} initialImageId={currentImages[id]} series={shown} loadingProgress={progress} reconstruction={mprSettings[plane]} viewAnchor={mprData?.pivot} expanded={maximizedMprPane===id} concealed={!!maximizedMprPane&&maximizedMprPane!==id} selected={mprActive===id} tool={limited?'scroll':tool} cursor={cursor} onCursor={onCursor} hideText={hideText} preset={preset} resetToken={resetToken} clearToken={clearToken} ready={ready} marks={marks} selectedMarkId={selectedMarkId} localizers={localizers}
+              return <ViewportPane projectionViews={projectionViews} anatomyControl={anatomyVolume} anatomyVolume={volumeResultFor(seriesList.find(s=>s.id===mprData?.sourceId))} anatomyVolumeVisible={anatomyVolume.visible} anatomyVolumeOpacity={anatomyVolume.opacity} windowLevels={windowLevels} windowingSourceId={mprData?.sourceId || mprPreview?.id} key={`${id}-${mprData?.sourceId || mprPreview?.id || 'waiting'}`} id={id} initialImageId={currentImages[id]} series={shown} loadingProgress={progress} reconstruction={mprSettings[plane]} viewAnchor={mprData?.pivot} expanded={maximizedMprPane===id} concealed={!!maximizedMprPane&&maximizedMprPane!==id} selected={mprActive===id} tool={limited?'scroll':tool} cursor={cursor} onCursor={onCursor} hideText={hideText} preset={preset} resetToken={resetToken} clearToken={clearToken} ready={ready} marks={marks} selectedMarkId={selectedMarkId} localizers={localizers}
                 otherImages={(['MS','MC','MA']).filter(other=>other!==id).map(other=>({panel:other,imageId:currentImages[other] || ''})).filter(item=>item.imageId)}
                 onImageChange={onImageChange} onMoveSource={moveMprSource} onMoveIntersection={moveMprIntersection} onRotateSource={rotateMprSource} onRotateStart={beginMprRotation} onPreviewRotateSource={(source,target,radians)=>updateMprRotation(source,target,radians)}
                 onAddMark={onAddMark} onUpdateMark={onUpdateMark} onRemoveMark={onRemoveMark} onClearImage={onClearImage} onSelectMark={markId=>{setMprActive(id);setSelectedMarkId(markId);}} onSelect={()=>{setMprActive(id);setSelectedMarkId(null);}} onToggleMaximize={()=>{setMprActive(id);setMaximizedMprPane(current=>current===id?null:id);}} onDropSeries={sid=>place(sid,'A')}/>;
@@ -1371,7 +1435,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
           </div>
         </>}
         {workspace === '3d' && <VolumePreview focusPoint={anatomyFocus} anatomy={volumeResultFor(volumeSeries)} anatomyAppearance={anatomyVolume.appearance} series={volumeSeries} sourceProgress={sourceLoading} preset={volumePreset} threshold={volumeThreshold} opacity={volumeOpacity} settings={volumeSettings} resetToken={volumeResetToken} onThresholdChange={setVolumeThreshold} onOpacityChange={setVolumeOpacity} onSettingsChange={setVolumeSettings} />}
-        <footer className="statusbar"><div><span className="status-led"/> {ready ? 'Cornerstone3D hazırdır' : 'Görüntüləmə hazırlanır'} <span className="status-sep">/</span> <span>{workspace === 'mpr' ? `MPR · ${mprSettings[panePlane[mprActive as keyof typeof panePlane] || 'AX'].mode}` : workspace === '3d' ? '3D görünüş' : `Aktiv panel ${active}`}</span><span className="status-sep">/</span>{status}<span className="status-sep">/</span><span aria-label={tr('ui.licence_status_2eb16')}>{licenseStatus}</span></div></footer>
+        <footer className="statusbar"><div><span className="viewer-version">v{releaseVersion}</span><span className="status-led"/> {ready ? 'Cornerstone3D hazırdır' : 'Görüntüləmə hazırlanır'} <span className="status-sep">/</span> <span>{workspace === 'mpr' ? `MPR · ${mprSettings[panePlane[mprActive as keyof typeof panePlane] || 'AX'].mode}` : workspace === '3d' ? '3D görünüş' : `Aktiv panel ${active}`}</span><span className="status-sep">/</span>{status}<span className="status-sep">/</span><span aria-label={tr('ui.licence_status_2eb16')}>{licenseStatus}</span></div></footer>
       </section>
     </div>
   </main></ToolbarWorkspace>;

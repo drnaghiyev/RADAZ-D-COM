@@ -1,15 +1,22 @@
 "use client"
 
 import * as React from "react"
+import {createPortal} from "react-dom"
 import { CheckIcon, ChevronRightIcon, CircleIcon } from "lucide-react"
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
+import {useToolbarHome,PortableMenuItem,toolbarLabel} from '../toolbar-customization'
+const ToolbarMenuOpen=React.createContext(true)
+const ClosedMenu=React.createContext(false)
 
 function DropdownMenu({
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
-  return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} />
+  const home=useToolbarHome();
+  const [localOpen,setLocalOpen]=React.useState(!!props.defaultOpen);
+  const open=props.open??localOpen;
+  return <ToolbarMenuOpen.Provider value={open}><DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} open={open} onOpenChange={value=>{setLocalOpen(value);props.onOpenChange?.(value);}} modal={home?false:props.modal}/></ToolbarMenuOpen.Provider>
 }
 
 function DropdownMenuPortal({
@@ -36,9 +43,15 @@ function DropdownMenuContent({
   sideOffset = 4,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
+  const home=useToolbarHome();
+  const open=React.useContext(ToolbarMenuOpen);
+  // Closed Radix Content still installs focus/outside handlers. Keep only the
+  // command registrations mounted, so pinning never interferes with other menus.
+  if(home&&!open)return typeof document==='undefined'?null:createPortal(<ClosedMenu.Provider value={true}><div hidden data-toolbar-menu={home} data-state="closed">{props.children}</div></ClosedMenu.Provider>,document.body);
   return (
     <DropdownMenuPrimitive.Portal>
       <DropdownMenuPrimitive.Content
+        data-toolbar-menu={home||undefined}
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}
         className={cn(
@@ -62,14 +75,19 @@ function DropdownMenuGroup({
 function DropdownMenuItem({
   className,
   inset,
+  toolbarId,
   variant = "default",
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Item> & {
   inset?: boolean
   variant?: "default" | "destructive"
+  toolbarId?: string
 }) {
-  return (
-    <DropdownMenuPrimitive.Item
+  const label=toolbarLabel(props.children);
+  const closed=React.useContext(ClosedMenu);
+  const icons=React.Children.toArray(props.children).filter(child=>React.isValidElement(child)&&child.type!=='kbd'&&!toolbarLabel(child));
+  return <PortableMenuItem id={toolbarId} label={label} command={<button type="button" className={`header-control ${className||''}`} aria-label={label} title={label} disabled={props.disabled} onClick={event=>{props.onClick?.(event as any);if(!event.defaultPrevented)props.onSelect?.(new Event('select',{cancelable:true}));}}>{icons.length?icons:<b className="mode-letter-icon">{label.slice(0,3)}</b>}<span>{label}</span></button>}>
+    {closed?<span>{props.children}</span>:<DropdownMenuPrimitive.Item
       data-slot="dropdown-menu-item"
       data-inset={inset}
       data-variant={variant}
@@ -78,8 +96,8 @@ function DropdownMenuItem({
         className
       )}
       {...props}
-    />
-  )
+    />}
+  </PortableMenuItem>
 }
 
 function DropdownMenuCheckboxItem({
@@ -88,6 +106,7 @@ function DropdownMenuCheckboxItem({
   checked,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.CheckboxItem>) {
+  if(React.useContext(ClosedMenu))return null;
   return (
     <DropdownMenuPrimitive.CheckboxItem
       data-slot="dropdown-menu-checkbox-item"
@@ -124,6 +143,7 @@ function DropdownMenuRadioItem({
   children,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.RadioItem>) {
+  if(React.useContext(ClosedMenu))return null;
   return (
     <DropdownMenuPrimitive.RadioItem
       data-slot="dropdown-menu-radio-item"
@@ -206,6 +226,7 @@ function DropdownMenuSubTrigger({
 }: React.ComponentProps<typeof DropdownMenuPrimitive.SubTrigger> & {
   inset?: boolean
 }) {
+  if(React.useContext(ClosedMenu))return null;
   return (
     <DropdownMenuPrimitive.SubTrigger
       data-slot="dropdown-menu-sub-trigger"

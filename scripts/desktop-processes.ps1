@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory=$true)][string]$InstallRoot,
-  [ValidateSet('Quiesce','StopRuntime','Owner','RetireWatch')][string]$Action = 'Quiesce',
+  [ValidateSet('Quiesce','StopRuntime','StopServices','Owner','RetireWatch','InUse')][string]$Action = 'Quiesce',
   [string]$Version,
   [int]$Port = 5173
 )
@@ -11,6 +11,16 @@ if ($Version -and $Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid runtime
 $scopedVersion = $Version -and $Action -ne 'RetireWatch'
 $scope = if ($scopedVersion) { Join-Path $versions $Version } else { $versions }
 $processes = @(Get-CimInstance Win32_Process)
+if ($Action -eq 'InUse') {
+  $pattern = [regex]::Escape($versions + '\') + '(\d+\.\d+\.\d+)\\'
+  $used = @($processes | ForEach-Object {
+    foreach ($text in @($_.ExecutablePath, $_.CommandLine)) {
+      if ($text) { foreach ($match in [regex]::Matches($text, $pattern, 'IgnoreCase')) { $match.Groups[1].Value } }
+    }
+  } | Sort-Object -Unique)
+  @{versions=$used} | ConvertTo-Json -Compress
+  exit 0
+}
 # Never stop this controller, its invoking watcher, or any ancestor. In
 # particular a gateway may have parented the detached update controller.
 $ancestors = @{}
@@ -70,5 +80,13 @@ if ($Action -eq 'StopRuntime') {
     $runtimeNode = $Version -and $process.ExecutablePath -ieq (Join-Path $scope 'runtime\node\node.exe')
     $worker = $runtimeNode -and $process.CommandLine -match '(?:["\s])dist[\\/]runtime[\\/]web-server\.mjs(?:["\s]|$)'
     if ($process.Name -eq 'node.exe' -and ((Has-Script $process 'scripts\start-release.mjs') -or (Has-Script $process 'dist\runtime\web-server.mjs') -or $worker)) { Stop-Snapshot $process }
+  }
+}
+if ($Action -eq 'StopServices') {
+  foreach ($process in $processes) {
+    $archive = $process.Name -eq 'python.exe' -and ((Has-Script $process 'bridge\radaz_archive.py') -or (Has-Script $process 'bridge\radaz_pacs_bridge.py'))
+    $shellPath = [regex]::Escape($versions + '\') + '\d+\.\d+\.\d+\\runtime\\electron\\RADAZ\.exe$'
+    $shell = $process.Name -eq 'RADAZ.exe' -and $process.ExecutablePath -match ('^' + $shellPath)
+    if ($archive -or $shell) { Stop-Snapshot $process }
   }
 }

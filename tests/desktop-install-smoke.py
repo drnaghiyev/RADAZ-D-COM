@@ -71,11 +71,11 @@ try:
         baseline=temporary/'baseline-package'
         with ZipFile(os.environ['RADAZ_TEST_BASE_PACKAGE']) as package: package.extractall(baseline)
     base_version=json.loads((baseline/'public/product.json').read_text())['version']
-    if os.environ.get('GITHUB_ACTIONS')=='true' or os.environ.get('RADAZ_TEST_SETUP')=='1':
-        setup = os.environ.get('RADAZ_TEST_SETUP_PATH') or ROOT/f'outputs/releases/RADAZ-{VERSION}-Setup.exe'
+    if not os.environ.get('RADAZ_TEST_BASE_PACKAGE') and (os.environ.get('GITHUB_ACTIONS')=='true' or os.environ.get('RADAZ_TEST_SETUP')=='1'):
+        setup = os.environ.get('RADAZ_TEST_SETUP_PATH') or ROOT/f'outputs/releases/RADAZ-Setup-v{VERSION}.exe'
         icon_root = os.environ.get('RADAZ_TEST_ICON_ROOT')
         icon_options = [] if icon_root else ['/NoShortcuts=1','/NoStartup=1']
-        run([setup,'/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',*icon_options,f'/DIR={install}'])
+        run([setup,'/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/NoRegistry=1',*icon_options,f'/DIR={install}'])
         assert get('/radaz-runtime.json')['version'] == VERSION
         assert get('/radaz-health.json')['ready'] is True
         if icon_root:
@@ -162,8 +162,22 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
     if base_version != VERSION:
         package=ROOT/f'outputs/releases/RADAZ-{VERSION}-Windows-x64.zip'
         digest=hashlib.sha256(package.read_bytes()).hexdigest()
-        script=f"from pathlib import Path;import radaz_desktop;radaz_desktop.stage_package(Path({str(install)!r}),Path({str(package)!r}),{VERSION!r},{digest!r},{package.stat().st_size})"
-        run([folder/'runtime/python/python.exe','-c',script])
+        if os.environ.get('RADAZ_TEST_DELTA')=='1':
+            package=ROOT/f'outputs/releases/RADAZ-{VERSION}-from-{base_version}-x64.patch.zip'
+            digest=hashlib.sha256(package.read_bytes()).hexdigest()
+            script=f"from pathlib import Path;import radaz_desktop;radaz_desktop.stage_delta(Path({str(install)!r}),Path({str(package)!r}),{VERSION!r},{digest!r},{package.stat().st_size},{base_version!r})"
+        else:
+            script=f"from pathlib import Path;import radaz_desktop;radaz_desktop.stage_package(Path({str(install)!r}),Path({str(package)!r}),{VERSION!r},{digest!r},{package.stat().st_size})"
+        if os.environ.get('RADAZ_TEST_SETUP_UPGRADE')=='1':
+            setup=ROOT/f'outputs/releases/RADAZ-Setup-v{VERSION}.exe'
+            run([setup,'/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/NoRegistry=1','/NoShortcuts=1','/NoStartup=1',f'/DIR={install}'])
+            assert get('/radaz-runtime.json')['version']==base_version
+            assert get('/radaz-runtime.json')['startedAt']==first['startedAt']
+            assert json.loads((install/'pending.json').read_text())['version']==VERSION
+            for file,digest in preserved.items():assert hashlib.sha256(file.read_bytes()).hexdigest()==digest,file.name
+            print('Full Setup upgrade staged without interrupting the running examination',flush=True)
+        else:
+            run([folder/'runtime/python/python.exe','-c',script])
         # Keep the old watcher alive: removing it used to mask activation races.
         with urlopen(Request(base+'/radaz-update',data=json.dumps({'action':'apply','confirmed':True,'version':VERSION}).encode(),headers={'Origin':base,'Content-Type':'application/json'}),timeout=5) as response:assert response.status==202
         for _ in range(180):
@@ -175,7 +189,7 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
         assert get('/radaz-health.json')['ready'] is True
         assert get('/radaz-installation.json')['activeVersion']==VERSION
         folder=install/'versions'/VERSION
-        print(f'Actual installed {base_version} controller -> {VERSION} activation passed without Setup',flush=True)
+        print(f'Actual installed {base_version} controller -> {VERSION} activation passed',flush=True)
     # A delayed startup from a superseded controller must fail before it can
     # stop the healthy gateway or switch the archive back to another version.
     before_stale=get('/radaz-runtime.json')['startedAt']
@@ -223,7 +237,7 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
     assert len(get('/local-archive-api/studies'))==1
     for file,digest in preserved.items():assert hashlib.sha256(file.read_bytes()).hexdigest()==digest,file.name
     detail=json.loads((install/'failed-update.json').read_text())['diagnostic']
-    assert detail['phase']=='startup-health'
+    assert detail['phase']=='startup-health',detail
     assert (install/'logs/update-errors.jsonl').is_file()
     variant('99.0.3',broken_asset=True);ps(install/'launcher.ps1','-NoBrowser')
     assert get('/radaz-runtime.json')['version']=='99.0.1'
@@ -232,6 +246,13 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
     assert 'ENOENT' in detail['startup']['message']
     for file,digest in preserved.items():assert hashlib.sha256(file.read_bytes()).hexdigest()==digest,file.name
     print('Real frontend/backend update and failed-runtime rollback passed; clinical archive stayed separate',flush=True)
+    if (install/'unins000.exe').exists():
+        run([install/'unins000.exe','/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'])
+        for file,digest in preserved.items():assert hashlib.sha256(file.read_bytes()).hexdigest()==digest,file.name
+        for endpoint in (web,archive):
+            with socket.socket() as sock:
+                sock.settimeout(2);assert sock.connect_ex(('127.0.0.1',endpoint))!=0
+        print('Uninstall stopped this installation without removing archive, settings or license',flush=True)
 finally:
     # Stop only synthetic processes whose executable/script path is inside this temp directory.
     literal=str(temporary).replace("'","''")

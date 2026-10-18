@@ -23,7 +23,7 @@ const date = (raw: string) => raw.length === 8 ? `${raw.slice(6,8)}.${raw.slice(
 const validAeTitle = (title: string) => /^[\x20-\x7E]{1,16}$/.test(title) && !title.includes('\\');
 const modalityOptions = ['CR','DX','CT','MR','XA','MG','US','PT','NM','RF','RG','PX','ES','XC','GM','SC','OT','SR'];
 
-export default function PacsPage() {
+export default function PacsPage({embedded=false}:{embedded?:boolean}={}) {
   useUiTranslation();
   const [locations, setLocations] = useState<PacsLocation[]>([]);
   const [selected, setSelected] = useState('');
@@ -63,8 +63,8 @@ export default function PacsPage() {
   const canSearch = !!location && (!!location.dicomwebUrl || !!(location.host && location.aeTitle));
 
   useEffect(() => {
-    recordsWindowTitle('PACS müayinələri');
-    const stopWindow = registerRecordsWindow('pacs');
+    if(!embedded)recordsWindowTitle('PACS müayinələri');
+    const stopWindow = embedded?()=>{}:registerRecordsWindow('pacs');
     try {
       const saved = JSON.parse(localStorage.getItem('radaz-pacs-config-v1') || '{}');
       if (Array.isArray(saved.locations)) {

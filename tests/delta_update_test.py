@@ -72,4 +72,53 @@ class DeltaUpdates(unittest.TestCase):
         self.assertFalse((self.root/'pending.json').exists())
         self.assertFalse((self.root.parent/'escape.txt').exists())
 
+    def test_distribution_metadata_lists_deleted_changed_new_and_unchanged_sizes(self):
+        info=json.loads(self.delta.with_suffix('.manifest.json').read_text())
+        self.assertEqual(info['deleted'],['old-only.txt'])
+        self.assertEqual(info['added'],['new-only.txt'])
+        self.assertNotIn('runtime/node/node.exe',info['changed'])
+        self.assertEqual(next(f['size'] for f in info['files'] if f['path']=='runtime/node/node.exe'),len(self.runtime))
+        self.assertEqual(info['sha256'],hashlib.sha256(self.delta.read_bytes()).hexdigest())
+
+    def test_retention_keeps_rollback_pending_live_runtime_and_unexpected_user_files(self):
+        for v in ['0.2.27','0.2.28','0.2.29','0.2.30','0.2.99']:
+            with ZipFile(self.package(v)) as z:z.extractall(self.root/'versions'/v)
+        (self.root/'versions/0.2.29/user-note.txt').write_text('must remain')
+        desktop.atomic_json(self.root/'active.json',{'version':self.base,'previousVersion':'0.2.30'})
+        self.stage()
+        with patch.object(desktop,'runtime_processes',return_value={'versions':['0.2.28']}):
+            self.assertEqual(desktop.cleanup_versions(self.root),['0.2.27'])
+        # 0.2.99 has no pending pointer yet: staging publication must not race cleanup.
+        for v in ['0.2.28','0.2.29','0.2.30','0.2.99',self.base,self.target]:self.assertTrue((self.root/'versions'/v).is_dir())
+
+    def test_interrupted_download_resumes_at_verified_offset(self):
+        raw=b'0123456789abcdef';asset=dict(name='fixture.zip',size=len(raw),digest='sha256:'+hashlib.sha256(raw).hexdigest(),browser_download_url='https://github.com/fixture.zip')
+        class Interrupted(io.BytesIO):
+            def read(self,n=-1):
+                if self.tell():raise OSError('connection lost')
+                return super().read(6)
+        resumed=io.BytesIO(raw[6:]);resumed.status=206;resumed.headers={'Content-Range':'bytes 6-15/16'}
+        with patch.object(desktop,'open_release_download',side_effect=[Interrupted(raw),resumed]) as opened,patch.object(desktop.time,'sleep'):
+            file=desktop.download_asset(self.root,asset,self.target)
+        self.assertEqual(file.read_bytes(),raw)
+        opened.assert_called_with(asset['browser_download_url'],6)
+
+    def test_partial_download_survives_outage_but_corruption_and_wrong_ranges_are_rejected(self):
+        raw=b'0123456789abcdef';asset=dict(name='fixture.zip',size=len(raw),digest='sha256:'+hashlib.sha256(raw).hexdigest(),browser_download_url='https://github.com/fixture.zip')
+        downloads=self.root/'downloads';downloads.mkdir();partial=downloads/'fixture.zip.part';partial.write_bytes(raw[:6])
+        desktop.atomic_json(downloads/'fixture.zip.part.json',asset)
+        with patch.object(desktop,'open_release_download',side_effect=OSError('offline')),patch.object(desktop.time,'sleep'):
+            with self.assertRaises(OSError):desktop.download_asset(self.root,asset,self.target)
+        self.assertEqual(partial.read_bytes(),raw[:6]);self.assertFalse((self.root/'pending.json').exists())
+        bad=io.BytesIO(raw[6:]);bad.status=206;bad.headers={'Content-Range':'bytes 5-15/16'}
+        with patch.object(desktop,'open_release_download',return_value=bad):
+            with self.assertRaises(ValueError):desktop.download_asset(self.root,asset,self.target)
+        self.assertFalse(partial.exists())
+        with patch.object(desktop,'open_release_download',return_value=io.BytesIO(b'x'*len(raw))):
+            with self.assertRaises(ValueError):desktop.download_asset(self.root,asset,self.target)
+        self.assertFalse(partial.exists())
+
+    def test_new_release_requires_publisher_signature_before_download(self):
+        with self.assertRaisesRegex(ValueError,'signature'):desktop.authenticate_release({'tag_name':'v0.2.41'})
+
 if __name__=='__main__':unittest.main()

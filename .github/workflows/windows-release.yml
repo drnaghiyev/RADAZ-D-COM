@@ -16,7 +16,7 @@ jobs:
   build:
     if: github.ref == 'refs/heads/main'
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     outputs:
       publish: ${{ steps.plan.outputs.publish }}
       version: ${{ steps.plan.outputs.version }}
@@ -82,6 +82,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests/desktop-install-smoke.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $delta = Get-ChildItem "outputs/releases/RADAZ-$releaseVersion-from-*.manifest.json" | Select-Object -First 1 | Get-Content -Raw | ConvertFrom-Json
+          $env:RADAZ_TEST_BASE_PACKAGE = "outputs/delta-base/RADAZ-$($delta.baseVersion)-Windows-x64.zip"
+          $env:RADAZ_TEST_DELTA = '1'
+          python tests/desktop-install-smoke.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item Env:RADAZ_TEST_DELTA
+          $env:RADAZ_TEST_SETUP_UPGRADE = '1'
+          python tests/desktop-install-smoke.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item Env:RADAZ_TEST_SETUP_UPGRADE, Env:RADAZ_TEST_BASE_PACKAGE
           python tests/desktop-watch-migration.py --download
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/github-release.py validate
@@ -94,6 +104,7 @@ jobs:
             outputs/releases/*.zip
             outputs/releases/*.exe
             outputs/releases/*.sha256
+            outputs/releases/*.manifest.json
           if-no-files-found: error
           retention-days: 14
 
@@ -115,4 +126,5 @@ jobs:
       - name: Publish verified assets and make the release visible to RADAZ
         env:
           GH_TOKEN: ${{ github.token }}
+          RADAZ_RELEASE_SIGNING_KEY: ${{ secrets.RADAZ_RELEASE_SIGNING_KEY }}
         run: python scripts/github-release.py publish

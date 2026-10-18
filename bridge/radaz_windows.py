@@ -20,8 +20,11 @@ def register_records(token):
 def focus_records(token):
     return _activate(token, False, focus=True)
 
-def _activate(token, maximize, register=False, focus=False):
-    prefix = "RADAZ_VIEWER_" if maximize else "RADAZ_RECORDS_"
+def maximize_records(token):
+    return _activate(token, True, records=True)
+
+def _activate(token, maximize, register=False, focus=False, records=False):
+    prefix = "RADAZ_VIEWER_" if maximize and not records else "RADAZ_RECORDS_"
     result = "registered" if register else "focused" if focus else "maximized" if maximize else "minimized"
     if not isinstance(token, str) or not re.fullmatch(prefix + r'[a-f0-9]{32}', token):
         raise ValueError('Pəncərə identifikatoru düzgün deyil')

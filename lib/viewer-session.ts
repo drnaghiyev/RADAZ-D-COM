@@ -4,7 +4,7 @@ const VIEWER_KEY = 'radaz-active-viewer';
 const randomId = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
 const recordsToken = (value: string) => /^RADAZ_RECORDS_[a-f0-9]{32}$/.test(value);
 const RECORDS_CHANNEL = 'radaz-records-windows-v1';
-type RecordsKind = 'archive' | 'pacs';
+type RecordsKind = 'archive' | 'pacs' | 'mpr' | '3d';
 const recordsOpening = new Map<RecordsKind, Promise<boolean>>();
 const recordsWindows = new Map<RecordsKind, Window>();
 export function openRecordsWindow(kind: RecordsKind): Promise<boolean> {
@@ -31,7 +31,7 @@ export function openRecordsWindow(kind: RecordsKind): Promise<boolean> {
   recordsOpening.set(kind, opening);
   return opening;
 }
-async function nativeRecordsAction(action: 'register-records' | 'focus-records', token: string) {
+async function nativeRecordsAction(action: 'register-records' | 'focus-records' | 'maximize-records', token: string) {
   const title = document.title, caption = `RADAZ [${token}] · ${title}`;
   try {
     document.title = caption;
@@ -45,13 +45,15 @@ export function registerRecordsWindow(kind: RecordsKind) {
   if (!recordsToken(window.name)) window.name = `RADAZ_RECORDS_${randomId()}`;
   const token = window.name, registration = nativeRecordsAction('register-records', token);
   const channel = new BroadcastChannel(RECORDS_CHANNEL);
+  const activate=()=>{window.focus();void registration.then(()=>nativeRecordsAction(kind==='mpr'||kind==='3d'?'maximize-records':'focus-records',token));};
+  window.addEventListener('radaz-maximize-window',activate);
   channel.onmessage = event => {
     if (event.data?.kind !== 'FOCUS' || event.data.page !== kind) return;
     window.focus();
     channel.postMessage({ kind: 'FOCUSED', request: event.data.request });
-    void registration.then(() => nativeRecordsAction('focus-records', token));
+    activate();
   };
-  return () => channel.close();
+  return () => {channel.close();window.removeEventListener('radaz-maximize-window',activate);};
 }
 export function recordsWindowTitle(label: string) {
   // Edge/PWA may sever window.opener or reset window.name across window groups.

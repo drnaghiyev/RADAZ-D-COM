@@ -22,7 +22,7 @@ const clock = (value: number | null) => value ? new Date(value).toLocaleString('
 const size = (bytes: number) => bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`;
 const modalityOptions = ['CR','DX','CT','MR','XA','MG','US','PT','NM','RF','RG','PX','ES','XC','GM','SC','OT','SR'];
 
-export default function ArchivePage() {
+export default function ArchivePage({embedded=false}:{embedded?:boolean}={}) {
   useUiTranslation();
   const [studies, setStudies] = useState<ArchiveStudy[]>([]);
   const [selected, setSelected] = useState('');
@@ -44,8 +44,8 @@ export default function ArchivePage() {
     return entries;
   }, []);
   useEffect(() => {
-    recordsWindowTitle('Local arxiv');
-    const stopWindow = registerRecordsWindow('archive');
+    if(!embedded)recordsWindowTitle('Local arxiv');
+    const stopWindow = embedded?()=>{}:registerRecordsWindow('archive');
     folderRef.current?.setAttribute('webkitdirectory', '');
     folderRef.current?.setAttribute('directory', '');
     void refresh().then(entries => setMessage(`${entries.length} müayinə arxivdədir`)).catch(error => setMessage(`Arxiv açıla bilmədi: ${String(error)}`));

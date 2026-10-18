@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import time
 from pathlib import Path
 from urllib.error import HTTPError
@@ -12,6 +13,9 @@ from urllib.request import Request, urlopen
 from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
+
+def setup_name(value):
+    return f'RADAZ-Setup-v{value}.exe' if version_parts(value)>=(0,2,41) else f'RADAZ-{value}-Setup.exe'
 
 
 def version_parts(version):
@@ -69,7 +73,7 @@ def release_plan(api, version):
         expected = f'RADAZ-{version}-Windows-preview.zip'
         required = {expected, expected + '.sha256'}
         if version_parts(version) >= (0,2,8):
-            for name in (f'RADAZ-{version}-Windows-x64.zip', f'RADAZ-{version}-Setup.exe'):
+            for name in (f'RADAZ-{version}-Windows-x64.zip', setup_name(version)):
                 required.update((name,name+'.sha256'))
         if release['prerelease'] or not required <= names:
             raise ValueError('Existing published version is incomplete; inspect it before publishing another version')
@@ -101,7 +105,7 @@ def validate_package(root, version):
             raise ValueError('Package runtime version mismatch')
     files = [archive,checksum]
     if version_parts(version) >= (0,2,8):
-        for name in (f'RADAZ-{version}-Windows-x64.zip',f'RADAZ-{version}-Setup.exe'):
+        for name in (f'RADAZ-{version}-Windows-x64.zip',setup_name(version)):
             file=root/'outputs/releases'/name
             sums=file.with_suffix(file.suffix+'.sha256')
             if sums.read_text().split() != [hashlib.sha256(file.read_bytes()).hexdigest(),file.name]:
@@ -126,9 +130,21 @@ def validate_package(root, version):
             if meta!=dict(schema=1,baseVersion=base,version=version) or patch.name!=f'RADAZ-{version}-from-{base}-x64.patch.zip':raise ValueError('Delta identity mismatch')
             manifest=json.loads(delta.read('SHA256SUMS.json'))
             if manifest!=json.loads(full.read('SHA256SUMS.json')):raise ValueError('Delta target mismatch')
+            target_sizes={name:full.getinfo(name).file_size for name in manifest}
+            payload_names=set(delta.namelist())-{'delta.json','SHA256SUMS.json'}
             for name in set(delta.namelist())-{'delta.json','SHA256SUMS.json'}:
                 if name not in manifest or hashlib.sha256(delta.read(name)).hexdigest()!=manifest[name]:raise ValueError('Delta file mismatch')
         files.extend((patch,sums))
+        metadata=patch.with_suffix('.manifest.json')
+        if version_parts(version)>=(0,2,41):
+            details=json.loads(metadata.read_text(encoding='utf-8'))
+            if details['version']!=version or details['baseVersion']!=base or details['size']!=patch.stat().st_size or details['sha256']!=hashlib.sha256(patch.read_bytes()).hexdigest():raise ValueError('Delta distribution metadata mismatch')
+            if {f['path']:f['sha256'] for f in details['files']}!=manifest:raise ValueError('Delta distribution file hashes mismatch')
+            if len(details['files'])!=len(manifest) or {f['path']:f['size'] for f in details['files']}!=target_sizes:raise ValueError('Delta distribution file sizes mismatch')
+            if details['minimumSupportedVersion']!=base or details['url']!=f'https://github.com/{config()["updateRepository"]}/releases/download/v{version}/{patch.name}':raise ValueError('Delta distribution source mismatch')
+            if set(details['added'])&set(details['changed']) or set(details['added'])|set(details['changed'])!=payload_names:raise ValueError('Delta changed file list mismatch')
+            if set(details['deleted'])&set(manifest):raise ValueError('Removed file still in target')
+            files.append(metadata)
     return tuple(files)
 
 
@@ -157,10 +173,19 @@ def publish(api, root, version, commit, release_commit=None):
     desktop_file = next((file for file in files if file.name == desktop_name), None)
     if desktop_file:
         update_files=[desktop_file,*[file for file in files if file.name.endswith('.patch.zip')]]
-        feed.write_text(json.dumps({'schema':1,'tag_name':f'v{version}','draft':False,'prerelease':False,
+        payload={'schema':1,'tag_name':f'v{version}','draft':False,'prerelease':False,
             'assets':[{'name':file.name,'state':'uploaded','size':file.stat().st_size,
                 'digest':'sha256:'+hashlib.sha256(file.read_bytes()).hexdigest(),
-                'browser_download_url':f'https://github.com/{api.repo}/releases/download/v{version}/{file.name}'} for file in update_files]},indent=2),encoding='utf-8')
+                'browser_download_url':f'https://github.com/{api.repo}/releases/download/v{version}/{file.name}'} for file in update_files]}
+        if version_parts(version)>=(0,2,41):
+            with ZipFile(desktop_file) as full:
+                manifest=json.loads(full.read('SHA256SUMS.json'))
+                payload['distribution']={'version':version,'minimumSupportedVersion':'0.2.8',
+                    'files':[{'path':name,'size':full.getinfo(name).file_size,'sha256':digest} for name,digest in sorted(manifest.items())],
+                    'deltas':[{k:v for k,v in json.loads(file.read_text(encoding='utf-8')).items() if k!='files'} for file in files if file.name.endswith('.manifest.json')]}
+            signed=subprocess.run(['node',str(root/'scripts/release-signature.mjs'),'sign'],input=json.dumps(payload,separators=(',',':')).encode(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=True)
+            payload['signature']=json.loads(signed.stdout)
+        feed.write_text(json.dumps(payload,indent=2),encoding='utf-8')
         files = (*files, feed)
     # Publish only after every portable, offline and installer asset is verified.
     for file in files:

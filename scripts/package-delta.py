@@ -30,6 +30,16 @@ def build_delta(previous, current, output):
             archive.writestr('SHA256SUMS.json', new.read('SHA256SUMS.json'))
             for name in changed: archive.writestr(name, new.read(name))
         patch.with_suffix('.zip.sha256').write_text(hashlib.sha256(patch.read_bytes()).hexdigest()+'  '+patch.name+'\n', encoding='ascii')
+        details={'schema':1,'version':target,'baseVersion':base,'minimumSupportedVersion':base,
+                 'url':f'https://github.com/drnaghiyev/RADAZ-D-COM/releases/download/v{target}/{patch.name}',
+                 'size':patch.stat().st_size,'sha256':hashlib.sha256(patch.read_bytes()).hexdigest(),
+                 'added':sorted(set(after)-set(before)),'changed':sorted(name for name in changed if name in before),
+                 'deleted':sorted(set(before)-set(after)),
+                 'files':[{'path':name,'size':new.getinfo(name).file_size,'sha256':digest} for name,digest in sorted(after.items())]}
+        # Keep delta.json schema 1 byte-for-byte compatible with deployed updaters.
+        # The separately signed release feed carries the richer distribution metadata.
+        metadata=patch.with_suffix('.manifest.json')
+        metadata.write_text(json.dumps(details,indent=2),encoding='utf-8')
         print(f'{patch.name}: {len(changed)}/{len(after)} files, {patch.stat().st_size/1024**2:.1f} MiB')
         return patch
 

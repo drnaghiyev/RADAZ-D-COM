@@ -13,7 +13,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 OutputDir=..\outputs\releases
-OutputBaseFilename=RADAZ-{#ProductVersion}-Setup
+OutputBaseFilename=RADAZ-Setup-v{#ProductVersion}
 Compression=lzma2/fast
 SolidCompression=yes
 WizardStyle=modern
@@ -21,6 +21,7 @@ DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\radaz.ico
 SetupIconFile=..\outputs\desktop-stage\public\radaz.ico
 CloseApplications=no
+CreateUninstallRegKey=RegisterUninstaller
 
 [Files]
 Source: "..\outputs\desktop-stage\*"; DestDir: "{app}\versions\{#ProductVersion}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -37,11 +38,16 @@ Filename: "{app}\versions\{#ProductVersion}\runtime\python\python.exe"; Paramete
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\launcher.ps1"""; Description: "RADAZ proqramini ac"; Flags: postinstall nowait skipifsilent runhidden
 
 [UninstallRun]
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\versions\{#ProductVersion}\scripts\stop-web-server.ps1"""; Flags: runhidden waituntilterminated
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\launcher.ps1"" -Uninstall"; Flags: runhidden waituntilterminated
 
 ; No recursive uninstall-delete rules: clinical data and rollback versions are preserved.
 
 [Code]
+function RegisterUninstaller: Boolean;
+begin
+  Result := ExpandConstant('{param:NoRegistry|0}') <> '1';
+end;
+
 function WantShortcuts: Boolean;
 begin
   Result := ExpandConstant('{param:NoShortcuts|0}') <> '1';

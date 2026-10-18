@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import time
+from http.client import HTTPException
 from pathlib import Path, PurePosixPath
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
@@ -153,7 +154,7 @@ def get_latest_release(repo=UPDATE_REPOSITORY):
         return get_json(f'https://api.github.com/repos/{repo}/releases/latest')
 
 
-def open_release_download(url):
+def open_release_download(url, offset=0):
     """Retry transient GitHub/CDN failures without reusing a cached error URL."""
     for attempt in range(3):
         download_url = url
@@ -162,7 +163,9 @@ def open_release_download(url):
             query = parse_qsl(parts.query, keep_blank_values=True)
             query.append(('radaz_retry', str(time.time_ns())))
             download_url = urlunsplit(parts._replace(query=urlencode(query)))
-        request = Request(download_url, headers={'User-Agent': 'RADAZ-desktop-updater', 'Cache-Control': 'no-cache'})
+        headers={'User-Agent': 'RADAZ-desktop-updater', 'Cache-Control': 'no-cache', 'Accept-Encoding':'identity'}
+        if offset: headers['Range']=f'bytes={offset}-'
+        request = Request(download_url, headers=headers)
         try:
             return urlopen(request, timeout=30)
         except HTTPError as error:
@@ -198,6 +201,68 @@ def select_asset(release, current, base_version=None):
     if not isinstance(asset.get('digest'), str) or not re.fullmatch(r'sha256:[a-f0-9]{64}', asset['digest']) or not isinstance(asset.get('size'), int) or not 0 < asset['size'] <= MAX_PACKAGE:
         raise ValueError('Update has no valid SHA-256 digest or size')
     return target, asset
+
+
+def authenticate_release(release):
+    """The pinned publisher key authenticates the feed, including every asset digest."""
+    if version(release['tag_name'].removeprefix('v')) < (0, 2, 41):
+        return  # Historical releases were pinned to GitHub's HTTPS repository.
+    envelope = release.get('signature')
+    if not isinstance(envelope, dict): raise ValueError('Release signature is required')
+    node = SOURCE / 'runtime/node/node.exe'
+    executable = str(node) if node.is_file() else shutil.which('node')
+    if not executable: raise ValueError('Release signature verifier is unavailable')
+    result = subprocess.run([executable, str(SOURCE / 'scripts/release-signature.mjs'), 'verify'],
+                            input=json.dumps(envelope).encode(), stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, timeout=15, creationflags=NO_WINDOW)
+    if result.returncode or json.loads(result.stdout) != {k:v for k,v in release.items() if k != 'signature'}:
+        raise ValueError('Release authenticity verification failed')
+
+
+def download_asset(root, asset, target):
+    """Resume only the same immutable, hash-bound asset; never trust a partial ZIP."""
+    downloads=root/'downloads';downloads.mkdir(exist_ok=True)
+    name=asset['name'];file_name(name)
+    if '/' in name: raise ValueError('Invalid asset name')
+    temporary=downloads/(name+'.part');metadata=downloads/(name+'.part.json')
+    identity={k:asset[k] for k in ('name','size','digest','browser_download_url')}
+    try: same=read_json(metadata)==identity
+    except (ValueError,OSError): same=False
+    if not same or temporary.exists() and temporary.stat().st_size>asset['size']:
+        temporary.unlink(missing_ok=True)
+    atomic_json(metadata,identity)
+    for attempt in range(3):
+        offset=temporary.stat().st_size if temporary.exists() else 0
+        try:
+            if offset<asset['size']:
+                response=open_release_download(asset['browser_download_url'],offset) if offset else open_release_download(asset['browser_download_url'])
+                with response:
+                    status=getattr(response,'status',200)
+                    if status==206:
+                        content_range=getattr(response,'headers',{}).get('Content-Range','')
+                        match=re.fullmatch(r'bytes (\d+)-(\d+)/(\d+)',content_range)
+                        if not match or int(match[1])!=offset or int(match[3])!=asset['size'] or int(match[2])<offset or int(match[2])>=asset['size']:
+                            raise ValueError('Invalid resumed download range')
+                    elif status==200: offset=0  # A server without Range support returns the whole file.
+                    else: raise ValueError('Unexpected download response')
+                    with temporary.open('ab' if offset else 'wb') as stream:
+                        total=offset;last_progress=0
+                        while block:=response.read(1024*1024):
+                            total+=len(block)
+                            if total>asset['size']:raise ValueError('Unexpected download size')
+                            stream.write(block)
+                            if time.monotonic()-last_progress>=.2 or total==asset['size']:
+                                state(root,'downloading',f'RADAZ {target} yüklənir…',target,{'done':total,'total':asset['size'],'unit':'bayt'})
+                                last_progress=time.monotonic()
+                if total!=asset['size']:raise OSError('Incomplete release download')
+            if hashlib.sha256(temporary.read_bytes()).hexdigest()!=asset['digest'][7:]:
+                raise ValueError('Downloaded update SHA-256 mismatch')
+            return temporary
+        except ValueError:
+            temporary.unlink(missing_ok=True);metadata.unlink(missing_ok=True);raise
+        except (OSError,HTTPException,TimeoutError):
+            if attempt==2:raise
+            time.sleep(.5*(attempt+1))
 
 def stage_package(root, archive, target, digest, size):
     version(target)
@@ -303,6 +368,7 @@ def check_update(root, approved_version=None):
     state(root, 'checking', 'Yeniləmələr arxa planda yoxlanılır.')
     try:
         release = get_latest_release()
+        authenticate_release(release)
         choice = select_asset(release, pending or active, base_version=active)
     except Exception:
         if not pending: raise
@@ -323,37 +389,22 @@ def check_update(root, approved_version=None):
         state(root, 'available', message, target, diagnostic=failed.get('diagnostic') if retry else None)
         return
     state(root, 'downloading', f'RADAZ {target} arxa planda yüklənir. Proqramdan istifadə edə bilərsiniz.', target)
-    downloads = root / 'downloads'; downloads.mkdir(exist_ok=True)
-    temporary = downloads / (target + '.zip.part')
+    temporary = download_asset(root,asset,target)
     try:
-        with open_release_download(asset['browser_download_url']) as response, temporary.open('wb') as stream:
-            total = 0; last_progress = 0
-            while block := response.read(1024 * 1024):
-                total += len(block)
-                if total > asset['size']: raise ValueError('Unexpected download size')
-                stream.write(block)
-                if time.monotonic() - last_progress >= .2 or total == asset['size']:
-                    state(root, 'downloading', f'RADAZ {target} yüklənir…', target,
-                          {'done': total, 'total': asset['size'], 'unit': 'bayt'})
-                    last_progress = time.monotonic()
         if asset.get('baseVersion'):
             try: stage_delta(root,temporary,target,asset['digest'][7:],asset['size'],asset['baseVersion'])
             except (ValueError,OSError,KeyError):
-                # A repaired/modified base cannot supply trusted reusable files. The
-                # same approved version may fall back to its complete verified package.
+                # Reconstruct from the full signed package if the installed base was modified.
+                temporary.unlink(missing_ok=True);temporary.with_suffix(temporary.suffix+'.json').unlink(missing_ok=True)
                 full=select_asset(release,active)[1]
                 state(root,'downloading','Yerli fayllar uyğun deyil; tam paket ilə bərpa edilir…',target)
-                with open_release_download(full['browser_download_url']) as response,temporary.open('wb') as stream:
-                    total=0
-                    while block:=response.read(1024*1024):
-                        total+=len(block)
-                        if total>full['size']: raise ValueError('Unexpected download size')
-                        stream.write(block)
-                        state(root,'downloading','Tam paket ilə bərpa edilir…',target,{'done':total,'total':full['size'],'unit':'bayt'})
+                temporary=download_asset(root,full,target)
                 stage_package(root,temporary,target,full['digest'][7:],full['size'])
-        else: stage_package(root, temporary, target, asset['digest'][7:], asset['size'])
+        else: stage_package(root,temporary,target,asset['digest'][7:],asset['size'])
     finally:
         temporary.unlink(missing_ok=True)
+        temporary.with_suffix(temporary.suffix+'.json').unlink(missing_ok=True)
+
 
 def environment(root):
     env = dict(os.environ, RADAZ_INSTALL_ROOT=str(root), RADAZ_DESKTOP_TOKEN=(root / 'control-token').read_text())
@@ -377,7 +428,37 @@ def runtime_processes(root, action, target=None):
                             creationflags=NO_WINDOW, capture_output=True, timeout=45)
     if result.returncode:
         raise RuntimeError('Desktop process ownership: ' + result.stderr.decode('utf-8', errors='replace')[-2000:])
-    if action == 'Owner': return json.loads(result.stdout.decode('utf-8-sig'))
+    if action in ('Owner','InUse'): return json.loads(result.stdout.decode('utf-8-sig'))
+
+
+def cleanup_versions(root):
+    """Caller holds launch.lock. Retain active, rollback, staged and every live runtime."""
+    active=read_json(root/'active.json')
+    keep={active['version'],active.get('previousVersion')}
+    for pointer in ('pending.json','failed-update.json'):
+        if (root/pointer).exists():keep.add(read_json(root/pointer).get('version'))
+    keep.update(runtime_processes(root,'InUse')['versions'])
+    removed=[]
+    for candidate in (root/'versions').iterdir():
+        if not re.fullmatch(r'\d+\.\d+\.\d+',candidate.name) or candidate.name in keep:continue
+        # An updater/Setup may have published a complete future directory just
+        # before pending.json. It is not an obsolete runtime and must survive.
+        if version(candidate.name)>=version(active['version']):continue
+        directory=version_dir(root,candidate.name)
+        if not directory.is_dir() or directory.is_symlink():continue
+        try:
+            validate_directory(directory,candidate.name)
+            known=set(read_json(directory/'SHA256SUMS.json'))|{'SHA256SUMS.json'}
+            files=list(directory.rglob('*'))
+            # Refuse junctions and unexpected user files even inside a runtime folder.
+            if any(p.is_symlink() or not p.resolve().is_relative_to(directory.resolve()) for p in files):continue
+            if any(p.is_file() and p.relative_to(directory).as_posix() not in known and not (p.suffix=='.pyc' and '__pycache__' in p.parts) for p in files):continue
+            if any((root/pointer).exists() and read_json(root/pointer).get('version')==candidate.name for pointer in ('pending.json','failed-update.json')):continue
+            if directory.resolve().parent!=(root/'versions').resolve():raise ValueError('Unsafe cleanup path')
+            shutil.rmtree(directory);removed.append(candidate.name)
+        except (OSError,ValueError,KeyError):continue
+    atomic_json(root/'version-retention.json',{'kept':sorted(v for v in keep if v),'removed':removed})
+    return removed
 
 
 def quiesce(root):
@@ -488,6 +569,7 @@ def open_version(root, target):
         raise
 
 def launch(root, no_browser=False):
+    if (root/'uninstalling.json').exists(): raise RuntimeError('RADAZ uninstall is in progress')
     with lock(root, 'launch', 90):
         active = read_json(root / 'active.json')
         current = active['version']; target = current
@@ -535,6 +617,7 @@ def launch(root, no_browser=False):
             open_app(root, build)
 
 def initialize(root, shortcuts=True):
+    (root/'uninstalling.json').unlink(missing_ok=True)
     target = read_json(SOURCE / 'public/product.json')['version']
     validate_directory(version_dir(root, target), target)
     current = read_json(root / 'active.json') if (root / 'active.json').exists() else None
@@ -610,6 +693,7 @@ def apply_update(root):
         finally: consumed.unlink(missing_ok=True)
 
 def recover_server(root):
+    if (root/'uninstalling.json').exists(): return
     # A failed runtime does not authorize activation of an unrequested staged update.
     with lock(root, 'launch'):
         current = read_json(root / 'active.json')['version']
@@ -644,6 +728,8 @@ def watch(root):
         with lock(root, 'launch', 90):
             if read_json(root / 'active.json')['version'] == own_version:
                 runtime_processes(root, 'RetireWatch', own_version)
+                try: cleanup_versions(root)
+                except (OSError,ValueError,KeyError,RuntimeError): pass  # Cleanup never blocks a healthy runtime.
         with lock(root, 'update'):
             while True:
                 active = read_json(root / 'active.json')['version']
@@ -696,9 +782,19 @@ def watch(root):
     if handoff:
         run_hidden([str(handoff/'runtime/python/python.exe'),str(handoff/'bridge/radaz_desktop.py'),'watch','--install-root',str(root)],root)
 
+def stop_installation(root):
+    # Inno owns removal. Only stop this installation; never delete clinical data.
+    with lock(root,'launch',90):
+        atomic_json(root/'uninstalling.json',{'stopping':True})
+        quiesce(root)
+        used=runtime_processes(root,'InUse')['versions']
+        for target in used: stop_runtime(root,target)
+        runtime_processes(root,'StopServices')
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['initialize', 'install', 'launch', 'watch', 'check', 'apply', 'repair'])
+    parser.add_argument('command', choices=['initialize', 'install', 'launch', 'watch', 'check', 'apply', 'repair', 'uninstall'])
     parser.add_argument('--target-version')
     parser.add_argument('--install-root', type=Path, default=Path(os.environ.get('LOCALAPPDATA', Path.home())) / 'Programs/RADAZ')
     parser.add_argument('--no-browser', action='store_true')
@@ -712,6 +808,7 @@ def main():
         # not opened. Installing an update must never interrupt an examination.
         if fresh and args.start_background: launch(root, no_browser=True)
     elif args.command == 'launch': launch(root, args.no_browser)
+    elif args.command == 'uninstall': stop_installation(root)
     elif args.command == 'repair': repair_update(root, args.target_version)
     elif args.command == 'check':
         with lock(root, 'update'): check_update(root)

@@ -26,6 +26,7 @@ explicit.extend(['bridge/radaz_online_license.py','public/online-license-public.
 explicit.append('bridge/radaz_send.py')
 explicit.append('scripts/release-health.mjs')
 explicit.append('scripts/desktop-processes.ps1')
+explicit.extend(['scripts/release-signature.mjs','public/update-public.pem'])
 explicit.extend(['scripts/local-ai-request.mjs', 'bridge/radaz_ai.py', 'bridge/radiology-profile.json'])
 explicit.extend(['scripts/local-anatomy-volume.mjs','scripts/anatomy-access.mjs','bridge/anatomy-models.json','bridge/anatomy_providers.py','bridge/radaz_anatomy_volume.py'])
 files={p:ROOT/p for p in explicit}
@@ -40,8 +41,10 @@ manifest={}
 with zipfile.ZipFile(target,'w',zipfile.ZIP_DEFLATED,compresslevel=6) as archive:
  for name,p in sorted(files.items()):
   if not p.is_file():raise SystemExit(f'Missing runtime input: {name}')
-  if p.suffix in ['.pem','.sqlite','.sqlite3'] or '/instances/' in name or '.env' in name:raise SystemExit(f'Forbidden file: {name}')
+  public_verifier=name in ('public/update-public.pem','dist/client/update-public.pem')
+  if (p.suffix in ['.pem','.sqlite','.sqlite3'] and not public_verifier) or '/instances/' in name or '.env' in name:raise SystemExit(f'Forbidden file: {name}')
   raw=p.read_bytes()
+  if public_verifier and (not raw.startswith(b'-----BEGIN PUBLIC KEY-----') or b'PRIVATE' in raw):raise SystemExit('Invalid release verification public key')
   if p.suffix in ['.js','.mjs','.json','.ts','.ps1','.cmd','.md'] and blocked.search(raw.decode('utf-8',errors='ignore')):raise SystemExit(f'Possible credential in {name}')
   if name.endswith('product.json'):raw=json.dumps(config,ensure_ascii=False,indent=2).encode()
   if name=='package.json':
