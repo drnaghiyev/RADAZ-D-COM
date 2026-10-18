@@ -45,7 +45,7 @@ var
   ExitCode: Integer;
 begin
   if CurUninstallStep <> usUninstall then Exit;
-  if not ExecWithNativeSysDir(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+  if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
     ExpandConstant('-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{app}\launcher.ps1" -Uninstall'),
     '', SW_HIDE, ewWaitUntilTerminated, ExitCode) then ExitCode := -1;
   Log(Format('RADAZ shutdown exit code: %d', [ExitCode]));
