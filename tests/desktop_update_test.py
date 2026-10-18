@@ -15,6 +15,16 @@ spec = importlib.util.spec_from_file_location('desktop', Path(__file__).resolve(
 desktop = importlib.util.module_from_spec(spec); spec.loader.exec_module(desktop)
 
 class DesktopUpdates(unittest.TestCase):
+    def test_failed_uninstall_is_logged_and_does_not_block_manual_recovery(self):
+        desktop.atomic_json(self.root / 'uninstalling.json', {'stopping': True})
+        args = ['radaz_desktop.py', 'uninstall', '--install-root', str(self.root)]
+        with patch('sys.argv', args), patch.object(desktop, 'stop_installation', side_effect=RuntimeError('synthetic shutdown failure')):
+            with self.assertRaisesRegex(RuntimeError, 'synthetic shutdown failure'):
+                desktop.main()
+        self.assertFalse((self.root / 'uninstalling.json').exists())
+        self.assertEqual(desktop.read_json(self.root / 'active.json')['version'], '0.2.8')
+        self.assertEqual(json.loads((self.root / 'logs/update-errors.jsonl').read_text())['phase'], 'uninstall')
+
     def test_uninstall_wins_over_a_launcher_already_waiting_for_the_lock(self):
         @desktop.contextlib.contextmanager
         def uninstall_while_waiting(*args):

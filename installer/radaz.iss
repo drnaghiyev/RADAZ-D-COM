@@ -37,12 +37,24 @@ Name: "{userstartup}\RADAZ"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.
 Filename: "{app}\versions\{#ProductVersion}\runtime\python\python.exe"; Parameters: """{app}\versions\{#ProductVersion}\bridge\radaz_desktop.py"" initialize --install-root ""{app}"" --no-shortcuts --start-background"; Flags: runhidden waituntilterminated
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\launcher.ps1"""; Description: "RADAZ proqramini ac"; Flags: postinstall nowait skipifsilent runhidden
 
-[UninstallRun]
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\launcher.ps1"" -Uninstall"; Flags: runhidden waituntilterminated
-
 ; No recursive uninstall-delete rules: clinical data and rollback versions are preserved.
 
 [Code]
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  ExitCode: Integer;
+begin
+  if CurUninstallStep <> usUninstall then Exit;
+  if not ExecWithNativeSysDir(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    ExpandConstant('-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{app}\launcher.ps1" -Uninstall'),
+    '', SW_HIDE, ewWaitUntilTerminated, ExitCode) then ExitCode := -1;
+  Log(Format('RADAZ shutdown exit code: %d', [ExitCode]));
+  if ExitCode <> 0 then begin
+    SuppressibleMsgBox('RADAZ services could not be stopped. No program files were removed. See logs\update-errors.jsonl and retry.', mbError, MB_OK, IDOK);
+    Abort;
+  end;
+end;
+
 function RegisterUninstaller: Boolean;
 begin
   Result := ExpandConstant('{param:NoRegistry|0}') <> '1';

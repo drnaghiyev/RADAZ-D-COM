@@ -41,14 +41,25 @@ function Stop-Snapshot($snapshot, [switch]$RetireAncestor) {
   if ($ancestors.ContainsKey([int]$snapshot.ProcessId) -and -not $RetireAncestor) { return }
   $current = Get-CimInstance Win32_Process -Filter "ProcessId = $($snapshot.ProcessId)"
   if (-not $current) { return }
-  if ($current.CreationDate -ne $snapshot.CreationDate -or $current.ExecutablePath -ne $snapshot.ExecutablePath -or $current.CommandLine -ne $snapshot.CommandLine) {
+  # A parent shutdown can reap a child between enumeration and this lookup.
+  # A recycled PID belongs to a replacement, so the original is already gone.
+  if ($current.CreationDate -ne $snapshot.CreationDate) { return }
+  if ($current.ExecutablePath -ne $snapshot.ExecutablePath -or $current.CommandLine -ne $snapshot.CommandLine) {
+    $live = Get-Process -Id $snapshot.ProcessId -ErrorAction SilentlyContinue
+    if (-not $live -or $live.HasExited) { return }
     throw 'Process identity changed; replacement process was not stopped.'
   }
   try { Stop-Process -Id $current.ProcessId -Force -ErrorAction Stop }
-  catch { if (Get-CimInstance Win32_Process -Filter "ProcessId = $($current.ProcessId)") { throw } }
+  catch {
+    $remaining = Get-CimInstance Win32_Process -Filter "ProcessId = $($current.ProcessId)"
+    if ($remaining -and $remaining.CreationDate -eq $snapshot.CreationDate) { throw }
+  }
   Wait-Process -Id $current.ProcessId -Timeout 10 -ErrorAction SilentlyContinue
-  $remaining = Get-Process -Id $current.ProcessId -ErrorAction SilentlyContinue
-  if ($remaining -and -not $remaining.HasExited) { throw "Runtime process did not stop: $($current.Name) PID $($current.ProcessId)" }
+  $remaining = Get-CimInstance Win32_Process -Filter "ProcessId = $($current.ProcessId)"
+  if ($remaining -and $remaining.CreationDate -eq $snapshot.CreationDate) {
+    $live = Get-Process -Id $current.ProcessId -ErrorAction SilentlyContinue
+    if ($live -and -not $live.HasExited) { throw "Runtime process did not stop: $($current.Name) PID $($current.ProcessId)" }
+  }
 }
 if ($Action -eq 'Owner') {
   $owners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique)

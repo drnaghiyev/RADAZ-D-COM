@@ -63,7 +63,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m unittest discover -s tests -p '*_test.py'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Build and validate the Windows package
+      - name: Build Windows installer and delta
         if: steps.plan.outputs.publish == 'true'
         shell: pwsh
         run: |
@@ -80,18 +80,36 @@ jobs:
           $releaseVersion = (Get-Content public/product.json -Raw | ConvertFrom-Json).version
           python scripts/package-delta.py --previous-release "outputs/releases/RADAZ-$releaseVersion-Windows-x64.zip"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Test fresh Windows Setup and rollback
+        if: steps.plan.outputs.publish == 'true'
+        shell: pwsh
+        run: |
           python tests/desktop-install-smoke.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Test previous-version delta activation
+        if: steps.plan.outputs.publish == 'true'
+        shell: pwsh
+        run: |
+          $releaseVersion = (Get-Content public/product.json -Raw | ConvertFrom-Json).version
           $delta = Get-ChildItem "outputs/releases/RADAZ-$releaseVersion-from-*.manifest.json" | Select-Object -First 1 | Get-Content -Raw | ConvertFrom-Json
           $env:RADAZ_TEST_BASE_PACKAGE = "outputs/delta-base/RADAZ-$($delta.baseVersion)-Windows-x64.zip"
           $env:RADAZ_TEST_DELTA = '1'
           python tests/desktop-install-smoke.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Remove-Item Env:RADAZ_TEST_DELTA
+      - name: Test full Setup upgrade and safe uninstall
+        if: steps.plan.outputs.publish == 'true'
+        shell: pwsh
+        run: |
+          $releaseVersion = (Get-Content public/product.json -Raw | ConvertFrom-Json).version
+          $delta = Get-ChildItem "outputs/releases/RADAZ-$releaseVersion-from-*.manifest.json" | Select-Object -First 1 | Get-Content -Raw | ConvertFrom-Json
+          $env:RADAZ_TEST_BASE_PACKAGE = "outputs/delta-base/RADAZ-$($delta.baseVersion)-Windows-x64.zip"
           $env:RADAZ_TEST_SETUP_UPGRADE = '1'
           python tests/desktop-install-smoke.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Remove-Item Env:RADAZ_TEST_SETUP_UPGRADE, Env:RADAZ_TEST_BASE_PACKAGE
+      - name: Test legacy Watch migration and validate release
+        if: steps.plan.outputs.publish == 'true'
+        shell: pwsh
+        run: |
           python tests/desktop-watch-migration.py --download
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/github-release.py validate

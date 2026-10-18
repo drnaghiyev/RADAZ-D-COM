@@ -247,6 +247,15 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
     for file,digest in preserved.items():assert hashlib.sha256(file.read_bytes()).hexdigest()==digest,file.name
     print('Real frontend/backend update and failed-runtime rollback passed; clinical archive stayed separate',flush=True)
     if (install/'unins000.exe').exists():
+        # A failed shutdown must abort Inno before it removes any program file.
+        launcher=install/'launcher.ps1';original_launcher=launcher.read_bytes()
+        try:
+            launcher.write_text('exit 42')
+            refused=subprocess.run([str(install/'unins000.exe'),'/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'],env=env,capture_output=True,timeout=30,creationflags=0x08000000)
+            assert refused.returncode!=0
+            assert (install/'versions'/VERSION/'SHA256SUMS.json').is_file()
+            assert get('/radaz-health.json')['ready'] is True
+        finally:launcher.write_bytes(original_launcher)
         run([install/'unins000.exe','/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',f'/LOG={install / "logs/uninstall.log"}'])
         for file,digest in preserved.items():assert hashlib.sha256(file.read_bytes()).hexdigest()==digest,file.name
         remaining=[]

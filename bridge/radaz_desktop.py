@@ -811,7 +811,12 @@ def main():
         # not opened. Installing an update must never interrupt an examination.
         if fresh and args.start_background: launch(root, no_browser=True)
     elif args.command == 'launch': launch(root, args.no_browser)
-    elif args.command == 'uninstall': stop_installation(root)
+    elif args.command == 'uninstall':
+        try: stop_installation(root)
+        except Exception as error:
+            (root/'uninstalling.json').unlink(missing_ok=True)
+            failure(root, error, 'uninstall')
+            raise
     elif args.command == 'repair': repair_update(root, args.target_version)
     elif args.command == 'check':
         with lock(root, 'update'): check_update(root)
