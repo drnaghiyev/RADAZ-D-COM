@@ -571,6 +571,7 @@ def open_version(root, target):
 def launch(root, no_browser=False):
     if (root/'uninstalling.json').exists(): raise RuntimeError('RADAZ uninstall is in progress')
     with lock(root, 'launch', 90):
+        if (root/'uninstalling.json').exists(): raise RuntimeError('RADAZ uninstall is in progress')
         active = read_json(root / 'active.json')
         current = active['version']; target = current
         if (root / 'pending.json').exists():
@@ -696,6 +697,7 @@ def recover_server(root):
     if (root/'uninstalling.json').exists(): return
     # A failed runtime does not authorize activation of an unrequested staged update.
     with lock(root, 'launch'):
+        if (root/'uninstalling.json').exists(): return
         current = read_json(root / 'active.json')['version']
         return open_version(root, current)
 
@@ -790,6 +792,7 @@ def stop_installation(root):
         used=runtime_processes(root,'InUse')['versions']
         for target in used: stop_runtime(root,target)
         runtime_processes(root,'StopServices')
+        atomic_json(root/'uninstalling.json',{'stopping':False,'stopped':True})
 
 
 def main():

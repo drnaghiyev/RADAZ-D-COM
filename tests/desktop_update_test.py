@@ -15,6 +15,24 @@ spec = importlib.util.spec_from_file_location('desktop', Path(__file__).resolve(
 desktop = importlib.util.module_from_spec(spec); spec.loader.exec_module(desktop)
 
 class DesktopUpdates(unittest.TestCase):
+    def test_uninstall_wins_over_a_launcher_already_waiting_for_the_lock(self):
+        @desktop.contextlib.contextmanager
+        def uninstall_while_waiting(*args):
+            desktop.atomic_json(self.root / 'uninstalling.json', {'stopped': True})
+            yield
+
+        for command in (desktop.launch, desktop.recover_server):
+            with self.subTest(command=command.__name__):
+                (self.root / 'uninstalling.json').unlink(missing_ok=True)
+                with patch.object(desktop, 'lock', uninstall_while_waiting), patch.object(desktop, 'open_version') as opened, patch.object(desktop, 'run_hidden') as spawned:
+                    if command is desktop.launch:
+                        with self.assertRaisesRegex(RuntimeError, 'uninstall'):
+                            command(self.root)
+                    else:
+                        command(self.root)
+                    opened.assert_not_called()
+                    spawned.assert_not_called()
+
     def test_setup_starts_fresh_install_but_only_stages_an_upgrade(self):
         source = self.root / 'package'
         (source / 'public').mkdir(parents=True)

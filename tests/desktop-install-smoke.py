@@ -247,11 +247,22 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
     for file,digest in preserved.items():assert hashlib.sha256(file.read_bytes()).hexdigest()==digest,file.name
     print('Real frontend/backend update and failed-runtime rollback passed; clinical archive stayed separate',flush=True)
     if (install/'unins000.exe').exists():
-        run([install/'unins000.exe','/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'])
+        run([install/'unins000.exe','/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',f'/LOG={install / "logs/uninstall.log"}'])
         for file,digest in preserved.items():assert hashlib.sha256(file.read_bytes()).hexdigest()==digest,file.name
-        for endpoint in (web,archive):
-            with socket.socket() as sock:
-                sock.settimeout(2);assert sock.connect_ex(('127.0.0.1',endpoint))!=0
+        remaining=[]
+        for _ in range(150):
+            remaining=[]
+            for endpoint in (web,archive):
+                with socket.socket() as sock:
+                    sock.settimeout(.2)
+                    if sock.connect_ex(('127.0.0.1',endpoint))==0:remaining.append(endpoint)
+            if not remaining:break
+            time.sleep(.2)
+        if remaining:
+            literal=str(install).replace("'","''")
+            print(run([PS,'-NoProfile','-Command',f"Get-CimInstance Win32_Process | Where-Object {{ $_.CommandLine -like '*{literal}*' }} | Select-Object Name,ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress"]),flush=True)
+            print((install/'logs/uninstall.log').read_text(encoding='utf-8-sig',errors='replace')[-12000:],flush=True)
+        assert not remaining,{'uninstallPortsStillListening':remaining,'markerExists':(install/'uninstalling.json').exists()}
         print('Uninstall stopped this installation without removing archive, settings or license',flush=True)
 finally:
     # Stop only synthetic processes whose executable/script path is inside this temp directory.
