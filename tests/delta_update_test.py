@@ -120,6 +120,20 @@ class DeltaUpdates(unittest.TestCase):
             self.assertEqual(desktop.cleanup_versions(self.root),['0.2.29'])
         self.assertTrue((self.root/'versions/0.2.30').exists())
 
+    def test_old_controller_activation_requires_matching_runtime_health_archive_and_listener(self):
+        desktop.atomic_json(self.source/'dist/server/radaz-build.json',{'buildId':'expected'})
+        good=[{'name':'RADAZ','version':self.base,'buildId':'expected','pid':123},
+              {'ready':True,'buildId':'expected'},{'version':1,'desktopManaged':True,'appVersion':self.base}]
+        marker=self.root/'activation-verified.json'
+        for index,field,value in [(0,'buildId','old'),(0,'version','0.2.1'),(0,'pid',999),(1,'ready',False),(2,'appVersion','0.2.1')]:
+            responses=[dict(item) for item in good];responses[index][field]=value
+            with patch.object(desktop,'get_json',side_effect=responses),patch.object(desktop,'runtime_processes',return_value={'pid':123}):
+                with self.assertRaises(RuntimeError):desktop.verify_activation(self.root,self.base)
+            self.assertFalse(marker.exists())
+        with patch.object(desktop,'get_json',side_effect=good),patch.object(desktop,'runtime_processes',return_value={'pid':123}):
+            desktop.verify_activation(self.root,self.base)
+        self.assertEqual(desktop.read_json(marker)['version'],self.base)
+
     def test_interrupted_download_resumes_at_verified_offset(self):
         raw=b'0123456789abcdef';asset=dict(name='fixture.zip',size=len(raw),digest='sha256:'+hashlib.sha256(raw).hexdigest(),browser_download_url='https://github.com/fixture.zip')
         class Interrupted(io.BytesIO):

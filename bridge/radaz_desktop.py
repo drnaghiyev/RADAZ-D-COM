@@ -437,6 +437,23 @@ def runtime_processes(root, action, target=None):
     if action in ('Owner','InUse'): return json.loads(result.stdout.decode('utf-8-sig'))
 
 
+def verify_activation(root,target):
+    """Read-only verification also works when an older controller activated us."""
+    identity=read_json(version_dir(root,target)/'dist/server/radaz-build.json')
+    base=f'http://127.0.0.1:{os.environ.get("RADAZ_PORT","5173")}'
+    served=get_json(base+'/radaz-runtime.json',3)
+    health=get_json(base+'/radaz-health.json',3)
+    receiver=get_json(f'http://127.0.0.1:{os.environ.get("RADAZ_ARCHIVE_PORT","8766")}/status',3)
+    owner=runtime_processes(root,'Owner',target)
+    if (served.get('name')!='RADAZ' or served.get('version')!=target
+        or served.get('buildId')!=identity['buildId'] or not isinstance(served.get('pid'),int)
+        or served['pid']<=0 or served['pid']!=owner.get('pid')
+        or not health.get('ready') or health.get('buildId')!=identity['buildId']
+        or receiver.get('version')!=1 or receiver.get('desktopManaged') and receiver.get('appVersion')!=target):
+        raise RuntimeError('Active runtime, listener and archive identity must match before cleanup')
+    if read_json(root/'active.json')['version']!=target:raise RuntimeError('Active version changed during verification')
+    atomic_json(root/'activation-verified.json',{'version':target})
+
 def cleanup_versions(root):
     """Caller holds launch.lock. Retain active, rollback, staged and every live runtime."""
     active=read_json(root/'active.json')
@@ -755,7 +772,9 @@ def watch(root):
         with lock(root, 'launch', 90):
             if read_json(root / 'active.json')['version'] == own_version:
                 runtime_processes(root, 'RetireWatch', own_version)
-                try: cleanup_versions(root)
+                try:
+                    verify_activation(root,own_version)
+                    cleanup_versions(root)
                 except (OSError,ValueError,KeyError,RuntimeError): pass  # Cleanup never blocks a healthy runtime.
         with lock(root, 'update'):
             while True:
@@ -792,7 +811,9 @@ def watch(root):
                         # The old controller can still be exiting during the
                         # first cleanup. Retry after it has released its files.
                         try:
-                            with lock(root,'launch'):cleanup_versions(root)
+                            with lock(root,'launch'):
+                                verify_activation(root,own_version)
+                                cleanup_versions(root)
                         except (OperationBusy,OSError,ValueError,KeyError,RuntimeError):pass
                     if tick % 10: continue
                     try:
