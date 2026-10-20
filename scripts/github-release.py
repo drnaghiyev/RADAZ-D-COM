@@ -193,7 +193,9 @@ def publish(api, root, version, commit, release_commit=None):
                     return {'path':name,'size':info.file_size,'sha256':digest,
                             'offset':info.header_offset+30+filename_length+extra_length,
                             'compressedSize':info.compress_size,'compression':info.compress_type}
-                payload['distribution']={'version':version,'minimumSupportedVersion':'0.2.8','fileTransport':'zip-ranges-v1',
+                # v2 keeps 0.2.44 on its compatible delta path while upgrading
+                # to the controller that reuses CDN redirects and backs off.
+                payload['distribution']={'version':version,'minimumSupportedVersion':'0.2.8','fileTransport':'zip-ranges-v2',
                     'files':[file_entry(name,digest) for name,digest in sorted(manifest.items())],
                     'deltas':[{k:v for k,v in json.loads(file.read_text(encoding='utf-8')).items() if k!='files'} for file in files if file.name.endswith('.manifest.json')]}
             signed=subprocess.run(['node',str(root/'scripts/release-signature.mjs'),'sign'],input=json.dumps(payload,separators=(',',':')).encode(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=True)

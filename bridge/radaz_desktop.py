@@ -406,6 +406,9 @@ def stage_file_update(root, release, target, base):
         # Preserve a rejected candidate until the new candidate passes all checks.
     staging=root/'versions'/('.staging-'+secrets.token_hex(10));staging.mkdir(parents=True)
     downloaded = 0
+    # Resolve GitHub's release redirect once. Re-resolving every file can hit
+    # github.com abuse limits even though only a few MB are being transferred.
+    range_url = asset['browser_download_url']
     try:
         for index,entry in enumerate(entries):
             name=entry['path'];existing=source/name;raw=None
@@ -419,19 +422,35 @@ def stage_file_update(root, release, target, base):
                 state(root,'downloading',f'RADAZ {target}: dəyişmiş və çatışmayan fayllar yüklənir…',target,
                       {'done':index,'total':len(entries),'unit':'fayl'})
                 if length:
-                    for attempt in range(3):
+                    for attempt in range(5):
                         try:
-                            url=asset['browser_download_url']+f'?range={start}-{end}&attempt={attempt}'
+                            parts=urlsplit(range_url)
+                            query=[(k,v) for k,v in parse_qsl(parts.query,keep_blank_values=True) if k not in ('radaz_range','radaz_attempt')]
+                            query.extend((('radaz_range',f'{start}-{end}'),('radaz_attempt',str(attempt))))
+                            url=urlunsplit((parts.scheme,parts.netloc,parts.path,urlencode(query),parts.fragment))
                             request=Request(url,headers={'User-Agent':'RADAZ-desktop-updater','Accept-Encoding':'identity','Range':f'bytes={start}-{end}'})
                             with urlopen(request,timeout=60) as response:
                                 if response.status!=206 or response.headers.get('Content-Range')!=f'bytes {start}-{end}/{asset["size"]}':
                                     raise ValueError('Server did not honor the requested file range')
                                 packed=response.read(length+1)
                                 if len(packed)!=length:raise OSError('Incomplete file update')
+                                if hasattr(response,'geturl'):range_url=response.geturl()
                             break
+                        except HTTPError as error:
+                            if attempt==4:raise
+                            if error.code in (401,403) and range_url!=asset['browser_download_url']:
+                                # The temporary CDN URL expired; acquire a fresh
+                                # redirect, without changing signed file hashes.
+                                range_url=asset['browser_download_url']
+                            elif error.code not in (408,429,500,502,503,504):raise
+                            delay=min(2**attempt,16)
+                            retry_after=error.headers.get('Retry-After','')
+                            if retry_after.isdigit():delay=max(delay,min(int(retry_after),60))
+                            error.close()
+                            time.sleep(delay)
                         except (OSError,HTTPException,TimeoutError):
-                            if attempt==2:raise
-                            time.sleep(.5*(attempt+1))
+                            if attempt==4:raise
+                            time.sleep(min(2**attempt,16))
                 else:packed=b''
                 if entry['compression']==8:
                     decoder=zlib.decompressobj(-15)
@@ -488,7 +507,7 @@ def check_update(root, approved_version=None):
                    else f'RADAZ {target} — yeni versiya mövcuddur. Avtomatik yükləmək üçün Yenilə düyməsini basın.')
         state(root, 'available', message, target, diagnostic=failed.get('diagnostic') if retry else None)
         return
-    if release.get('distribution',{}).get('fileTransport') == 'zip-ranges-v1':
+    if release.get('distribution',{}).get('fileTransport') in ('zip-ranges-v1','zip-ranges-v2'):
         stage_file_update(root,release,target,active)
         return
     product_path = version_dir(root,active)/'public/product.json'

@@ -220,4 +220,58 @@ class DeltaUpdates(unittest.TestCase):
                 with self.assertRaises(ValueError):desktop.stage_file_update(self.root,release,self.target,self.base)
                 network.assert_not_called()
 
+    def test_file_update_reuses_cdn_redirect_and_honors_rate_limit_delay(self):
+        release,raw=self.file_release();requests=[];limited=False
+        cdn='https://release-assets.githubusercontent.com/fixture.zip?sig=fixture'
+        def response(request,**kwargs):
+            nonlocal limited
+            requests.append(request.full_url)
+            if len(requests)>1 and not limited:
+                limited=True
+                raise desktop.HTTPError(request.full_url,429,'Rate limited',{'Retry-After':'7'},None)
+            start,end=map(int,request.get_header('Range')[6:].split('-'))
+            result=io.BytesIO(raw[start:end+1]);result.status=206
+            result.headers={'Content-Range':f'bytes {start}-{end}/{len(raw)}'}
+            result.geturl=lambda:cdn
+            return result
+        with patch.object(desktop,'urlopen',side_effect=response),patch.object(desktop.time,'sleep') as sleep:
+            desktop.stage_file_update(self.root,release,self.target,self.base)
+        self.assertTrue(requests[0].startswith('https://github.com/'))
+        self.assertGreater(len(requests),3)
+        self.assertTrue(all(url.startswith(cdn+'&radaz_range=') for url in requests[1:]))
+        sleep.assert_called_once_with(7)
+        desktop.validate_directory(self.root/'versions'/self.target,self.target)
+
+    def test_file_update_refreshes_expired_cdn_url_without_full_download(self):
+        release,raw=self.file_release();requests=[]
+        def response(request,**kwargs):
+            requests.append(request.full_url)
+            if len(requests)==2:
+                raise desktop.HTTPError(request.full_url,403,'Expired',{},None)
+            start,end=map(int,request.get_header('Range')[6:].split('-'))
+            result=io.BytesIO(raw[start:end+1]);result.status=206
+            result.headers={'Content-Range':f'bytes {start}-{end}/{len(raw)}'}
+            result.geturl=lambda:'https://release-assets.githubusercontent.com/fixture.zip?sig=new'
+            return result
+        with patch.object(desktop,'urlopen',side_effect=response),patch.object(desktop.time,'sleep'):
+            desktop.stage_file_update(self.root,release,self.target,self.base)
+        self.assertTrue(requests[1].startswith('https://release-assets.githubusercontent.com/'))
+        self.assertTrue(requests[2].startswith('https://github.com/'))
+        desktop.validate_directory(self.root/'versions'/self.target,self.target)
+
+    def test_file_transport_v2_repairs_missing_file_through_update_controller(self):
+        release,raw=self.file_release()
+        release['distribution']['fileTransport']='zip-ranges-v2'
+        (self.source/'installer/launcher.ps1').unlink()
+        def response(request,**kwargs):
+            start,end=map(int,request.get_header('Range')[6:].split('-'))
+            result=io.BytesIO(raw[start:end+1]);result.status=206
+            result.headers={'Content-Range':f'bytes {start}-{end}/{len(raw)}'}
+            return result
+        with patch.object(desktop,'get_latest_release',return_value=release),patch.object(desktop,'urlopen',side_effect=response):
+            desktop.check_update(self.root,approved_version=self.target)
+        desktop.validate_directory(self.root/'versions'/self.target,self.target)
+        self.assertTrue((self.root/'versions'/self.target/'installer/launcher.ps1').is_file())
+        self.assertEqual(desktop.read_json(self.root/'active.json')['version'],self.base)
+
 if __name__=='__main__':unittest.main()
