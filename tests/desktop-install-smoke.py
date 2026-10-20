@@ -220,6 +220,11 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
     assert get('/radaz-runtime.json')['version']==VERSION
     assert get('/radaz-runtime.json')['startedAt']!=before_recovery
     print('Background watcher restored stopped server; active version and archive preserved',flush=True)
+    if base_version!=VERSION:
+        for _ in range(150):
+            if not (install/'versions'/base_version).exists():break
+            time.sleep(.5)
+        assert not (install/'versions'/base_version).exists(), 'Superseded controller must release its runtime for cleanup'
     variant('99.0.1')
     # Exercise HTTP apply with a live watcher as well as a detached controller.
     with urlopen(Request(base+'/radaz-update',data=json.dumps({'action':'apply','confirmed':True,'version':'99.0.1'}).encode(),headers={'Origin':base,'Content-Type':'application/json'}),timeout=5) as response:

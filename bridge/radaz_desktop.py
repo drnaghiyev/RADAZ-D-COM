@@ -788,6 +788,12 @@ def watch(root):
                         handoff = version_dir(root, active)
                         break
                     if (root / 'update-request.json').exists(): break
+                    if tick == 30:
+                        # The old controller can still be exiting during the
+                        # first cleanup. Retry after it has released its files.
+                        try:
+                            with lock(root,'launch'):cleanup_versions(root)
+                        except (OperationBusy,OSError,ValueError,KeyError,RuntimeError):pass
                     if tick % 10: continue
                     try:
                         served = get_json(f'http://127.0.0.1:{os.environ.get("RADAZ_PORT", "5173")}/radaz-runtime.json', 3)
