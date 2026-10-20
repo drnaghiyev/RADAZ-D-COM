@@ -511,6 +511,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   const [mediaFilter, setMediaFilter] = useState<string[] | undefined>();
   const [mediaProgress, setMediaProgress] = useState<MediaProgress | null>(null);
   const [loadProgress, setLoadProgress] = useState<LoadingProgress | null>(null);
+  const [transferProgress, setTransferProgress] = useState<LoadingProgress | null>(null);
   const [mprProgress, setMprProgress] = useState<LoadingProgress | null>(null);
   const mprBuildEpoch = useRef(0);
   const mediaId = (session: string, item: MediaImage) => `media:${item.archived ? "archive" : session}:${item.studyId}/${item.seriesUID}`;
@@ -542,6 +543,11 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   const detachedSources=useRef(new Map<string,()=>void>());
   const selectedIdRef = useRef<string | undefined>(undefined);
   selectedIdRef.current=assigned[active];
+  useEffect(()=>{
+    if(detachedMode)return;
+    const frame=requestAnimationFrame(()=>document.querySelector('.series-card.chosen')?.scrollIntoView({block:'nearest',inline:'nearest'}));
+    return()=>cancelAnimationFrame(frame);
+  },[assigned[active],detachedMode]);
   assignmentsRef.current=assigned;
   const connectHandoff = (mode: DetachedMode | 'report', token: string, seriesId = selectedIdRef.current) => {
     const key = mode === 'report' ? mode : `${mode}:${seriesId}`;
@@ -682,9 +688,11 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       progress(progress) {
         setMediaProgress(progress);
         if (importEpoch.current === selectionEpoch && progress.sessions && (!selectedIdRef.current || mediaSeries.current.has(selectedIdRef.current))) setStatus(`CD/DVD · ${progress.loaded} / ${progress.discovered} görüntü${progress.scanning ? ' · Local arxivə köçürülür…' : progress.loaded + progress.skipped < progress.discovered ? ' · yüklənir…' : ' · Local arxivdən oxunur'}${progress.skipped ? ` · ${progress.skipped} oxunmadı` : ''}`);
-        if (!progress.scanning && progress.loaded + progress.skipped >= progress.discovered) {
+        if (progress.indexedSessions?.length || !progress.scanning && progress.loaded + progress.skipped >= progress.discovered) {
           let changed = false;
-          for (const [id, s] of mediaSeries.current) if (s.loading) {
+          for (const [id, s] of mediaSeries.current) if (s.loading && (
+            progress.indexedSessions?.includes(s.mediaSession||'') && s.imageIds.length >= (s.discovered||0) ||
+            !progress.scanning && progress.loaded + progress.skipped >= progress.discovered)) {
             mediaSeries.current.set(id, {...s, loading: false}); changed = true;
           }
           if (changed) { const next = mergeMedia(listRef.current); listRef.current = next; setSeriesList(next); }
@@ -716,7 +724,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     }
   }, [ready, seriesList]);
 
-  const importFiles = useCallback(async (files: File[], request = ++importEpoch.current, preferredSeriesId?: string, job?:{select:()=>boolean;progress:(p:LoadingProgress|null)=>void}): Promise<boolean> => {
+  const importFiles = useCallback(async (files: File[], request = ++importEpoch.current, preferredSeriesId?: string, job?:{select:()=>boolean;pending?:(seriesId:string)=>boolean;progress:(p:LoadingProgress|null)=>void}): Promise<boolean> => {
     const current=()=>!!job||request===importEpoch.current;
     const reportProgress=job?.progress||setLoadProgress;
     reportProgress({label: 'DICOM yüklənir', done: 0, total: files.length});
@@ -733,6 +741,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     let firstError = '';
     let published = false;
     let finished = false;
+    let firstDecoded = false;
     const discardUnpublished = () => {
       const visible = new Set(listRef.current.flatMap(s => s.imageIds));
       releaseLocalDicoms(createdIds.filter(id => !visible.has(id)));
@@ -740,7 +749,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     const publish = () => {
       const imported = [...found.values()].map(({ ordered, sopUIDs, ...s }) => {
         const imageIds = ordered.sort((a, b) => a.n - b.n).map(o => o.id);
-        return { ...s, imageIds, loading: !finished, thumb: s.thumb || thumbnailLocalDicom(imageIds[0]) };
+        return { ...s, imageIds, loading: !finished||!!job?.pending?.(s.id), thumb: s.thumb || thumbnailLocalDicom(imageIds[0]) };
       });
       if (!imported.length) return;
       if (!published && (!job || job.select())) {
@@ -767,6 +776,12 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       if (!detachedMode) document.title = viewerTitle;
       setStatus(`${imported.length} seriya · ${acceptedFiles.length} / ${files.length} görüntü oxunur…`);
     };
+    const rejectImage=(imageId:string,error:unknown)=>{
+      rejected++; firstError ||= String(error); invalidIds.add(imageId);
+      const index=acceptedFiles.indexOf(filesById.get(imageId)!);if(index>=0)acceptedFiles.splice(index,1);
+      for(const [key,record] of found){record.ordered=record.ordered.filter(item=>item.id!==imageId);if(!record.ordered.length)found.delete(key);}
+      releaseLocalDicoms([imageId]);
+    };
     for (const file of files) {
       if (!current()) { discardUnpublished(); return false; }
       if (file.name.split('/').pop()?.toUpperCase() === 'DICOMDIR') { ignored++; continue; }
@@ -780,7 +795,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         const sopUID = get('x00080018');
         if(!found.has(uid)){
           const existing=listRef.current.find(s=>s.id.replace(/^media:[^:]+:/,'')===uid);
-          if(existing)found.set(uid,{...existing,ordered:existing.imageIds.map((id,n)=>({id,n:Number(viewer.core.metaData.get('generalImageModule',id)?.instanceNumber??n)})),
+          if(existing)found.set(uid,{...existing,id:uid,ordered:existing.imageIds.map((id,n)=>({id,n:Number(viewer.core.metaData.get('generalImageModule',id)?.instanceNumber??n)})),
             sopUIDs:new Set(existing.imageIds.map(id=>viewer.core.metaData.get('sopCommonModule',id)?.sopInstanceUID).filter(Boolean))});
         }
         if (sopUID && found.get(uid)?.sopUIDs.has(sopUID)) { ignored++; continue; }
@@ -799,25 +814,25 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         record.ordered.push({ id: imageId, n: Number(get('x00200013')) || 0 });
         if (sopUID) record.sopUIDs.add(sopUID);
         found.set(uid, record);
+        if(!firstDecoded){
+          try{await viewer.core.imageLoader.loadAndCacheImage(imageId);firstDecoded=true;}catch(error){rejectImage(imageId,error);}
+        }
+        if(firstDecoded&&(acceptedFiles.length===1||acceptedFiles.length%16===0||record.ordered.length===1))publish();
         if (acceptedFiles.length === 1 || acceptedFiles.length % 8 === 0 || record.ordered.length === 1) {
           await yieldToBrowser();
         }
       } catch (err) { rejected++; firstError ||= err instanceof Error ? err.message : String(err); }
     }
     if (!current()) { discardUnpublished(); return false; }
-    const rejectImage=(imageId:string,error:unknown)=>{
-      rejected++; firstError ||= String(error); invalidIds.add(imageId);
-      const index=acceptedFiles.indexOf(filesById.get(imageId)!);if(index>=0)acceptedFiles.splice(index,1);
-      for(const [key,record] of found){record.ordered=record.ordered.filter(item=>item.id!==imageId);if(!record.ordered.length)found.delete(key);}
-      releaseLocalDicoms([imageId]);
-    };
     // Keep the previous examination if none of the new files can be decoded.
     for(const imageId of createdIds){
+      if(invalidIds.has(imageId))continue;
       try{await viewer.core.imageLoader.loadAndCacheImage(imageId);break;}
       catch(error){rejectImage(imageId,error);}
       if(!current()){discardUnpublished();return false;}
     }
     if(!current()){discardUnpublished();return false;}
+    if(!createdIds.length)finished=true;
     publish();
     for (const imageId of createdIds) {
       if(invalidIds.has(imageId))continue;
@@ -839,6 +854,28 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     setStatus(`Uyğun DICOM görüntüsü tapılmadı${firstError && !firstError.startsWith('dicomParser.') ? `: ${firstError}` : ''}. Əvvəlki müayinə saxlanıldı.`);
     return false;
   }, [detachedMode]);
+
+  const archiveLoadEpoch=useRef(0);
+  const loadArchiveStudies = useCallback(async (uids: string[], request: number, cancelled:()=>boolean=()=>false, selectFirst=true) => {
+    const generation=++archiveLoadEpoch.current;
+    const current=()=>!cancelled()&&generation===archiveLoadEpoch.current;
+    let selected=!selectFirst,opened=false;
+    for(const [index,uid] of uids.entries()){
+      const files=await getArchiveFiles(uid,(done,total)=>{
+        if(current())setLoadProgress({label:`Local arxiv ${index+1}/${uids.length}`,done,total});
+      },async (batch,pendingSeries)=>{
+        if(!current())throw new DOMException('Study changed','AbortError');
+        opened=await importFiles(batch,request,undefined,{pending:id=>pendingSeries?pendingSeries.has(id.split('/').at(-1)!):true,select:()=>{if(selected||request!==importEpoch.current)return false;selected=true;return true;},progress:()=>{}})||opened;
+      });
+      if(!files.length)throw Error('Seçilmiş müayinə arxivdə tapılmadı');
+      if(current()){
+        const next=listRef.current.map(s=>s.studyId===uid?{...s,loading:false}:s);
+        listRef.current=next;setSeriesList(next);
+      }
+    }
+    if(current())setLoadProgress(null);
+    return opened;
+  },[importFiles]);
 
   useEffect(() => {
     if (!detachedMode) return;
@@ -863,7 +900,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       const next:Series[]=snapshot.series.map(({images,...series})=>({...series,imageIds:borrowLocalDicoms(images)}));
       const selected=next.find(s=>s.id===snapshot.preferredSeriesId)||next[0];
       syncAnatomy(snapshot.anatomy,selected);
-      const replacement=previous[0]?.id!==selected?.id||!!previous[0]?.imageIds.length&&previous[0].imageIds[0]!==selected?.imageIds[0];
+      const replacement=previous[0]?.id!==selected?.id||previous[0]?.imageIds.length!==selected?.imageIds.length||!!previous[0]?.imageIds.length&&previous[0].imageIds[0]!==selected?.imageIds[0];
       if(replacement||!selected){
         mprBuildEpoch.current++;setMprProgress(null);setMprError('');
         const mpr=mprDataRef.current;mprDataRef.current=null;setMprData(null);
@@ -907,15 +944,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         if (archivedStudies.length) {
           setStatus('Local arxivdən müayinə açılır…');
           setLoadProgress({label: 'Local arxiv yüklənir', done: 0, total: 0});
-          const files:File[]=[];
-          for(const [index,uid] of archivedStudies.entries()){
-            if(cancelled)return;
-            const studyFiles=await getArchiveFiles(uid,(done,total)=>{if(!cancelled)setLoadProgress({label:`Local arxiv ${index+1}/${archivedStudies.length}`,done,total});});
-            if(!studyFiles.length)throw Error(`Seçilmiş müayinə arxivdə tapılmadı (${index+1}/${archivedStudies.length})`);
-            files.push(...studyFiles);
-          }
-          if (!cancelled && files.length) await importFiles(files, 0);
-          else if (!cancelled) setStatus('Arxiv müayinəsi tapılmadı');
+          await loadArchiveStudies(archivedStudies,0,()=>cancelled);
           return;
         }
         if (new URLSearchParams(window.location.search).get('pending') === 'pacs') setLoadProgress({label:'PACS yüklənir',done:0,total:0});
@@ -928,22 +957,15 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
 
   useEffect(() => {
     if (detachedMode || typeof BroadcastChannel === 'undefined') return;
-    const load = async (uids: string[]) => {
-      const request = ++importEpoch.current;
+    const load = async (uids: string[], append=false) => {
+      const request = append?importEpoch.current:++importEpoch.current;
       setStatus('Local arxivdən müayinə açılır…');
       try {
-        const files:File[]=[];
-        for(const [index,uid] of uids.entries()){
-          const found=await getArchiveFiles(uid,(done,total)=>{if(request===importEpoch.current)setLoadProgress({label:`Local arxiv ${index+1}/${uids.length}`,done,total});});
-          if(request!==importEpoch.current)return;
-          if(!found.length)throw new Error('Seçilmiş müayinə arxivdə tapılmadı');
-          files.push(...found);
-        }
-        if(await importFiles(files,request))history.replaceState(null,'',`/#archive-studies=${encodeURIComponent(uids.join(','))}`);
-      } catch (error) { if (request === importEpoch.current) setStatus(String(error)); }
+        if(await loadArchiveStudies(uids,request,()=>false,!append)&&!append)history.replaceState(null,'',`/#archive-studies=${encodeURIComponent(uids.join(','))}`);
+      } catch (error) { if (request === importEpoch.current) {setStatus(String(error));setLoadProgress(null);} }
     };
-    return registerViewer(load, (progress,error) => { setLoadProgress(progress); if(error)setStatus(error); });
-  }, [detachedMode, importFiles]);
+    return registerViewer(load, (progress,error) => { setTransferProgress(progress); if(error)setStatus(error); });
+  }, [detachedMode, loadArchiveStudies]);
 
   const openDetached = (mode: DetachedMode) => {
     const source=listRef.current.find(s=>s.id===selectedIdRef.current);
@@ -1087,7 +1109,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     const run=async()=>{
       setImportBusy(true);setImportProgress({label:'İdxal hazırlanır',done:0,total:sources.length,unit:'mənbə',indeterminate:true});
       let processed=0,selected=false,successful=false,batch:File[]=[],bytes=0,last:{source:string;sourceIndex:number;sourceCount:number;entryIndex:number;entryCount:number}|null=null;
-      const progress=(phase:string)=>setImportProgress({label:'İdxal',done:last?last.sourceIndex+(last.entryIndex+1)/last.entryCount:0,total:sources.length,unit:'mənbə',phase:`${last?.source||''} · ${processed} fayl · ${phase}`});
+      const progress=(phase:string)=>setImportProgress({label:'İdxal',done:Math.min(sources.length*.99,last?last.sourceIndex+(last.entryIndex+1)/last.entryCount:0),total:sources.length,unit:'mənbə',counter:`${processed} fayl emal edilib · Mənbə ${last?last.sourceIndex+1:1}/${sources.length}`,phase:`${last?.source||''} · ${phase}`});
       const flush=async()=>{
         if(!batch.length)return;
         const files=batch;batch=[];bytes=0;
@@ -1330,7 +1352,10 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   };
 
   const mprPreview = currentSeries?.imageIds.length && ['CT','MR'].includes(currentSeries.modality) ? currentSeries : seriesList.find(item=>item.imageIds.length && ['CT','MR'].includes(item.modality));
-  const sourceLoading: LoadingProgress | null = loadProgress || (mediaProgress?.sessions && (mediaProgress.scanning || mediaProgress.loaded + mediaProgress.skipped < mediaProgress.discovered) ? {label:detachedMode === '3d'?'3D görüntü hazırlanır':'MPR hazırlanır',done:mediaProgress.loaded,total:mediaProgress.discovered,indeterminate:mediaProgress.scanning,phase:'DICOM görüntüləri oxunur'} : null);
+  const mediaLoading: LoadingProgress | null = mediaProgress?.sessions && (mediaProgress.scanning || mediaProgress.loaded + mediaProgress.skipped < mediaProgress.discovered) ? {label:'CD/DVD yüklənir',done:mediaProgress.loaded,total:mediaProgress.discovered,indeterminate:mediaProgress.scanning,phase:mediaProgress.error || (mediaProgress.scanning?'Fayllar indekslənir':undefined)} : null;
+  const jobProgress = importProgress || transferProgress || loadProgress || mediaLoading;
+  const floatingProgress = !detachedMode && (railHidden || importOpen);
+  const sourceLoading: LoadingProgress | null = volumeSeries?.loading ? {label:'Seriya yüklənir',done:volumeSeries.imageIds.length,total:volumeSeries.discovered||0,indeterminate:!volumeSeries.discovered} : null;
   return <ToolbarWorkspace scope={workspace}><main className={`workstation grouped-workstation ${railHidden ? 'rail-hidden' : ''} ${detachedMode ? 'detached' : ''}`} data-mode={detachedMode || 'viewer'} style={measurementVariables as React.CSSProperties}
     onDragOverCapture={event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; } }}
     onDropCapture={event => {
@@ -1338,7 +1363,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       event.preventDefault(); event.stopPropagation();
       if (!limited) void dropSources(event.dataTransfer.items, event.dataTransfer.files);
     }}>
-    <WorkProgress className="import-job-progress" progress={importProgress}/><header className={`topbar ${toolbarMore?'toolbar-more-open':''}`}>
+    <WorkProgress className="import-job-progress floating-job-progress" progress={floatingProgress?jobProgress:null}/><header className={`topbar ${toolbarMore?'toolbar-more-open':''}`}>
       <ToolbarOverflow/>
       {!detachedMode && <div className="brand"><RadazLogo size={34}/><span><strong>RADAZ</strong><RadazTagline/></span></div>}
       <div className="primary-command-row">
@@ -1435,7 +1460,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
           {importQueue.length ? importQueue.map(source => <div className="source-row" key={source.id}><span><strong>{source.label}</strong><small>{source.files.length} {tr('ui.files_46c6f')}</small></span><button aria-label={`${source.label} siyahıdan sil`} disabled={importBusy} onClick={() => setImportQueue(current => current.filter(item => item.id !== source.id))}><Trash2 size={15}/></button></div>)
             : <p>{tr('ui.no_sources_selected_choose_folders_separately_b1cb5')}</p>}
         </div>
-        <WorkProgress progress={importProgress}/><DialogFooter><Button variant="outline" disabled={importBusy} onClick={() => setImportOpen(false)}>{tr('ui.close_c1cf9')}</Button><Button disabled={importBusy || !importQueue.length} onClick={() => { void openSources(importQueue.flatMap(source => source.files)); }}>{importBusy ? 'Açılır…' : `${importQueue.length} mənbəni aç`}</Button></DialogFooter>
+        <DialogFooter><Button variant="outline" disabled={importBusy} onClick={() => setImportOpen(false)}>{tr('ui.close_c1cf9')}</Button><Button disabled={importBusy || !importQueue.length} onClick={() => { void openSources(importQueue.flatMap(source => source.files)); }}>{importBusy ? 'Açılır…' : `${importQueue.length} mənbəni aç`}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
     <div className="body-grid">
@@ -1460,13 +1485,10 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
           </section>)}
           {!seriesList.length && <div className="rail-empty">{status}</div>}
         </div>
-        <WorkProgress className="series-work-progress" progress={importProgress||loadProgress}/>
+        <WorkProgress className="series-work-progress import-job-progress" progress={!floatingProgress?jobProgress:null}/>
         {mediaEnabled && <div className="media-import-progress">
           {mediaProgress?.error ? <small role="alert">{mediaProgress.error} <a href="/RADAZ-Qurasdirma.html" target="_blank" rel="noreferrer">{tr('ui.installation_instructions_11dc8')}</a></small> : !mediaProgress?.sessions ? <small>{tr('ui.waiting_for_cd_dvd_ac285')}</small> : null}
-          <WorkProgress progress={mediaProgress && (mediaProgress.scanning || mediaProgress.loaded + mediaProgress.skipped < mediaProgress.discovered) && !mediaProgress.error ? {
-            label:'CD/DVD yüklənir',done:mediaProgress.loaded,total:mediaProgress.discovered,indeterminate:mediaProgress.scanning,
-            phase:mediaProgress.scanning?'Müvəqqəti diskə köçürülür; hazır görüntülərə baxa bilərsiniz':mediaProgress.skipped ? `${mediaProgress.skipped} görüntü oxunmadı` : undefined,
-          } : null}/>
+
         </div>}
       </aside>}
       <section className="main-area">{recordsPage&&<section className="embedded-records" aria-label={recordsPage==='archive'?'Local arxiv':'PACS'}><button className="embedded-close" onClick={()=>setRecordsPage(null)}>Viewer-ə qayıt ×</button>{recordsPage==='archive'?<ArchivePage embedded/>:<PacsPage embedded/>}</section>}
@@ -1480,7 +1502,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
           <div className={`mpr-grid ${inlinePlanes?'inline-mpr-grid':''} ${maximizedMprPane ? 'maximized' : ''}`} style={inlinePlanes?{gridTemplateColumns:`repeat(${maximizedMprPane?1:inlinePlanes.length},minmax(0,1fr))`,gridTemplateRows:'1fr'}:undefined}>
             {(inlinePlanes||(['SAG','COR','AX'] as const)).map(plane=>({plane,index:{SAG:0,COR:1,AX:2}[plane],id:{SAG:'MS',COR:'MC',AX:'MA'}[plane]})).map(({plane,index,id})=>{
               const shown=mprData?.planes[index] || (plane==='AX'?mprPreview:undefined);
-              const progress=!shown?.imageIds.length ? mprProgress || sourceLoading : null;
+              const progress=index===0 && !shown?.imageIds.length ? mprProgress || sourceLoading : null;
               return <ViewportPane onHover={()=>{syncSource.current=id;}} projectionViews={projectionViews} anatomyControl={anatomyVolume} anatomyVolume={volumeResultFor(seriesList.find(s=>s.id===mprData?.sourceId))} anatomyVolumeVisible={anatomyVolume.visible} anatomyVolumeOpacity={anatomyVolume.opacity} windowLevels={windowLevels} windowingSourceId={mprData?.sourceId || mprPreview?.id} key={`${id}-${mprData?.sourceId || mprPreview?.id || 'waiting'}`} id={id} initialImageId={currentImages[id]} series={shown} loadingProgress={progress} reconstruction={mprSettings[plane]} viewAnchor={mprData?.pivot} expanded={maximizedMprPane===id} concealed={!!maximizedMprPane&&maximizedMprPane!==id} selected={mprActive===id} tool={limited?'scroll':tool} cursor={cursor} onCursor={onCursor} hideText={hideText} preset={preset} resetToken={resetToken} clearToken={clearToken} ready={ready} marks={marks} selectedMarkId={selectedMarkId} localizers={localizers}
                 otherImages={(['MS','MC','MA']).filter(other=>other!==id).map(other=>({panel:other,imageId:currentImages[other] || ''})).filter(item=>item.imageId)}
                 onImageChange={onImageChange} onMoveSource={moveMprSource} onMoveIntersection={moveMprIntersection} onRotateSource={rotateMprSource} onRotateStart={beginMprRotation} onPreviewRotateSource={(source,target,radians)=>updateMprRotation(source,target,radians)}

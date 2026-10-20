@@ -1,7 +1,7 @@
 export type MediaSession = { id: string; label: string; stage: 'scanning' | 'ready' | 'error'; scanned: number; total: number; error: string; dicomdir: boolean };
 export type MediaImage = { id: string; studyId: string; seriesUID: string; sopUID: string; name: string; modality: string;
   patient: string; patientId: string; birth: string; date: string; number: string; instance: number; size: number; decodedBytes: number; archived?: boolean; tags: Record<string,string> };
-export type MediaProgress = { sessions: number; discovered: number; loaded: number; skipped: number; scanning: boolean; error: string };
+export type MediaProgress = { sessions: number; discovered: number; loaded: number; skipped: number; scanning: boolean; error: string; indexedSessions?: string[] };
 type SessionState = { session: MediaSession; controller: AbortController; next: number; queue: MediaImage[];
   loaded: number; skipped: number; pumping: boolean; bytes: number; error: string };
 type Callbacks = {
@@ -33,6 +33,7 @@ export function watchRemovableMedia(callbacks: Callbacks, onlySessions?: string[
     callbacks.progress({ sessions: items.length, discovered: items.reduce((n, s) => n + s.session.total, 0),
       loaded: items.reduce((n, s) => n + s.loaded, 0), skipped: items.reduce((n, s) => n + s.skipped, 0),
       scanning: items.some(s => s.session.stage === 'scanning'),
+      indexedSessions: items.filter(s=>s.session.stage!=='scanning'&&s.next>=s.session.total).map(s=>s.session.id),
       error: error || items.map(s => s.error || s.session.error).find(Boolean) || '' });
   };
   const remove = (id: string) => {

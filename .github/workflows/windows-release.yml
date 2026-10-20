@@ -91,9 +91,12 @@ jobs:
         shell: pwsh
         run: |
           $releaseVersion = (Get-Content public/product.json -Raw | ConvertFrom-Json).version
-          $delta = Get-ChildItem "outputs/releases/RADAZ-$releaseVersion-from-*.manifest.json" | Select-Object -First 1 | Get-Content -Raw | ConvertFrom-Json
+          $delta = Get-ChildItem "outputs/releases/RADAZ-$releaseVersion-from-*.manifest.json" | Sort-Object Name -Descending | Select-Object -First 1 | Get-Content -Raw | ConvertFrom-Json
           $env:RADAZ_TEST_BASE_PACKAGE = "outputs/delta-base/RADAZ-$($delta.baseVersion)-Windows-x64.zip"
           $env:RADAZ_TEST_DELTA = '1'
+          python tests/desktop-install-smoke.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:RADAZ_TEST_BASE_PACKAGE = "outputs/delta-base/RADAZ-0.2.40-Windows-x64.zip"
           python tests/desktop-install-smoke.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Test full Setup upgrade and safe uninstall
@@ -101,7 +104,7 @@ jobs:
         shell: pwsh
         run: |
           $releaseVersion = (Get-Content public/product.json -Raw | ConvertFrom-Json).version
-          $delta = Get-ChildItem "outputs/releases/RADAZ-$releaseVersion-from-*.manifest.json" | Select-Object -First 1 | Get-Content -Raw | ConvertFrom-Json
+          $delta = Get-ChildItem "outputs/releases/RADAZ-$releaseVersion-from-*.manifest.json" | Sort-Object Name -Descending | Select-Object -First 1 | Get-Content -Raw | ConvertFrom-Json
           $env:RADAZ_TEST_BASE_PACKAGE = "outputs/delta-base/RADAZ-$($delta.baseVersion)-Windows-x64.zip"
           $env:RADAZ_TEST_SETUP_UPGRADE = '1'
           python tests/desktop-install-smoke.py

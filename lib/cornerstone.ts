@@ -259,6 +259,7 @@ function metadata(type: string, imageId: string) {
     samplesPerPixel: 1, photometricInterpretation: ds.string('x00280004') || 'MONOCHROME2' };
   if (type === m.VOI_LUT) { const { wl, ww } = defaultWindow(item); return { windowCenter: [wl], windowWidth: [ww] }; }
   if (type === m.MODALITY_LUT) return { rescaleIntercept: 0, rescaleSlope: 1 };
+  if (type === 'generalImageModule') return { instanceNumber: asNumber(ds, 'x00200013', 0) };
   if (type === m.GENERAL_SERIES) return { modality: ds.string('x00080060') || 'OT', seriesInstanceUID: ds.string('x0020000e') };
   if (type === m.SOP_COMMON) return { sopClassUID: ds.string('x00080016'), sopInstanceUID: ds.string('x00080018') };
 }
@@ -436,7 +437,7 @@ export function seriesGeometry(imageIds:string[]) {
   return describeVolume(imageIds.map(id=>{
     const g=getLocalizerGeometry(id),ds=records.get(id)?.dataSet;
     if(!g||!ds)throw Error('Volume üçün DICOM məkan koordinatları tələb olunur');
-    return {...g,id,sliceThickness:asNumber(ds,'x00180050',0),spacingBetweenSlices:asNumber(ds,'x00180088',0)};
+    return {...g,id,sopUID:derived.has(id)||geometryOverrides.has(id)?undefined:ds.string('x00080018')?.trim(),sliceThickness:asNumber(ds,'x00180050',0),spacingBetweenSlices:asNumber(ds,'x00180088',0)};
   }));
 }
 /** Stream a complete, geometry-validated CT/MR volume at the model's 3 mm scale.
@@ -581,7 +582,7 @@ export function rotateMprOrientation(orientation: MprOrientation, axis: Point3, 
 
 /** Reconstruct one actual oblique frame from the original calibrated voxel volume. */
 export function createObliqueMprStacks(imageIds: string[], settings: MprSettings, orientations: MprOrientations, pivot: Point3, planes: MprPlane[] = ['SAG','COR','AX']): Record<MprPlane, string[]> {
-  seriesGeometry(imageIds);
+  imageIds=seriesGeometry(imageIds).imageIds;
   // Use the existing volume validation before registering any new derived images.
   const slices = imageIds.map(id => ({ id, record: records.get(id), geometry: getLocalizerGeometry(id) }));
   if (slices.length < 3 || slices.some(s => !s.record || !s.geometry)) throw new Error('MPR üçün məkan koordinatlı kəsitlər lazımdır');
@@ -638,7 +639,7 @@ export function createObliqueMprStacks(imageIds: string[], settings: MprSettings
 
 /** Reformat one parallel, regularly spaced mono volume into three patient-space stacks. */
 export function createMprStacks(imageIds: string[], settings: MprSettings, planes: MprPlane[] = ['SAG','COR','AX']): Record<MprPlane, string[]> {
-  seriesGeometry(imageIds);
+  imageIds=seriesGeometry(imageIds).imageIds;
   if (imageIds.length < 3) throw new Error('MPR üçün ən azı 3 məkan koordinatlı kəsit lazımdır');
   const slices = imageIds.map(id => ({ id, record: records.get(id), geometry: getLocalizerGeometry(id) }));
   if (slices.some(s => !s.record || !s.geometry)) throw new Error('MPR üçün DICOM məkan koordinatları tələb olunur');

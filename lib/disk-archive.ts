@@ -26,15 +26,28 @@ export const receiverStatus = async (): Promise<ArchiveReceiverStatus> => (await
 export const diskStudies = async (): Promise<ArchiveStudy[]> => (await request('/studies', {}, 4000)).json();
 export const configureReceiver = async (settings: Pick<ArchiveReceiverStatus, 'aeTitle' | 'port' | 'enabled'>): Promise<ArchiveReceiverStatus> =>
   (await request('/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings) })).json();
-export async function diskFiles(study: string, onProgress?: (done: number, total: number) => void): Promise<File[]> {
-  const items: { uid: string }[] = await (await request(`/instances?study=${encodeURIComponent(study)}`)).json();
+export type ArchiveBatch = (files: File[], pendingSeries?: ReadonlySet<string>) => Promise<void>;
+export async function diskFiles(study: string, onProgress?: (done: number, total: number) => void, onBatch?: ArchiveBatch): Promise<File[]> {
+  const items: { uid: string; series?: string }[] = await (await request(`/instances?study=${encodeURIComponent(study)}`)).json();
   const files: File[] = [];
+  let batch: File[] = [];
+  const remaining = new Map<string,number>();
+  for (const item of items) if(item.series) remaining.set(item.series,(remaining.get(item.series)||0)+1);
+  const completeCatalog = items.every(item=>!!item.series);
+  const flush=async()=>{
+    if(onBatch&&batch.length){await onBatch(batch,completeCatalog?new Set([...remaining].filter(([,count])=>count>0).map(([uid])=>uid)):undefined);batch=[];}
+  };
   onProgress?.(0, items.length);
   for (const item of items) {
     const response = await request(`/file/${encodeURIComponent(item.uid)}`, {}, 60000);
     files.push(new File([await response.blob()], `${item.uid}.dcm`, { type: 'application/dicom' }));
+    batch.push(files[files.length-1]);
+    if(item.series)remaining.set(item.series,remaining.get(item.series)!-1);
+    // Publish the last slice of a series before requesting the next series.
+    if(files.length===1||batch.length>=16||(item.series&&remaining.get(item.series)===0))await flush();
     onProgress?.(files.length, items.length);
   }
+  await flush();
   return files;
 }
 export async function saveDiskFiles(files: File[], onProgress?: (done: number, total: number) => void) {

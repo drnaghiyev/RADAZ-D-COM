@@ -50,7 +50,7 @@ export function VolumePreview(props:Props){
   if(!inputSeries?.loading)return;
   const timer=setInterval(()=>setSeries(propsRef.current.series),750);
   return()=>clearInterval(timer);
- },[inputSeries?.id,inputSeries?.loading]);
+ },[inputSeries?.id,inputSeries?.loading,inputSeries?.imageIds.length]);
  const interacting=useRef(false),lastFrame=useRef(0),finishTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);
  const adjust=useRef<{mode:"zoom"|"tissue"|"width";x:number;y:number;scale:number;threshold:number;opacity:number;width:number}|null>(null);
  const autoProfile=useRef<Profile>('balanced'),applyRef=useRef<()=>void>(()=>{});

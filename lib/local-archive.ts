@@ -1,5 +1,5 @@
 import {dicomSeriesName} from './dicom-description';
-import { deleteDiskStudies, diskFiles, diskStudies, diskStudyOpened, receiverStatus, saveDiskFiles, hasLocalArchiveEndpoint } from './disk-archive';
+import { deleteDiskStudies, diskFiles, diskStudies, diskStudyOpened, receiverStatus, saveDiskFiles, hasLocalArchiveEndpoint, type ArchiveBatch } from './disk-archive';
 import { parseDicomFile } from './dicom-file';
 
 const DATABASE = 'radaz-local-archive';
@@ -195,13 +195,14 @@ export async function listArchiveStudies(requireDisk = false): Promise<ArchiveSt
   for (const study of disk) entries.set(study.uid, study);
   return [...entries.values()].sort((a, b) => b.date.localeCompare(a.date) || b.addedAt - a.addedAt);
 }
-export async function getArchiveFiles(study: string, onProgress?: (done: number, total: number) => void): Promise<File[]> {
+export async function getArchiveFiles(study: string, onProgress?: (done: number, total: number) => void, onBatch?: ArchiveBatch): Promise<File[]> {
   const browser = await browserGetArchiveFiles(study);
   let disk: File[] = [];
   if (hasLocalArchiveEndpoint()) {
-    try { disk = await diskFiles(study, onProgress); }
+    try { disk = await diskFiles(study, onProgress, onBatch); }
     catch (error) { if (!browser.length) throw error; }
   }
+  if(onBatch&&browser.length)await onBatch(browser,new Set());
   const unique = new Map<string, File>();
   if (!disk.length) onProgress?.(browser.length, browser.length);
   for (const file of [...browser, ...disk]) {

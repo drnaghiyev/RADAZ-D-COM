@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {registerViewer,openStudyInViewer,openStudiesInViewer,requestedStudies,focusViewer,notifyViewerProgress,recordsWindowTitle,registerRecordsWindow,openRecordsWindow} from '../lib/viewer-session.ts';
+import {registerViewer,openStudyInViewer,openStudiesInViewer,requestedStudies,focusViewer,notifyViewerProgress,refreshStudyInViewer,recordsWindowTitle,registerRecordsWindow,openRecordsWindow} from '../lib/viewer-session.ts';
 let opened=[],navigated=[];
 const storage=new Map();globalThis.localStorage={getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)};
 const open=(url,name)=>{opened.push([url,name]);return {name,closed:false,focus(){},location:{href:'http://localhost/',assign:url=>navigated.push(url),replace:url=>navigated.push(url)}};};
@@ -21,6 +21,18 @@ test('PACS reserves the existing tab and delivers scoped progress',async()=>{
 test('closed or unready Viewer receives a complete selection URL in the reserved tab',async()=>{
  opened=[];navigated=[];assert.equal(await openStudiesInViewer(['1.2.3','1.2.4','1.2.3']),'new');assert.equal(opened.length,1);
  assert.deepEqual(requestedStudies(navigated[0].slice(1)),['1.2.3','1.2.4']);
+});
+
+test('completed PACS series refresh in order without requesting a new selection',async()=>{
+ const loaded=[];let finish;const gate=new Promise(resolve=>finish=resolve);
+ const stop=registerViewer(async(ids,append)=>{loaded.push([ids,append]);if(!append)await gate;});
+ try{
+  const tab=await focusViewer();await openStudyInViewer('1.2.3',tab);
+  refreshStudyInViewer('1.2.3',tab);refreshStudyInViewer('1.2.4',tab);
+  await new Promise(r=>setTimeout(r,20));assert.equal(loaded.length,1);
+  finish();await new Promise(r=>setTimeout(r,40));
+  assert.deepEqual(loaded,[[['1.2.3'],undefined],[['1.2.3'],true],[['1.2.4'],true]]);
+ }finally{finish();stop();}
 });
 test('popup denial is recoverable and invalid IDs never navigate',async()=>{
  navigated=[];window.open=()=>null;

@@ -15,3 +15,12 @@ test('reject incompatible frames, missing slices, tilt and invalid geometry inst
   const values=frames();change(values);assert.throws(()=>describeVolume(values));
  }
 });
+
+test('reimported SOP instances do not duplicate slices, while conflicting phases stay rejected',()=>{
+ const values=frames().map((f,i)=>({...f,sopUID:`1.2.${i}`}));
+ const duplicate=values.map(f=>({...f,id:`copy-${f.id}`}));
+ const volume=describeVolume([...values,...duplicate]);
+ assert.equal(volume.dimensions[2],8);assert.deepEqual(volume.imageIds,values.map(f=>f.id));
+ assert.throws(()=>describeVolume([...values,{...values[0],id:'phase',sopUID:'9.1'}]));
+ assert.throws(()=>describeVolume([...values,{...values[0],id:'corrupt',origin:[0,0,0]}]));
+});

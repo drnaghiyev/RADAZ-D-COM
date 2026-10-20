@@ -9,15 +9,23 @@ from urllib.request import Request, urlopen
 
 
 def build_delta(previous, current, output):
-    with ZipFile(previous) as old, ZipFile(current) as new:
-        before = json.loads(old.read('SHA256SUMS.json'))
+    with ZipFile(previous) as old:
+        before=json.loads(old.read('SHA256SUMS.json'))
+        base=json.loads(old.read('desktop.json'))['version']
+        if set(old.namelist()) != set(before) | {'SHA256SUMS.json'}:raise ValueError('Incomplete source package')
+        for name,digest in before.items():
+            if hashlib.sha256(old.read(name)).hexdigest()!=digest:raise ValueError('Source checksum mismatch: '+name)
+    return build_delta_manifest(base,before,current,output)
+
+
+def build_delta_manifest(base, before, current, output):
+    with ZipFile(current) as new:
         after = json.loads(new.read('SHA256SUMS.json'))
-        base = json.loads(old.read('desktop.json'))['version']
         target = json.loads(new.read('desktop.json'))['version']
         for value in (base, target):
             if not re.fullmatch(r'\d+\.\d+\.\d+', value): raise ValueError('Invalid version')
         changed = [name for name, digest in after.items() if before.get(name) != digest]
-        for package, manifest in ((old, before), (new, after)):
+        for package, manifest in ((new, after),):
             if set(package.namelist()) != set(manifest) | {'SHA256SUMS.json'}:
                 raise ValueError('Incomplete source package')
             for name, digest in manifest.items():
@@ -54,7 +62,7 @@ if __name__ == '__main__':
     if args.previous_release:
         repo='drnaghiyev/RADAZ-D-COM'
         with urlopen(Request(f'https://github.com/{repo}/releases/latest/download/radaz-update.json',headers={'User-Agent':'RADAZ-delta-builder'}),timeout=60) as response:
-            release=json.loads(response.read(1024*1024))
+            release=json.load(response)
         base=release['tag_name'].removeprefix('v')
         if not re.fullmatch(r'\d+\.\d+\.\d+',base): raise ValueError('Invalid prior release')
         name=f'RADAZ-{base}-Windows-x64.zip'
@@ -73,3 +81,31 @@ if __name__ == '__main__':
         if args.previous.stat().st_size!=asset['size'] or hashlib.sha256(args.previous.read_bytes()).hexdigest()!=asset['digest'][7:]:raise ValueError('Prior package checksum mismatch')
     if args.previous is None:parser.error('A previous package or --previous-release is required')
     build_delta(args.previous, args.current, args.output)
+
+    # Deployed 0.2.40-43 controllers understand only a direct base->target delta.
+    # Publish cumulative deltas so skipping releases never omits their changes.
+    if args.previous_release:
+        for patch_number in range(40,int(base.split('.')[-1])):
+            compatibility=f'0.2.{patch_number}'
+            with urlopen(Request(f'https://github.com/{repo}/releases/download/v{compatibility}/radaz-update.json',headers={'User-Agent':'RADAZ-delta-builder'}),timeout=60) as response:
+                prior=json.load(response)
+            if prior['tag_name']!='v'+compatibility:raise ValueError('Wrong compatibility release')
+            entries=prior.get('distribution',{}).get('files')
+            if entries:
+                import importlib.util
+                spec=importlib.util.spec_from_file_location('compat_desktop',Path(__file__).resolve().parents[1]/'bridge/radaz_desktop.py')
+                desktop=importlib.util.module_from_spec(spec);spec.loader.exec_module(desktop)
+                desktop.authenticate_release(prior)
+                build_delta_manifest(compatibility,{f['path']:f['sha256'] for f in entries},args.current,args.output)
+            else:
+                name=f'RADAZ-{compatibility}-Windows-x64.zip'
+                asset=next(a for a in prior['assets'] if a['name']==name)
+                url=f'https://github.com/{repo}/releases/download/v{compatibility}/{name}'
+                if asset['browser_download_url']!=url or not re.fullmatch('sha256:[a-f0-9]{64}',asset['digest']):raise ValueError('Invalid compatibility package')
+                file=Path('outputs/delta-base')/name
+                if not file.exists() or hashlib.sha256(file.read_bytes()).hexdigest()!=asset['digest'][7:]:
+                    with urlopen(Request(url,headers={'User-Agent':'RADAZ-delta-builder'}),timeout=120) as src,file.open('wb') as dst:
+                        import shutil
+                        shutil.copyfileobj(src,dst)
+                if file.stat().st_size!=asset['size'] or hashlib.sha256(file.read_bytes()).hexdigest()!=asset['digest'][7:]:raise ValueError('Compatibility checksum mismatch')
+                build_delta(file,args.current,args.output)

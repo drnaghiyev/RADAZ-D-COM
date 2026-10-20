@@ -37,7 +37,7 @@ const drag=async(source,target)=>{
 try{
   await page.goto((process.env.RADAZ_TEST_URL||'http://localhost:5317')+'/#archive-study=2.25.410',{timeout:60000,waitUntil:'domcontentloaded'});
   console.log('STEP viewer loaded');
-  await page.waitForFunction(()=>document.querySelectorAll('.series-card img').length===2&&!document.querySelector('.series-work-progress [role="progressbar"]'),null,{timeout:30000});
+  await page.waitForFunction(()=>document.querySelectorAll('.series-card img').length===2&&!document.querySelector('.series-work-progress progress'),null,{timeout:30000});
   console.log('STEP thumbnails loaded');
   await pane('A').filter({has:page.locator('.vertical-stack-scroll input')}).waitFor();
   await page.getByTitle('Listələ · S',{exact:true}).click();
@@ -143,6 +143,8 @@ try{
     let importTimer;
     try{await Promise.race([started,new Promise((_,reject)=>{importTimer=setTimeout(()=>reject(new Error('Import did not reach disk save')),20000);})]);}finally{clearTimeout(importTimer);}
     await fresh.locator('.import-job-progress progress').waitFor();
+    assert.equal(await fresh.locator('progress').count(),1,'single indicator for mixed ZIP/DICOM import');
+    assert.doesNotMatch(await fresh.locator('.import-job-progress').textContent(),/\d\.\d{5}/,'no fractional source counter');
     await fresh.evaluate(()=>{const c=new BroadcastChannel('radaz-viewer-open-v2');c.postMessage({kind:'OPEN',request:crypto.randomUUID(),target:window.name,studies:['2.25.411']});setTimeout(()=>c.close(),50);});
     await fresh.waitForFunction(()=>document.querySelector('[data-panel="A"] .top-right')?.textContent.includes('SYNTHETIC CR'));
     assert.equal(await fresh.locator('.import-job-progress progress').count(),1);

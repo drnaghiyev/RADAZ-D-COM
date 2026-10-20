@@ -3,6 +3,7 @@ import importlib.util
 import io
 import json
 import os
+import struct
 import tempfile
 import unittest
 from pathlib import Path
@@ -163,5 +164,60 @@ class DeltaUpdates(unittest.TestCase):
 
     def test_new_release_requires_publisher_signature_before_download(self):
         with self.assertRaisesRegex(ValueError,'signature'):desktop.authenticate_release({'tag_name':'v0.2.41'})
+
+    def file_release(self):
+        raw=self.new.read_bytes();entries=[]
+        with ZipFile(self.new) as archive:
+            manifest=json.loads(archive.read('SHA256SUMS.json'))
+            for name,digest in manifest.items():
+                info=archive.getinfo(name);n,e=struct.unpack_from('<HH',raw,info.header_offset+26)
+                entries.append(dict(path=name,size=info.file_size,sha256=digest,offset=info.header_offset+30+n+e,compressedSize=info.compress_size,compression=info.compress_type))
+        name=f'RADAZ-{self.target}-Windows-x64.zip'
+        return dict(tag_name='v'+self.target,draft=False,prerelease=False,assets=[dict(name=name,state='uploaded',size=len(raw),digest='sha256:'+hashlib.sha256(raw).hexdigest(),browser_download_url=f'https://github.com/{desktop.UPDATE_REPOSITORY}/releases/download/v{self.target}/{name}')],
+                    distribution=dict(version=self.target,fileTransport='zip-ranges-v1',files=entries)),raw
+
+    def test_file_update_skips_releases_and_repairs_missing_and_corrupt_files(self):
+        # An installed version need not have a matching delta, and its own
+        # manifest may claim a file is healthy when the bytes are actually old.
+        (self.source/'runtime/node/node.exe').write_bytes(b'broken')
+        (self.source/'installer/launcher.ps1').unlink()
+        release,raw=self.file_release();requested=[]
+        def response(request,**kwargs):
+            start,end=map(int,request.get_header('Range')[6:].split('-'));requested.append((start,end))
+            result=io.BytesIO(raw[start:end+1]);result.status=206
+            result.headers={'Content-Range':f'bytes {start}-{end}/{len(raw)}'};return result
+        with patch.object(desktop,'urlopen',side_effect=response):
+            desktop.stage_file_update(self.root,release,self.target,self.base)
+        destination=self.root/'versions'/self.target
+        desktop.validate_directory(destination,self.target)
+        self.assertEqual(desktop.read_json(self.root/'active.json')['version'],self.base)
+        self.assertEqual((self.source/'runtime/node/node.exe').read_bytes(),b'broken')
+        unchanged=next(e for e in release['distribution']['files'] if e['path']=='runtime/python/python.exe')
+        self.assertNotIn((unchanged['offset'],unchanged['offset']+unchanged['compressedSize']-1),requested)
+        self.assertFalse((destination/'old-only.txt').exists())
+        self.assertEqual(desktop.read_json(self.root/'pending.json')['version'],self.target)
+        self.assertEqual(desktop.read_json(self.root/'update-state.json')['diagnostic']['verifiedFiles'],len(release['distribution']['files']))
+
+    def test_file_update_rejects_ignored_range_or_bad_bytes_without_ready_marker(self):
+        release,raw=self.file_release()
+        for kind in ('full','corrupt'):
+            def response(request,**kwargs):
+                start,end=map(int,request.get_header('Range')[6:].split('-'))
+                result=io.BytesIO(raw if kind=='full' else b'X'*(end-start+1))
+                result.status=200 if kind=='full' else 206
+                result.headers={'Content-Range':f'bytes {start}-{end}/{len(raw)}'};return result
+            with patch.object(desktop,'urlopen',side_effect=response):
+                with self.assertRaises((ValueError,desktop.zlib.error)):
+                    desktop.stage_file_update(self.root,release,self.target,self.base)
+            self.assertFalse((self.root/'pending.json').exists())
+            self.assertFalse((self.root/'versions'/self.target).exists())
+
+    def test_file_update_rejects_unsafe_and_overlapping_signed_index(self):
+        for change in ('path','offset'):
+            release,_=self.file_release();entry=release['distribution']['files'][1]
+            entry[change]='../escape' if change=='path' else release['distribution']['files'][0]['offset']
+            with patch.object(desktop,'urlopen') as network:
+                with self.assertRaises(ValueError):desktop.stage_file_update(self.root,release,self.target,self.base)
+                network.assert_not_called()
 
 if __name__=='__main__':unittest.main()

@@ -180,8 +180,21 @@ def publish(api, root, version, commit, release_commit=None):
         if version_parts(version)>=(0,2,41):
             with ZipFile(desktop_file) as full:
                 manifest=json.loads(full.read('SHA256SUMS.json'))
-                payload['distribution']={'version':version,'minimumSupportedVersion':'0.2.8',
-                    'files':[{'path':name,'size':full.getinfo(name).file_size,'sha256':digest} for name,digest in sorted(manifest.items())],
+                def file_entry(name,digest):
+                    info=full.getinfo(name)
+                    # Local ZIP headers may use a different filename encoding/extra
+                    # length than the central directory. Read their actual lengths.
+                    import struct
+                    with desktop_file.open('rb') as stream:
+                        stream.seek(info.header_offset)
+                        header=stream.read(30)
+                    if header[:4]!=b'PK\x03\x04':raise ValueError('Invalid local ZIP header')
+                    filename_length,extra_length=struct.unpack_from('<HH',header,26)
+                    return {'path':name,'size':info.file_size,'sha256':digest,
+                            'offset':info.header_offset+30+filename_length+extra_length,
+                            'compressedSize':info.compress_size,'compression':info.compress_type}
+                payload['distribution']={'version':version,'minimumSupportedVersion':'0.2.8','fileTransport':'zip-ranges-v1',
+                    'files':[file_entry(name,digest) for name,digest in sorted(manifest.items())],
                     'deltas':[{k:v for k,v in json.loads(file.read_text(encoding='utf-8')).items() if k!='files'} for file in files if file.name.endswith('.manifest.json')]}
             signed=subprocess.run(['node',str(root/'scripts/release-signature.mjs'),'sign'],input=json.dumps(payload,separators=(',',':')).encode(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=True)
             payload['signature']=json.loads(signed.stdout)

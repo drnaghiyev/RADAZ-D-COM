@@ -1,9 +1,21 @@
 export type Vec3 = [number,number,number];
-export type VolumeFrame = { id: string; studyId: string; frameId: string; origin: Vec3; columnDirection: Vec3; rowDirection: Vec3;
+export type VolumeFrame = { id: string; sopUID?: string; studyId: string; frameId: string; origin: Vec3; columnDirection: Vec3; rowDirection: Vec3;
   rowSpacing: number; columnSpacing: number; rows: number; columns: number; sliceThickness?: number; spacingBetweenSlices?: number };
 const dot = (a: Vec3,b: Vec3) => a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
 const sub = (a: Vec3,b: Vec3): Vec3 => [a[0]-b[0],a[1]-b[1],a[2]-b[2]];
 export function describeVolume(frames: VolumeFrame[]) {
+  // Reopened/imported instances may have distinct local handles. Only identical
+  // DICOM instance identities can be collapsed; coincident phases remain invalid.
+  const unique=new Map<string,VolumeFrame>();
+  for(const frame of frames){
+    const key=frame.sopUID?`sop:${frame.sopUID}`:`id:${frame.id}`;
+    const previous=unique.get(key);
+    if(previous){
+      const geometry=({id,sopUID,...rest}:VolumeFrame)=>JSON.stringify(rest);
+      if(geometry(previous)!==geometry(frame))throw Error('Eyni DICOM instansiyasının məkan məlumatları uyğun deyil');
+    }else unique.set(key,frame);
+  }
+  frames=[...unique.values()];
   if(frames.length<3)throw Error('Volume üçün ən azı 3 məkan koordinatlı kəsit lazımdır');
   const base=frames[0],u=base.columnDirection,v=base.rowDirection;
   if([...u,...v,...base.origin,base.rowSpacing,base.columnSpacing].some(x=>!Number.isFinite(x)) ||

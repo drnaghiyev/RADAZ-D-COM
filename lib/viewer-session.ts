@@ -104,25 +104,35 @@ export async function focusViewer(): Promise<ViewerTarget|null> {
   if(tab&&!tab.closed){if(tab.location.href==='about:blank')tab.location.replace('/?pending=pacs');tab.focus();}
   return tab;
 }
-export function registerViewer(load: (studies: string[]) => Promise<void>, progress?: (value: WorkProgress | null, error?: string) => void) {
+export function registerViewer(load: (studies: string[], append?: boolean) => Promise<void>, progress?: (value: WorkProgress | null, error?: string) => void) {
   if (!/^RADAZ_VIEWER_[a-f0-9]{32}$/.test(window.name)) window.name = `RADAZ_VIEWER_${randomId()}`;
   const register=()=>{try{localStorage.setItem(VIEWER_KEY,window.name);}catch{}};
   register();window.addEventListener('focus',register);
   nativeRegistration = nativeViewerAction('register');
   if (window.location.hash.includes('archive-stud') || new URLSearchParams(window.location.search).has('pending')) void maximizeViewerWindow();
   const channel = new BroadcastChannel(CHANNEL);
+  let loading = Promise.resolve();
   channel.onmessage = event => {
     const data = event.data;
     if(data?.kind==='FIND'){channel.postMessage({kind:'PRESENT',request:data.request,name:window.name});return;}
     if(data?.target!==window.name)return;
     if(data.kind==='FOCUS')void maximizeViewerWindow();
     if(data.kind==='PROGRESS')progress?.(data.progress,data.error);
+    if(data.kind==='REFRESH'&&validStudy(data.study)){
+      loading=loading.then(()=>load([data.study],true)).catch(error=>progress?.(null,String(error)));
+    }
     if(data.kind==='OPEN'&&Array.isArray(data.studies)&&data.studies.length>0&&data.studies.length<=200&&data.studies.every(validStudy)){
       channel.postMessage({kind:'ACCEPTED',request:data.request});
-      void maximizeViewerWindow();void load([...new Set<string>(data.studies)]).catch(error=>progress?.(null,String(error)));
+      void maximizeViewerWindow();loading=load([...new Set<string>(data.studies)]).catch(error=>progress?.(null,String(error)));
     }
   };
   return () => {window.removeEventListener('focus',register);channel.close();};
+}
+/** Publish another fully archived series without stealing the current selection. */
+export function refreshStudyInViewer(study: string, tab: ViewerTarget | null) {
+  if(!validStudy(study)||!tab||tab.closed)return;
+  const channel=new BroadcastChannel(CHANNEL);
+  channel.postMessage({kind:'REFRESH',target:tab.name,study});channel.close();
 }
 export function notifyViewerProgress(tab: ViewerTarget | null, progress: WorkProgress | null, error?: string) {
   if (!tab || tab.closed) return;

@@ -982,8 +982,8 @@ body .toolbar-workspace .mpr-thickness output{white-space:nowrap;font-variant-nu
 .toolbar-second-row{flex:0 0 100%;order:1000;min-height:44px;display:flex;gap:10px;padding:5px 0;align-items:center;border-top:1px solid #314352}
 .toolbar-second-row[hidden]{display:none}
 [data-toolbar-group][data-group-deleted="true"]{display:none!important}
-.import-job-progress{position:fixed;bottom:32px;left:270px;right:24px;z-index:90;background:#101f2cf2;max-width:650px;pointer-events:none}
-@media(max-width:760px){.import-job-progress{left:12px;right:12px}}
+.floating-job-progress{position:fixed;bottom:32px;left:270px;right:24px;z-index:90;background:#101f2cf2;max-width:650px;pointer-events:none}
+@media(max-width:760px){.floating-job-progress{left:12px;right:12px}}
 @media(max-width:600px){.toolbar-editor-backdrop{padding:8px}.toolbar-editor{padding:12px;width:100%;max-height:96dvh}.toolbar-editor header{top:-12px}.toolbar-editor-item{grid-template-columns:minmax(80px,1fr) minmax(90px,1fr) 30px 30px;gap:4px}.toolbar-editor form{flex-wrap:wrap}}
 .toolbar-editor button{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid #39556d;border-radius:5px;background:#192f42;cursor:pointer}
 .toolbar-editor button:disabled{opacity:.35}.toolbar-editor svg{width:16px;height:16px}.toolbar-editor input,.toolbar-editor select{background:#091621;border:1px solid #39556d;border-radius:4px;padding:7px;color:#e3eff5;min-width:0}

@@ -4,7 +4,7 @@ import {useTranslation as useUiTranslation,translate as tr} from '@/lib/i18n';
 
 import { ResizableTable, ResizableHeader } from '@/components/resizable-table';
 import { SortHeader, useTableSort } from '@/components/table-sort';
-import { registerRecordsWindow, recordsWindowTitle, openStudyInViewer, openStudiesInViewer, focusViewer, notifyViewerProgress, type ViewerTarget } from '@/lib/viewer-session';
+import { registerRecordsWindow, recordsWindowTitle, openStudyInViewer, openStudiesInViewer, focusViewer, notifyViewerProgress, refreshStudyInViewer, type ViewerTarget } from '@/lib/viewer-session';
 
 import { useEffect, useRef, useState } from 'react';
 import { Activity, ExternalLink, Network, Plus, Search, Settings2, Trash2, Wifi, Download, Database, RefreshCw, X, Disc3 } from 'lucide-react';
@@ -221,20 +221,23 @@ export default function PacsPage({embedded=false}:{embedded?:boolean}={}) {
       if (!chosen.length) throw new Error('Müayinədə açılacaq seriya tapılmadı');
       if (!location.dicomwebUrl && chosen.length > 30) throw new Error('Bir köçürmədə ən çox 30 seriya seçin.');
       const expected = chosen.reduce((total, item) => total + item.instanceCount, 0);
-      if (!location.dicomwebUrl && expected > 800) throw new Error(`Seçilmiş seriyalarda ${expected} görüntü var. Bir köçürmədə ən çox 800 görüntü mümkündür; daha az seriya seçin.`);
-      report(`${chosen.length} seriya endirilir… PACS cavabı gözlənilir.`);
-      const files = location.dicomwebUrl
-        ? await retrieveRemoteStudy(location.dicomwebUrl, token, selectedStudy.uid, chosen,
-          (done, total) => progress(done,total))
-        : await retrieveDimseStudy(location, aeTitle, listenerPort, selectedStudy.uid, chosen.map(item => item.uid),
-          (done, total) => progress(done,total));
-      const imported = await saveArchiveFiles(files, (done, total) => progress(done,total,'PACS arxivə yazılır'));
-      if (!imported) throw new Error('PACS fayllarında oxuna bilən DICOM görüntüsü tapılmadı');
+      let count=0,opened=false;
+      for(const item of chosen){
+        const files=location.dicomwebUrl
+          ? await retrieveRemoteStudy(location.dicomwebUrl,token,selectedStudy.uid,[item],(done)=>progress(count+done,expected))
+          : await retrieveDimseStudy(location,aeTitle,listenerPort,selectedStudy.uid,[item.uid],(done)=>progress(count+done,expected));
+        if(!await saveArchiveFiles(files,(done,total)=>progress(count+done,expected,'PACS arxivə yazılır')))throw new Error('PACS fayllarında oxuna bilən DICOM görüntüsü tapılmadı');
+        count+=files.length;
+        if(destination==='viewer'){
+          if(!opened){await openStudyInViewer(selectedStudy.uid,viewer);opened=true;}
+          else refreshStudyInViewer(selectedStudy.uid,viewer);
+        }
+      }
       await recordStudyOpened(selectedStudy.uid);
       const target = destination === 'media' ? `/media?study=${encodeURIComponent(selectedStudy.uid)}` : `/#archive-study=${encodeURIComponent(selectedStudy.uid)}`;
-      if (destination === 'viewer') await openStudyInViewer(selectedStudy.uid, viewer);
+      if (destination === 'viewer') notifyViewerProgress(viewer,null);
       else if (mediaTab) mediaTab.location.href = target;
-      setStatus(`${files.length} görüntü local arxivə saxlanıldı${viewer || destination === 'viewer' ? ' və seçilmiş modul açıldı' : '. Arxiv vərəqəsindən açın'}`);
+      setStatus(`${count} görüntü local arxivə saxlanıldı${viewer || destination === 'viewer' ? ' və seçilmiş modul açıldı' : '. Arxiv vərəqəsindən açın'}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       updateTab(message, true); if(destination === 'viewer')notifyViewerProgress(viewer,null,message);
@@ -258,13 +261,18 @@ export default function PacsPage({embedded=false}:{embedded?:boolean}={}) {
         progress(0,0);
         const entries=location.dicomwebUrl?await queryRemoteSeries(location.dicomwebUrl,token,item.uid):(await queryDimseSeries(location,aeTitle,item.uid)).items;
         if(!entries.length)throw Error(`${index+1}-ci müayinədə seriya tapılmadı`);
-        if(!location.dicomwebUrl&&(entries.length>30||entries.reduce((n,s)=>n+s.instanceCount,0)>800))throw Error('Müayinə böyükdür. Seriyaları ayrıca seçib açın.');
-        const files=location.dicomwebUrl?await retrieveRemoteStudy(location.dicomwebUrl,token,item.uid,entries,progress):
-          await retrieveDimseStudy(location,aeTitle,listenerPort,item.uid,entries.map(s=>s.uid),progress);
-        if(!await saveArchiveFiles(files,progress))throw Error(`${index+1}-ci müayinədə oxuna bilən DICOM tapılmadı`);
+        let done=0;const total=entries.reduce((n,s)=>n+s.instanceCount,0);
+        for(const [seriesIndex,entry] of entries.entries()){
+          const files=location.dicomwebUrl?await retrieveRemoteStudy(location.dicomwebUrl,token,item.uid,[entry],n=>progress(done+n,total)):
+            await retrieveDimseStudy(location,aeTitle,listenerPort,item.uid,[entry.uid],n=>progress(done+n,total));
+          if(!await saveArchiveFiles(files,n=>progress(done+n,total)))throw Error(`${index+1}-ci müayinədə oxuna bilən DICOM tapılmadı`);
+          done+=files.length;
+          if(index===0&&seriesIndex===0)await openStudyInViewer(item.uid,viewer);
+          else refreshStudyInViewer(item.uid,viewer);
+        }
         await recordStudyOpened(item.uid);
       }
-      await openStudiesInViewer(targets.map(item=>item.uid),viewer);
+      notifyViewerProgress(viewer,null);
       setStatus(`${targets.length} seçilmiş müayinə Viewer-də açıldı`);
     }catch(error){const message=error instanceof Error?error.message:String(error);setStatus(message);notifyViewerProgress(viewer,null,message);}
     finally{setBusy(false);openingStudy.current=false;}

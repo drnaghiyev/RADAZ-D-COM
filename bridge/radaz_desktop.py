@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import time
+import zlib
 from http.client import HTTPException
 from pathlib import Path, PurePosixPath
 from urllib.request import Request, urlopen
@@ -359,6 +360,105 @@ def stage_delta(root, archive, target, digest, size, base):
     atomic_json(root/'pending.json',{'version':target})
     state(root,'ready',f'RADAZ {target} hazırdır. Tətbiq etmək üçün proqramı yenidən açın.',target,{'done':1,'total':1,'unit':'yeniləmə'})
 
+def stage_file_update(root, release, target, base):
+    """Reconstruct the complete target from signed file hashes and ZIP byte ranges.
+
+    This works across any number of skipped releases. Only locally missing or
+    mismatched files are downloaded; unchanged files are copied, never linked.
+    The caller must authenticate_release before using the signed range index.
+    """
+    source = version_dir(root, base)
+    destination = version_dir(root, target)
+    if target == read_json(root/'active.json')['version']:
+        raise ValueError('Cannot repair the active version in place')
+    distribution = release.get('distribution', {})
+    entries = distribution.get('files', [])
+    if distribution.get('version') != target or not isinstance(entries,list) or not 0 < len(entries) <= 10000:
+        raise ValueError('Invalid file update index')
+    asset = select_asset(release, base)[1]
+    manifest = {}
+    total_size = 0
+    ranges = []
+    for entry in entries:
+        name = entry['path'];file_name(name)
+        digest = entry['sha256'];size = entry['size']
+        offset = entry.get('offset');compressed = entry.get('compressedSize');method = entry.get('compression')
+        if name in ('SHA256SUMS.json','delta.json') or not re.fullmatch('[a-f0-9]{64}',digest):
+            raise ValueError('Invalid file update checksum')
+        if any(type(n) is not int for n in (size,offset,compressed,method)) or min(size,offset,compressed)<0 or method not in (0,8) or offset+compressed>asset['size']:
+            raise ValueError('Invalid file update range')
+        total_size += size
+        if total_size > 2*1024**3: raise ValueError('File update is too large')
+        manifest[name] = digest
+        ranges.append((offset,offset+compressed))
+    if len(manifest)!=len(entries) or len(manifest)!=len({n.casefold() for n in manifest}):
+        raise ValueError('Duplicate file update paths')
+    ranges.sort()
+    if any(a[1]>b[0] for a,b in zip(ranges,ranges[1:])):raise ValueError('Overlapping update ranges')
+    if destination.exists():
+        try:
+            validate_directory(destination,target)
+            if read_json(destination/'SHA256SUMS.json')==manifest:
+                atomic_json(root/'pending.json',{'version':target})
+                state(root,'ready',f'RADAZ {target} hazırdır.',target)
+                return
+        except (ValueError,OSError): pass
+        # Preserve a rejected candidate until the new candidate passes all checks.
+    staging=root/'versions'/('.staging-'+secrets.token_hex(10));staging.mkdir(parents=True)
+    downloaded = 0
+    try:
+        for index,entry in enumerate(entries):
+            name=entry['path'];existing=source/name;raw=None
+            if not existing.resolve().is_relative_to(source.resolve()) or existing.is_symlink():
+                raise ValueError('Unsafe base file')
+            if existing.is_file() and existing.stat().st_size==entry['size']:
+                candidate=existing.read_bytes()
+                if hashlib.sha256(candidate).hexdigest()==entry['sha256']:raw=candidate
+            if raw is None:
+                start=entry['offset'];length=entry['compressedSize'];end=start+length-1
+                state(root,'downloading',f'RADAZ {target}: dəyişmiş və çatışmayan fayllar yüklənir…',target,
+                      {'done':index,'total':len(entries),'unit':'fayl'})
+                if length:
+                    for attempt in range(3):
+                        try:
+                            url=asset['browser_download_url']+f'?range={start}-{end}&attempt={attempt}'
+                            request=Request(url,headers={'User-Agent':'RADAZ-desktop-updater','Accept-Encoding':'identity','Range':f'bytes={start}-{end}'})
+                            with urlopen(request,timeout=60) as response:
+                                if response.status!=206 or response.headers.get('Content-Range')!=f'bytes {start}-{end}/{asset["size"]}':
+                                    raise ValueError('Server did not honor the requested file range')
+                                packed=response.read(length+1)
+                                if len(packed)!=length:raise OSError('Incomplete file update')
+                            break
+                        except (OSError,HTTPException,TimeoutError):
+                            if attempt==2:raise
+                            time.sleep(.5*(attempt+1))
+                else:packed=b''
+                if entry['compression']==8:
+                    decoder=zlib.decompressobj(-15)
+                    raw=decoder.decompress(packed,entry['size']+1)
+                    if not decoder.eof or decoder.unused_data or decoder.unconsumed_tail:raise ValueError('Invalid compressed update file')
+                else:raw=packed
+                if len(raw)!=entry['size'] or hashlib.sha256(raw).hexdigest()!=entry['sha256']:
+                    raise ValueError('Downloaded file SHA-256 mismatch: '+name)
+                downloaded+=len(packed)
+            file=staging/name;file.parent.mkdir(parents=True,exist_ok=True);file.write_bytes(raw)
+            if index%20==0:state(root,'installing','Bütün fayllar son versiya ilə yoxlanılır…',target,{'done':index+1,'total':len(entries),'unit':'fayl'})
+        atomic_json(staging/'SHA256SUMS.json',manifest)
+        validate_directory(staging,target)
+        rejected=None
+        if destination.exists():
+            rejected=root/'versions'/('.rejected-'+target+'-'+secrets.token_hex(8));os.replace(destination,rejected)
+        try:os.replace(staging,destination)
+        except Exception:
+            if rejected:os.replace(rejected,destination)
+            raise
+        if rejected and rejected.resolve().parent==(root/'versions').resolve():shutil.rmtree(rejected)
+        atomic_json(root/'pending.json',{'version':target})
+        state(root,'ready',f'RADAZ {target} hazırdır. Bütün fayllar yoxlanıldı; yalnız fərqli fayllar yükləndi.',target,
+              {'done':1,'total':1,'unit':'yeniləmə'},diagnostic={'downloadedBytes':downloaded,'verifiedFiles':len(entries)})
+    finally:
+        if staging.exists() and staging.resolve().parent==(root/'versions').resolve():shutil.rmtree(staging)
+
 def check_update(root, approved_version=None):
     active = read_json(root / 'active.json')['version']
     pending = None
@@ -387,6 +487,9 @@ def check_update(root, approved_version=None):
         message = (f'RADAZ {target} əvvəlki cəhddə açılmadı. Yenidən yoxlayıb hazırlamaq üçün Yenilə düyməsini basın.' if retry
                    else f'RADAZ {target} — yeni versiya mövcuddur. Avtomatik yükləmək üçün Yenilə düyməsini basın.')
         state(root, 'available', message, target, diagnostic=failed.get('diagnostic') if retry else None)
+        return
+    if release.get('distribution',{}).get('fileTransport') == 'zip-ranges-v1':
+        stage_file_update(root,release,target,active)
         return
     product_path = version_dir(root,active)/'public/product.json'
     delta_only = product_path.exists() and read_json(product_path).get('deltaOnlyUpdates',False)
