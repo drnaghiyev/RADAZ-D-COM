@@ -18,7 +18,6 @@ import pydicom
 
 UID = re.compile(r'\d+(?:\.\d+)+\Z')
 MAX_FILE = 256 * 1024 * 1024
-MAX_FILES = 20000
 CACHE_MARKER = b'RADAZ disposable CD cache v1\n'
 
 
@@ -314,8 +313,6 @@ class RemovableMedia:
                 session['scanned'] += 1
                 if not item or item['sopUID'] in seen_sops:
                     return
-                if len(session['files']) >= MAX_FILES:
-                    raise ValueError('Diskdə 20000-dən çox görüntü var')
             fid = uuid.uuid4().hex
             # A single sequential copy avoids random optical seeks while scrolling.
             # Publish only complete local files; never fall back to slow disc reads.

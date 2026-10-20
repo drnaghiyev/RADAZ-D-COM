@@ -128,6 +128,15 @@ class DesktopUpdates(unittest.TestCase):
                 self.assertFalse((self.root/'pending.json').exists())
             opened.assert_not_called()
 
+    def test_delta_only_policy_never_silently_downloads_full_setup(self):
+        product=self.root/'versions/0.2.8/public/product.json'
+        product.parent.mkdir(parents=True)
+        desktop.atomic_json(product,{'deltaOnlyUpdates':True})
+        with patch.object(desktop,'get_latest_release',return_value=self.release()),patch.object(desktop,'download_asset') as downloaded:
+            with self.assertRaisesRegex(ValueError,'delta paketi'):
+                desktop.check_update(self.root,self.target)
+            downloaded.assert_not_called()
+
     def test_staged_older_release_does_not_hide_latest_and_keeps_old_without_approval(self):
         desktop.atomic_json(self.root/'pending.json',{'version':'0.2.8'})
         desktop.atomic_json(self.root/'active.json',{'version':'0.2.7'})

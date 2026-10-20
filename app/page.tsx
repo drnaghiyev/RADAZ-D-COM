@@ -40,7 +40,7 @@ import { volumeStyles, type VolumePreset, type VolumeQuality } from '@/lib/volum
 import { ArrowUpRight, Pencil, MoveVertical, Eye, EyeOff, Download, PanelLeftClose, Activity, Box, ChevronDown, CircleDot, Crosshair, Database, Disc3, Eraser, FileArchive, FileText, Focus, Grid2X2, Hand, Layers3, MoveDiagonal2, RotateCcw, Ruler, ScanLine, ScanSearch, ServerCog, Settings2, SlidersHorizontal, Trash2, FolderOpen, Triangle, Waypoints } from 'lucide-react';
 import { addLocalDicom, registerDiskDicom, getOriginalDicom, getDiskDicomSource, registerLocalDicom, shareLocalDicoms, borrowLocalDicoms, getSeriesVolume, createMprStacks, createObliqueMprStacks, getDefaultWindow, getLocalizerGeometry, getMprOrientations, getViewer, releaseLocalDicoms, rotateMprOrientation, thumbnailLocalDicom, loadDicomThumbnail, type MprOrientations, type MprMode, type MprSettings } from '@/lib/cornerstone';
 import { closestSlice, sameCoordinateSpace, normalOf, planeLabel, intersectPlanes, type Point3 } from '@/lib/localizer';
-import { expandSources, filesFromDrop } from '@/lib/import-sources';
+import { iterateSources, filesFromDrop } from '@/lib/import-sources';
 import { parseDicomFile } from '@/lib/dicom-file';
 import { getArchiveFiles, saveArchiveFiles } from '@/lib/local-archive';
 import { watchRemovableMedia, type MediaImage, type MediaProgress } from '@/lib/removable-media';
@@ -50,7 +50,7 @@ import { Sparkles } from 'lucide-react';
 import type * as Core from '@cornerstonejs/core';
 
 type Tool = 'anatomy-volume' | 'anatomy-auto' | 'anatomy' | 'scroll' | 'arrow' | 'pencil' | 'cursor3d' | 'wl' | 'pan' | 'zoom' | 'length' | 'angle' | 'arch' | 'cobb' | 'ellipse' | 'hu' | 'deviation' | 'erase';
-type Series = { institution?: string; id: string; studyId: string; name: string; modality: string; patient: string; patientId: string; birth: string; date: string; number: string; imageIds: string[]; initialImageId?:string; thumb?: string; mediaSession?: string; archived?: boolean; discovered?: number; loading?: boolean };
+type Series = { sourceId?: string; institution?: string; id: string; studyId: string; name: string; modality: string; patient: string; patientId: string; birth: string; date: string; number: string; imageIds: string[]; initialImageId?:string; thumb?: string; mediaSession?: string; archived?: boolean; discovered?: number; loading?: boolean };
 type Preset = { ww: number; wl: number; token: number; panel: string; seriesId: string; imageId: string } | null;
 type ImportSource = { id: number; label: string; files: File[] };
 type MprData = { sourceId: string; stacks: Record<'SAG' | 'COR' | 'AX', string[]>; planes: Series[]; owned: string[]; orientations: MprOrientations | null; pivot?: Point3 | null };
@@ -111,7 +111,8 @@ function age(birth: string, study: string) {
   return `${+study.slice(0, 4) - +birth.slice(0, 4) - Number(study.slice(4) < birth.slice(4))} yaş`;
 }
 
-function ViewportPane({ projectionViews, anatomyControl, anatomyVolume, anatomyVolumeVisible, anatomyVolumeOpacity, anatomyLabel, windowLevels, windowingSourceId, cursor, onCursor, hideText, id, series, initialImageId, selected, tool, preset, resetToken, clearToken, ready, marks, selectedMarkId, localizers, otherImages, reconstruction, viewAnchor, expanded, concealed, onImageChange, onMoveSource, onMoveIntersection, loadingProgress, onRotateSource, onRotateStart, onPreviewRotateSource, onAddMark, onUpdateMark, onRemoveMark, onSelectMark, onClearImage, onSelect, onToggleMaximize, onDropSeries }: {
+function ViewportPane({ onHover, projectionViews, anatomyControl, anatomyVolume, anatomyVolumeVisible, anatomyVolumeOpacity, anatomyLabel, windowLevels, windowingSourceId, cursor, onCursor, hideText, id, series, initialImageId, selected, tool, preset, resetToken, clearToken, ready, marks, selectedMarkId, localizers, otherImages, reconstruction, viewAnchor, expanded, concealed, onImageChange, onMoveSource, onMoveIntersection, loadingProgress, onRotateSource, onRotateStart, onPreviewRotateSource, onAddMark, onUpdateMark, onRemoveMark, onSelectMark, onClearImage, onSelect, onToggleMaximize, onDropSeries }: {
+  onHover?: () => void;
   projectionViews?: Map<string,ImagePresentation>;
   anatomyControl?:ReturnType<typeof useAnatomyVolume>; anatomyVolume?: AnatomyVolumeResult|null; anatomyVolumeVisible?:boolean; anatomyVolumeOpacity?:number;
   anatomyLabel?: AnatomyLabel | null;
@@ -387,13 +388,13 @@ function ViewportPane({ projectionViews, anatomyControl, anatomyVolume, anatomyV
     });
   }, [enabled, selected, clearToken, viewportId, onClearImage]);
 
-  return <section ref={containerRef} data-has-image={!!imageId} data-panel={id} data-expanded={expanded || undefined} aria-hidden={concealed || undefined} className={`viewport ${selected ? 'active' : ''} ${hideText ? 'hide-image-text' : ''} ${tool === 'scroll' ? 'touch-scroll-mode' : ''}`} onPointerDownCapture={event => { if (event.button === 0) onSelect(); }} onClick={onSelect} onDoubleClick={event=>{
+  return <section ref={containerRef} onPointerEnter={onHover} onWheelCapture={onHover} data-has-image={!!imageId} data-panel={id} data-expanded={expanded || undefined} aria-hidden={concealed || undefined} className={`viewport ${selected ? 'active' : ''} ${hideText ? 'hide-image-text' : ''} ${tool === 'scroll' ? 'touch-scroll-mode' : ''}`} onPointerDownCapture={event => { if (event.button === 0) onSelect(); }} onClick={onSelect} onDoubleClick={event=>{
     if(limited||event.button!==0||event.defaultPrevented||performance.now()<Number(containerRef.current?.dataset.suppressMaximizeUntil||0))return;
     if(event.target instanceof Element&&event.target.closest('button,input,textarea,select,[role="menu"],[role="button"],.measurement-menu,.localizer-overlay,.measurement-overlay,.drawing-overlay'))return;
     onToggleMaximize?.();
   }}
-    onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
-    onDrop={e => { e.preventDefault(); const uid = e.dataTransfer.getData('application/x-series-id'); if (uid) onDropSeries(uid); }}
+    onDragOver={e => { if(e.dataTransfer.types.includes('application/x-series-id')) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'; } }}
+    onDrop={e => { const uid = e.dataTransfer.getData('application/x-series-id'); if (uid) { e.preventDefault(); e.stopPropagation(); onDropSeries(uid); } }}
     aria-label={`Görüntü paneli ${id}`}>
     <div className="dicom-canvas" ref={elementRef} onContextMenu={e => e.preventDefault()} />
     {!limited&&(!reconstruction||reconstruction.mode==='MPR')&&<AnatomyVolumeOverlay control={anatomyControl} viewport={viewport} element={viewport?.element??null} imageId={imageId} result={anatomyVolume||null} opacity={anatomyVolumeOpacity??.22} visible={!!anatomyVolumeVisible&&!concealed} picking={tool==='anatomy-volume'} onAdd={mark=>{onSelect();onAddMark(mark);}}/>}
@@ -429,6 +430,8 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   const [seriesList, setSeriesList] = useState<Series[]>([]);
   const projectionViews = useRef(new Map<string,ImagePresentation>()).current;
   const [syncScroll,setSyncScroll]=useState(false);
+  const paneRequests=useRef<Record<string,number>>({});
+  const assignmentsRef=useRef<Record<string,string>>({});
   const [recordsPage,setRecordsPage]=useState<'archive'|'pacs'|null>(null);
   const [inlinePlanes,setInlinePlanes]=useState<('AX'|'COR'|'SAG')[]|null>(null);
   useEffect(()=>{document.title=viewerTitle;},[]);
@@ -482,6 +485,9 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   const [mprError, setMprError] = useState('');
   const [importOpen, setImportOpen] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
+  const [importProgress,setImportProgress]=useState<LoadingProgress|null>(null);
+  const importJobs=useRef(Promise.resolve());
+  const importPending=useRef(0);
   const [importQueue, setImportQueue] = useState<ImportSource[]>([]);
   const [status, setStatus] = useState('DICOM faylı, CD/DVD və ya arxiv müayinəsi açın');
   const fileRef = useRef<HTMLInputElement>(null);
@@ -531,21 +537,23 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       window.setTimeout(()=>{const keep=new Set(listRef.current.flatMap(s=>s.imageIds));releaseLocalDicoms([...ids].filter(id=>!keep.has(id)));},100);
     });
   },[projectionViews]);
-  const channels = useRef<Map<DetachedMode | 'report', BroadcastChannel>>(new Map());
-  const detachedWindows=useRef(new Map<DetachedMode,Window>());
-  const detachedSources=useRef(new Map<DetachedMode,()=>void>());
+  const channels = useRef<Map<string, BroadcastChannel>>(new Map());
+  const detachedWindows=useRef(new Map<string,Window>());
+  const detachedSources=useRef(new Map<string,()=>void>());
   const selectedIdRef = useRef<string | undefined>(undefined);
   selectedIdRef.current=assigned[active];
-  const connectHandoff = (mode: DetachedMode | 'report', token: string) => {
+  assignmentsRef.current=assigned;
+  const connectHandoff = (mode: DetachedMode | 'report', token: string, seriesId = selectedIdRef.current) => {
+    const key = mode === 'report' ? mode : `${mode}:${seriesId}`;
     if(mode!=='report'){
-      detachedSources.current.get(mode)?.();
-      detachedSources.current.set(mode,publishDetachedSource(token,()=>{
-        const selected=listRef.current.find(s=>s.id===selectedIdRef.current)||listRef.current[0];
+      detachedSources.current.get(key)?.();
+      detachedSources.current.set(key,publishDetachedSource(token,()=>{
+        const selected=listRef.current.find(s=>s.id===seriesId);
         return {revision:selected?`${selected.id}:${selected.imageIds.join(',')}:${selected.loading}`:'empty',
           series:selected?[{...selected,images:shareLocalDicoms(selected.imageIds)}]:[],preferredSeriesId:selected?.id,anatomy:selected&&anatomyRef.current.result?.sourceKey===volumeSourceKey(selected.imageIds)?anatomyRef.current.result:null};
       }));
     }
-    channels.current.get(mode)?.close();
+    channels.current.get(key)?.close();
     const channel = new BroadcastChannel(`radaz-${token}`);
     const { imageIds: reportIds, preferredSeriesId, mediaSessions } = reportHandoff(listRef.current, selectedIdRef.current);
     channel.onmessage = event => {
@@ -565,7 +573,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         channel.postMessage({kind:'LOAD', files, preferredSeriesId, mediaSessions});
       })().catch(() => { const message = 'AI asistent üçün müayinə tam oxunmadı; mənbəni yoxlayıb yenidən açın.'; setStatus(message); channel.postMessage({kind:'LOAD_ERROR', message}); });
     };
-    channels.current.set(mode,channel);
+    channels.current.set(key,channel);
     return channel;
   };
   const onAddMark = useCallback((mark: LocalMark) => {setMarks(current => [...current, mark]);if(mark.anatomyId){setAnatomyLabel(null);if(!mark.anatomyId.startsWith('auto:'))setTool('wl');setSelectedMarkId(mark.id);}}, []);
@@ -708,10 +716,12 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     }
   }, [ready, seriesList]);
 
-  const importFiles = useCallback(async (files: File[], request = ++importEpoch.current, preferredSeriesId?: string): Promise<boolean> => {
-    setLoadProgress({label: 'DICOM yüklənir', done: 0, total: files.length});
+  const importFiles = useCallback(async (files: File[], request = ++importEpoch.current, preferredSeriesId?: string, job?:{select:()=>boolean;progress:(p:LoadingProgress|null)=>void}): Promise<boolean> => {
+    const current=()=>!!job||request===importEpoch.current;
+    const reportProgress=job?.progress||setLoadProgress;
+    reportProgress({label: 'DICOM yüklənir', done: 0, total: files.length});
     const viewer = await getViewer();
-    if (request !== importEpoch.current) return false;
+    if (!current()) return false;
     const found = new Map<string, Series & { ordered: { id: string; n: number }[]; sopUIDs: Set<string> }>();
     const createdIds: string[] = [];
     const acceptedFiles: File[] = [];
@@ -733,7 +743,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         return { ...s, imageIds, loading: !finished, thumb: s.thumb || thumbnailLocalDicom(imageIds[0]) };
       });
       if (!imported.length) return;
-      if (!published) {
+      if (!published && (!job || job.select())) {
         mprBuildEpoch.current++; setMprProgress(null);
         // Other patients, including temporary CD references, remain in this session.
         setSelectedMarkId(null); setMaximizedPane(null); setMaximizedMprPane(null);setInlinePlanes(null);setRecordsPage(null);
@@ -748,20 +758,21 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         setDatasetVersion(version => version + 1);
         published = true;
       }
+      published=true;
       const incoming=new Set(imported.map(s=>s.id));
       for(const s of imported)if(mediaSeries.current.has(s.id))mediaSeries.current.set(s.id,s);
       const combined = mergeMedia([...listRef.current.filter(s=>!incoming.has(s.id)),...imported]);
       listRef.current = combined; setSeriesList(combined);
-      setLoadProgress({label: 'DICOM yüklənir', done: decoded, total: acceptedFiles.length || files.length});
+      reportProgress({label: 'DICOM yüklənir', done: decoded, total: acceptedFiles.length || files.length});
       if (!detachedMode) document.title = viewerTitle;
       setStatus(`${imported.length} seriya · ${acceptedFiles.length} / ${files.length} görüntü oxunur…`);
     };
     for (const file of files) {
-      if (request !== importEpoch.current) { discardUnpublished(); return false; }
+      if (!current()) { discardUnpublished(); return false; }
       if (file.name.split('/').pop()?.toUpperCase() === 'DICOMDIR') { ignored++; continue; }
       try {
         const bytes = new Uint8Array(await file.arrayBuffer());
-        if (request !== importEpoch.current) { discardUnpublished(); return false; }
+        if (!current()) { discardUnpublished(); return false; }
         const ds = parseDicomFile(bytes);
         const get = (tag: string) => ds.string(tag)?.trim() || '';
         const studyId = get('x0020000d');
@@ -776,7 +787,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         const imageId = registerLocalDicom(bytes, ds);
         createdIds.push(imageId);
         filesById.set(imageId,file);
-        if (request !== importEpoch.current) { discardUnpublished(); return false; }
+        if (!current()) { discardUnpublished(); return false; }
         acceptedFiles.push(file);
         const record = found.get(uid) || {
           id: uid, studyId, name: dicomSeriesName(get), institution: get('x00080080'), modality: get('x00080060') || 'DICOM',
@@ -793,7 +804,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         }
       } catch (err) { rejected++; firstError ||= err instanceof Error ? err.message : String(err); }
     }
-    if (request !== importEpoch.current) { discardUnpublished(); return false; }
+    if (!current()) { discardUnpublished(); return false; }
     const rejectImage=(imageId:string,error:unknown)=>{
       rejected++; firstError ||= String(error); invalidIds.add(imageId);
       const index=acceptedFiles.indexOf(filesById.get(imageId)!);if(index>=0)acceptedFiles.splice(index,1);
@@ -804,21 +815,21 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     for(const imageId of createdIds){
       try{await viewer.core.imageLoader.loadAndCacheImage(imageId);break;}
       catch(error){rejectImage(imageId,error);}
-      if(request!==importEpoch.current){discardUnpublished();return false;}
+      if(!current()){discardUnpublished();return false;}
     }
-    if(request!==importEpoch.current){discardUnpublished();return false;}
+    if(!current()){discardUnpublished();return false;}
     publish();
     for (const imageId of createdIds) {
       if(invalidIds.has(imageId))continue;
-      if (request !== importEpoch.current) { discardUnpublished(); return false; }
+      if (!current()) { discardUnpublished(); return false; }
       try { await viewer.core.imageLoader.loadAndCacheImage(imageId); decoded++; }
       catch (err) {
         rejectImage(imageId,err);
       }
       if (decoded % 8 === 0 || decoded === 1) { publish(); await yieldToBrowser(); }
     }
-    if (request !== importEpoch.current) { discardUnpublished(); return false; }
-    finished = true; publish(); discardUnpublished(); setLoadProgress(null);
+    if (!current()) { discardUnpublished(); return false; }
+    finished = true; publish(); discardUnpublished(); reportProgress(null);
     if (published) {
       if (!detachedMode) channels.current.forEach((channel, mode) => { if (mode === 'report') return; try { channel.postMessage({ kind: 'SHARED_READY' }); } catch { /* Closed tabs reconnect on demand. */ } });
       setStatus(`${found.size} seriya · ${[...found.values()].reduce((n,s)=>n+s.ordered.length,0)} DICOM görüntüsü yükləndi${rejected ? ` · ${rejected} fayl keçildi` : ''}`);
@@ -874,9 +885,10 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   }, [detachedMode, importFiles]);
 
   useEffect(() => {
-    if (!detachedMode) for (const mode of ['mpr','3d','report'] as const) {
-      const token=sessionStorage.getItem(`radaz-${mode}-handoff`);
-      if(token) connectHandoff(mode,token);
+    if (!detachedMode) {
+      try { for (const entry of JSON.parse(sessionStorage.getItem('radaz-detached-handoffs-v2') || '[]')) {
+        if (['mpr','3d'].includes(entry.mode) && typeof entry.seriesId === 'string' && typeof entry.token === 'string') connectHandoff(entry.mode,entry.token,entry.seriesId);
+      } } catch {}
     }
     return () => { channels.current.forEach(channel => channel.close()); channels.current.clear();detachedSources.current.forEach(dispose=>dispose());detachedSources.current.clear(); };
   // Restore existing handoffs if the parent browser tab reloads.
@@ -934,13 +946,17 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   }, [detachedMode, importFiles]);
 
   const openDetached = (mode: DetachedMode) => {
-    const existing=detachedWindows.current.get(mode);
+    const source=listRef.current.find(s=>s.id===selectedIdRef.current);
+    if(!source){setStatus('Əvvəlcə seriya seçin');return;}
+    const key=`${mode}:${source.id}`;
+    const existing=detachedWindows.current.get(key);
     if(existing&&!existing.closed){existing.focus();existing.dispatchEvent(new Event('radaz-maximize-window'));return;}
-    const token=sessionStorage.getItem(`radaz-${mode}-handoff`)||crypto.randomUUID();
-    connectHandoff(mode,token);sessionStorage.setItem(`radaz-${mode}-handoff`,token);
+    const token=crypto.randomUUID();connectHandoff(mode,token,source.id);
+    try { const entries=JSON.parse(sessionStorage.getItem('radaz-detached-handoffs-v2')||'[]').filter((e:any)=>`${e.mode}:${e.seriesId}`!==key);
+      sessionStorage.setItem('radaz-detached-handoffs-v2',JSON.stringify([...entries,{mode,seriesId:source.id,token}])); } catch {}
     const tab=window.open(`/${mode}?handoff=${encodeURIComponent(token)}`,`radaz-${mode}-${token}`,`popup=yes,width=${Math.min(1500,screen.availWidth)},height=${Math.min(980,screen.availHeight)},resizable=yes`);
-    if(tab){detachedWindows.current.set(mode,tab);tab.focus();}
-    else setStatus(`${mode.toUpperCase()} səhifəsi bloklandı. Brauzerdə RADAZ üçün yeni vərəqələrə icazə verin.`);
+    if(tab){detachedWindows.current.set(key,tab);tab.focus();}
+    else setStatus('Yeni pəncərə bloklandı. RADAZ üçün pəncərə açılmasına icazə verin.');
   };
 
   useEffect(()=>detachedMode?registerRecordsWindow(detachedMode):undefined,[detachedMode]);
@@ -1028,11 +1044,14 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       } });
     return () => controller.abort();
   }, [seriesList, layout, limited]);
-  const place = (seriesId: string, panel: string) => {
+  const place = (seriesId: string, panel: string, dropped = false) => {
+    importEpoch.current++;
+    paneRequests.current[panel]=(paneRequests.current[panel]||0)+1;
     setInlinePlanes(null);setRecordsPage(null);
     const next = seriesList.find(series => series.id === seriesId);
+    if (!next) return;
     const previous = seriesList.find(series => series.id === assigned[active]) || seriesList.find(series => series.id === assigned.A);
-    const changedStudy = !!next && next.studyId !== previous?.studyId;
+    const changedStudy = !dropped && next.studyId !== previous?.studyId;
     const target = changedStudy || workspace !== 'viewer' ? 'A' : panel;
     if (changedStudy) {
       setLayout({ rows: 1, columns: 1 }); setLayoutOpen(false); setMaximizedPane(null); setMaximizedMprPane(null);
@@ -1061,29 +1080,33 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     const root = files[0].webkitRelativePath?.split('/')[0] || files[0].name;
     setImportQueue(current => [...current, { id: ++sourceSerial.current, label: `${kind}: ${root}`, files }]);
   };
-  const openSources = async (sources: File[]) => {
-    if (!sources.length) return;
-    const request = ++importEpoch.current;
-    setImportBusy(true);
-    try {
-      setStatus(`${sources.length} mənbə faylı hazırlanır…`);
-      const expanded = await expandSources(sources, message => { if (request === importEpoch.current) setStatus(message); });
-      if (request !== importEpoch.current) return;
-      if (!expanded.length) { setStatus('Seçilən mənbədə fayl yoxdur. Əvvəlki müayinə saxlanıldı.'); return; }
-      if (await importFiles(expanded, request)) {
-        setImportQueue([]); setImportOpen(false);
-        try {
-          const count = await saveArchiveFiles(expanded);
-          if (request === importEpoch.current && count) setStatus(current => `${current} · ${count} müayinə local arxivdə saxlanıldı`);
-        } catch (error) {
-          if (request === importEpoch.current) setStatus(current => `${current} · Arxivə saxlamaq alınmadı: ${error instanceof Error ? error.message : String(error)}`);
+  const openSources = (sources: File[]) => {
+    if (!sources.length) return Promise.resolve();
+    const request=++importEpoch.current;
+    importPending.current++;setImportBusy(true);
+    const run=async()=>{
+      setImportBusy(true);setImportProgress({label:'İdxal hazırlanır',done:0,total:sources.length,unit:'mənbə',indeterminate:true});
+      let processed=0,selected=false,successful=false,batch:File[]=[],bytes=0,last:{source:string;sourceIndex:number;sourceCount:number;entryIndex:number;entryCount:number}|null=null;
+      const progress=(phase:string)=>setImportProgress({label:'İdxal',done:last?last.sourceIndex+(last.entryIndex+1)/last.entryCount:0,total:sources.length,unit:'mənbə',phase:`${last?.source||''} · ${processed} fayl · ${phase}`});
+      const flush=async()=>{
+        if(!batch.length)return;
+        const files=batch;batch=[];bytes=0;
+        const ok=await importFiles(files,request,undefined,{select:()=>{if(selected||request!==importEpoch.current)return false;selected=true;return true;},progress:p=>progress(p?`${p.done}/${p.total} görüntü açılır`:'Arxivə yazılır')});
+        successful ||= ok;
+        if(ok)await saveArchiveFiles(files,(done,total)=>progress(`Arxiv ${done}/${total}`));
+        processed+=files.length;progress('Davam edir');await yieldToBrowser();
+      };
+      try {
+        for await(const item of iterateSources(sources,message=>setImportProgress(current=>({...current!,phase:message})))){
+          last=item;batch.push(item.file);bytes+=item.file.size;
+          if(batch.length>=32||bytes>=32*1024*1024)await flush();
+          else progress('Fayllar hazırlanır');
         }
-      }
-    } catch (err) {
-      if (request === importEpoch.current) setStatus(`İdxal alınmadı: ${err instanceof Error ? err.message : String(err)}. Əvvəlki müayinə saxlanıldı.`);
-    } finally {
-      if (request === importEpoch.current) setImportBusy(false);
-    }
+        await flush();setImportQueue([]);setImportOpen(false);setStatus(successful?`${processed} fayl emal edildi. İdxal tamamlandı.`:'Uyğun DICOM görüntüsü tapılmadı. Əvvəlki müayinə saxlanıldı.');
+      } catch(error){setStatus(`İdxal: ${String(error)}. Mövcud müayinələr saxlanıldı.`);}
+      finally{importPending.current--;if(!importPending.current){setImportBusy(false);setImportProgress(null);}}
+    };
+    const result=importJobs.current.then(run,run);importJobs.current=result;return result;
   };
   const siteImportStarted = useRef(false);
   useEffect(() => {
@@ -1094,8 +1117,9 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     void importFromRadazSite(openSources, setStatus, allowed).catch(error => setStatus(error instanceof Error ? error.message : String(error)));
   }, [ready, detachedMode]);
   const dropSources = async (items: DataTransferItemList, fallback: FileList) => {
-    try { await openSources(await filesFromDrop(items, fallback)); }
-    catch (err) { setStatus(`Qovluqlar oxuna bilmədi: ${String(err)}`); }
+    setImportProgress({label:'Qovluqlar oxunur',done:0,total:0,indeterminate:true});
+    try { const files=await filesFromDrop(items,fallback);if(files.length)await openSources(files);else if(!importPending.current)setImportProgress(null); }
+    catch (err) { if(!importPending.current)setImportProgress(null);setStatus(`Qovluqlar oxuna bilmədi: ${String(err)}`); }
   };
   const currentSeries = seriesList.find(s => s.id === assigned[active]);
   const anatomyVolumeSeries=workspace==='mpr'?seriesList.find(s=>s.id===mprData?.sourceId):currentSeries;
@@ -1104,21 +1128,23 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     ? currentSeries
     : seriesList.filter(s => s.studyId === currentSeries?.studyId && s.imageIds.length >= 3)
       .sort((a, b) => b.imageIds.length - a.imageIds.length)[0];
-  const grouped = groupSeries(seriesList);
+  const grouped = groupSeries(seriesList.filter(s=>!s.sourceId));
   const syncEligible=workspace==='viewer'&&Object.entries(assigned).filter(([panel,id])=>paneIndex(panel)<layout.rows*layout.columns&&seriesList.some(s=>s.id===id&&['CT','MR'].includes(s.modality)&&s.imageIds.length>1)).length>=2;
+  const syncSource=useRef('A');
   const syncSignature=useRef('');
   const syncRevision=useRef(0);
   useEffect(()=>{
     if(!syncScroll||!syncEligible){syncSignature.current='';syncRevision.current++;return;}
-    const sourceId=currentImages[active], source=seriesList.find(s=>s.id===assigned[active]);
+    const sourcePanel=syncSource.current;
+    const sourceId=currentImages[sourcePanel], source=seriesList.find(s=>s.id===assigned[sourcePanel]);
     if(!sourceId||!source||!['CT','MR'].includes(source.modality))return;
-    const signature=`${active}:${sourceId}:${Object.values(assigned).join(',')}`;
+    const signature=`${sourcePanel}:${sourceId}:${Object.values(assigned).join(',')}`;
     if(signature===syncSignature.current)return;
     syncSignature.current=signature;const revision=++syncRevision.current;
     void getViewer().then(async({engine})=>{
       for(const [panel,id] of Object.entries(assigned)){
         if(revision!==syncRevision.current)return;
-        if(panel===active||paneIndex(panel)>=layout.rows*layout.columns)continue;
+        if(panel===sourcePanel||paneIndex(panel)>=layout.rows*layout.columns)continue;
         const target=seriesList.find(s=>s.id===id);
         if(!target||!['CT','MR'].includes(target.modality))continue;
         const index=synchronizedSlice(getLocalizerGeometry(sourceId),target.imageIds.map(getLocalizerGeometry));
@@ -1126,7 +1152,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         if(index!==null&&vp&&vp.getCurrentImageIdIndex()!==index)await vp.setImageIdIndex(index);
       }
     }).catch(error=>setStatus(`Sync Scroll: ${String(error)}`));
-  },[syncScroll,syncEligible,currentImages,assigned,active,layout,seriesList]);
+  },[syncScroll,syncEligible,currentImages,assigned,layout,seriesList]);
   const ctVolume = volumeSeries?.modality === 'CT';
   const availableVolumeStyles = volumeStyles.filter(style => ctVolume ? style.key !== 'mr' : ['mr','mip','minip'].includes(style.key));
   useEffect(() => {
@@ -1182,6 +1208,34 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       const obsolete=[...(previousData?.owned || []),...created].filter(id=>!retained.has(id));
       if(obsolete.length)window.setTimeout(()=>releaseLocalDicoms(obsolete),300);
     }
+  };
+  const reformatPane = async (plane:'AX'|'COR'|'SAG') => {
+    const panel=active, displayed=seriesList.find(s=>s.id===assigned[panel]);
+    const source=displayed?.sourceId?seriesList.find(s=>s.id===displayed.sourceId):displayed;
+    if(!source || !['CT','MR'].includes(source.modality) || source.imageIds.length<3){setStatus('MPR üçün məkan koordinatlı KT/MRT seriyası seçin');return;}
+    const request=paneRequests.current[panel]=(paneRequests.current[panel]||0)+1;
+    const stillCurrent=()=>paneRequests.current[panel]===request&&assignmentsRef.current[panel]===displayed?.id;
+    let owned:string[]=[];
+    try {
+      setStatus(`${plane} rekonstruksiya hazırlanır…`);
+      const {core}=await getViewer();
+      await getSeriesVolume(source.imageIds);
+      for(let i=0;i<source.imageIds.length;i+=4){
+        if(!stillCurrent())return;
+        await Promise.all(source.imageIds.slice(i,i+4).map(id=>core.imageLoader.loadAndCacheImage(id)));
+      }
+      if(!stillCurrent())return;
+      const geometry=getLocalizerGeometry(source.imageIds[Math.floor(source.imageIds.length/2)])!;
+      const orientations:MprOrientations={AX:{normal:[0,0,1],horizontal:[1,0,0],vertical:[0,1,0]},COR:{normal:[0,1,0],horizontal:[1,0,0],vertical:[0,0,-1]},SAG:{normal:[1,0,0],horizontal:[0,1,0],vertical:[0,0,-1]}};
+      const stacks=createObliqueMprStacks(source.imageIds,newMprSettings(),orientations,geometry.origin,[plane]);
+      owned=stacks[plane];const first=owned[Math.floor(owned.length/2)];
+      await core.imageLoader.loadAndCacheImage(first);
+      if(!stillCurrent()){releaseLocalDicoms(owned);return;}
+      const derived:Series={...source,sourceId:source.id,id:`${source.id}/reformat/${panel}/${request}/${plane}`,name:`${source.name} · ${{AX:'Axial',COR:'Coronal',SAG:'Sagittal'}[plane]}`,imageIds:owned,initialImageId:first,loading:false};
+      listRef.current=[...listRef.current,derived];setSeriesList(listRef.current);
+      setAssigned(current=>({...current,[panel]:derived.id}));setCurrentImages(current=>({...current,[panel]:first}));
+      setRecordsPage(null);setWorkspace('viewer');setStatus(`${derived.name} hazırdır`);
+    } catch(error){releaseLocalDicoms(owned);if(stillCurrent())setStatus(`MPR: ${String(error)}`);}
   };
   const openMpr = () => {
     const source = currentSeries?.imageIds.length && currentSeries.imageIds.length >= 3 ? currentSeries : volumeSeries;
@@ -1280,11 +1334,11 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   return <ToolbarWorkspace scope={workspace}><main className={`workstation grouped-workstation ${railHidden ? 'rail-hidden' : ''} ${detachedMode ? 'detached' : ''}`} data-mode={detachedMode || 'viewer'} style={measurementVariables as React.CSSProperties}
     onDragOverCapture={event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; } }}
     onDropCapture={event => {
-      if (!event.dataTransfer.types.includes('Files') || (event.target as HTMLElement).closest('.source-list')) return;
+      if (event.dataTransfer.types.includes('application/x-series-id') || !event.dataTransfer.types.includes('Files') || (event.target as HTMLElement).closest('.source-list')) return;
       event.preventDefault(); event.stopPropagation();
       if (!limited) void dropSources(event.dataTransfer.items, event.dataTransfer.files);
     }}>
-    <header className={`topbar ${toolbarMore?'toolbar-more-open':''}`}>
+    <WorkProgress className="import-job-progress" progress={importProgress}/><header className={`topbar ${toolbarMore?'toolbar-more-open':''}`}>
       <ToolbarOverflow/>
       {!detachedMode && <div className="brand"><RadazLogo size={34}/><span><strong>RADAZ</strong><RadazTagline/></span></div>}
       <div className="primary-command-row">
@@ -1304,8 +1358,8 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       {!detachedMode && <ToolbarGroup className="workspace-launch toolbar-group" role="group" aria-label={tr('ui.view_mode_a87b2')} groupId="workspace" order={20}>
         <button type="button" aria-label={tr('ui.2d_viewer_b2533')} onClick={() => {setWorkspace('viewer');setInlinePlanes(null);setRecordsPage(null);}}><ScanLine size={18}/></button>
         <div className="workspace-split" key="mpr"><button type="button" disabled={limited} title={tr('ui.mpr_reconstruction_9bcc7')} aria-label={tr('ui.mpr_reconstruction_9bcc7')} onClick={()=>openDetached('mpr')}><b className="mode-letter-icon">MPR</b></button><DropdownMenu><DropdownMenuTrigger asChild><button className="workspace-options" aria-label="MPR açılış seçimləri" disabled={limited}><ChevronDown/></button></DropdownMenuTrigger><DropdownMenuContent>
- <DropdownMenuItem toolbarId="mpr-main" onSelect={()=>{setRecordsPage(null);setInlinePlanes(null);openMpr();}}>Əsas viewer-də aç</DropdownMenuItem>
- <DropdownMenuItem toolbarId="mpr-window" onSelect={()=>openDetached('mpr')}>Ayrı pəncərədə aç</DropdownMenuItem>{(['AX','COR','SAG'] as const).map(plane=><DropdownMenuItem toolbarId={`mpr-${plane}`} key={plane} onSelect={()=>{setRecordsPage(null);setLocalizers(true);setMaximizedMprPane(null);setInlinePlanes(current=>(['AX','COR','SAG'] as const).filter(p=>p===plane||(mprDataRef.current?.sourceId===volumeSeries?.id?current||['AX']:['AX']).includes(p)));openMpr();}}>{{AX:'Axial',COR:'Coronal',SAG:'Sagittal'}[plane]}</DropdownMenuItem>)}<DropdownMenuItem toolbarId="mpr-full" onSelect={()=>{setInlinePlanes(null);setRecordsPage(null);openMpr();}}>Full MPR</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>
+ <DropdownMenuItem toolbarId="mpr-window" onSelect={()=>openDetached('mpr')}>MPR</DropdownMenuItem>
+ {(['COR','SAG','AX'] as const).map(plane=><DropdownMenuItem toolbarId={`mpr-${plane}`} key={plane} onSelect={()=>void reformatPane(plane)}>{{AX:'Axial',COR:'Coronal',SAG:'Sagittal'}[plane]}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu></div>
         <div className="workspace-split" key="3d"><button type="button" disabled={limited} title={tr('ui.3d_volume_rendering_8b54e')} aria-label={tr('ui.3d_volume_rendering_8b54e')} onClick={()=>openDetached('3d')}><b className="mode-letter-icon">3D</b></button><DropdownMenu><DropdownMenuTrigger asChild><button className="workspace-options" aria-label="3D açılış seçimləri" disabled={limited}><ChevronDown/></button></DropdownMenuTrigger><DropdownMenuContent>
  <DropdownMenuItem toolbarId="3d-main" onSelect={()=>{setRecordsPage(null);setInlinePlanes(null);setWorkspace('3d');}}>Əsas viewer-də aç</DropdownMenuItem>
  <DropdownMenuItem toolbarId="3d-window" onSelect={()=>openDetached('3d')}>Ayrı pəncərədə aç</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>
@@ -1381,7 +1435,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
           {importQueue.length ? importQueue.map(source => <div className="source-row" key={source.id}><span><strong>{source.label}</strong><small>{source.files.length} {tr('ui.files_46c6f')}</small></span><button aria-label={`${source.label} siyahıdan sil`} disabled={importBusy} onClick={() => setImportQueue(current => current.filter(item => item.id !== source.id))}><Trash2 size={15}/></button></div>)
             : <p>{tr('ui.no_sources_selected_choose_folders_separately_b1cb5')}</p>}
         </div>
-        <DialogFooter><Button variant="outline" disabled={importBusy} onClick={() => setImportOpen(false)}>{tr('ui.close_c1cf9')}</Button><Button disabled={importBusy || !importQueue.length} onClick={() => { void openSources(importQueue.flatMap(source => source.files)); }}>{importBusy ? 'Açılır…' : `${importQueue.length} mənbəni aç`}</Button></DialogFooter>
+        <WorkProgress progress={importProgress}/><DialogFooter><Button variant="outline" disabled={importBusy} onClick={() => setImportOpen(false)}>{tr('ui.close_c1cf9')}</Button><Button disabled={importBusy || !importQueue.length} onClick={() => { void openSources(importQueue.flatMap(source => source.files)); }}>{importBusy ? 'Açılır…' : `${importQueue.length} mənbəni aç`}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
     <div className="body-grid">
@@ -1396,9 +1450,9 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
             {patient.studies.map(study => <div className="study-group" key={study.id}>
               {patient.studies.length > 1 && <div className="study-group-heading"><strong>{formatDate(study.date)}</strong></div>}
               {study.modalities.map(modality => <div className="modality-group" key={modality.code}>
-                {modality.series.map(({ item: s, index }) => <button key={s.id} draggable onDragStart={e => e.dataTransfer.setData('application/x-series-id', s.id)}
+                {modality.series.map(({ item: s, index }) => <button key={s.id} draggable onDragStart={e => { e.dataTransfer.clearData(); e.dataTransfer.setData('application/x-series-id', s.id); e.dataTransfer.effectAllowed = 'copy'; }}
                   className={`series-card ${assigned[active] === s.id ? 'chosen' : ''}`} onClick={() => place(s.id, active)} title={`${s.name} — panel ${active}`}>
-                  <div className="series-thumb">{s.thumb ? <img src={s.thumb} alt=""/> : <ScanSearch size={30} strokeWidth={1}/>}<span>{String(index + 1).padStart(2, '0')}</span></div>
+                  <div className="series-thumb">{s.thumb ? <img src={s.thumb} alt="" draggable={false}/> : <ScanSearch size={30} strokeWidth={1}/>}<span>{String(index + 1).padStart(2, '0')}</span></div>
                   <div className="series-info"><strong>{s.name}</strong><span>{s.imageIds.length}{s.discovered && s.discovered > s.imageIds.length ? ` / ${s.discovered}` : ''} {tr('ui.images_992d4')}</span><span>{s.archived ? 'Local arxiv · CD/DVD' : s.mediaSession ? 'CD/DVD · müvəqqəti' : `Seriya ${s.number}`}</span></div><span className="drag-handle" aria-hidden="true">⋮⋮</span>
                 </button>)}
               </div>)}
@@ -1406,7 +1460,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
           </section>)}
           {!seriesList.length && <div className="rail-empty">{status}</div>}
         </div>
-        <WorkProgress className="series-work-progress" progress={loadProgress}/>
+        <WorkProgress className="series-work-progress" progress={importProgress||loadProgress}/>
         {mediaEnabled && <div className="media-import-progress">
           {mediaProgress?.error ? <small role="alert">{mediaProgress.error} <a href="/RADAZ-Qurasdirma.html" target="_blank" rel="noreferrer">{tr('ui.installation_instructions_11dc8')}</a></small> : !mediaProgress?.sessions ? <small>{tr('ui.waiting_for_cd_dvd_ac285')}</small> : null}
           <WorkProgress progress={mediaProgress && (mediaProgress.scanning || mediaProgress.loaded + mediaProgress.skipped < mediaProgress.discovered) && !mediaProgress.error ? {
@@ -1419,7 +1473,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         {anatomyVolumeOpen&&!limited&&<AnatomyVolumeControls editing={workspace!=='3d'} control={anatomyVolume} source={anatomyVolumeSeries} onFocus={world=>{if(workspace==='3d')setAnatomyFocus(world);else if(workspace==='mpr')moveMprIntersection(world);else if(anatomyVolumeSeries){const index=closestSlice(anatomyVolumeSeries.imageIds,world,getLocalizerGeometry);if(index!==null)void getViewer().then(({engine})=>{const pane=engine.getViewport(`panel-${active}`) as Core.Types.IStackViewport|undefined;if(pane)void pane.setImageIdIndex(index).catch(error=>setStatus(String(error)));});}}} onPick={()=>{setAnatomyLabel(null);setTool('anatomy-volume');}} onClose={()=>{setAnatomyVolumeOpen(false);if(tool==='anatomy-volume')setTool('wl');}}/>}
         {anatomyLabel&&tool==='anatomy'&&<div className="anatomy-placement" role="status"><Crosshair size={18}/><span><strong>{anatomyLabel.text.split('\n')[0]}</strong> {tr('ui._pane_b5c88')}{anatomyLabel.panel}{tr('ui._click_the_structure_once_44e32')}</span><button onClick={()=>{setAnatomyLabel(null);setTool('wl');}}>{tr('ui.cancel_esc_bd665')}</button></div>}
         {workspace === 'viewer' && <div className="viewport-grid" style={{ gridTemplateColumns: `repeat(${maximizedPane ? 1 : layout.columns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${maximizedPane ? 1 : layout.rows}, minmax(0, 1fr))` }}>
-          {Array.from({ length: layout.rows * layout.columns }, (_, index) => paneId(index)).filter(id => !maximizedPane || id === maximizedPane).map(id => { const otherImages = id !== active && assigned[active] && currentImages[active] ? [{ panel: active, imageId: currentImages[active] }] : []; return <ViewportPane projectionViews={projectionViews} anatomyControl={anatomyVolume} anatomyVolume={volumeResultFor(seriesList.find(s=>s.id===assigned[id]))} anatomyVolumeVisible={anatomyVolume.visible} anatomyVolumeOpacity={anatomyVolume.opacity} anatomyLabel={anatomyLabel?.panel===id?anatomyLabel:null} windowLevels={windowLevels} key={`${id}-${datasetVersion}-${assigned[id] || "empty"}`} id={id} initialImageId={currentImages[id]} series={seriesList.find(s => s.id === assigned[id])} selected={active === id} tool={limited ? 'scroll' : tool} cursor={cursor} onCursor={onCursor} hideText={hideText} preset={preset} resetToken={resetToken} clearToken={clearToken} ready={ready} marks={marks} selectedMarkId={selectedMarkId} localizers={localizers && id !== active} otherImages={otherImages} onImageChange={onImageChange} onMoveSource={onMoveSource} onAddMark={onAddMark} onUpdateMark={onUpdateMark} onRemoveMark={onRemoveMark} onSelectMark={markId => { setActive(id); setSelectedMarkId(markId); }} onClearImage={onClearImage} onSelect={() => { setActive(id); setSelectedMarkId(null); }} onToggleMaximize={() => { setActive(id); setMaximizedPane(current => current === id ? null : id); }} onDropSeries={sid => place(sid, id)}/>; })}
+          {Array.from({ length: layout.rows * layout.columns }, (_, index) => paneId(index)).filter(id => !maximizedPane || id === maximizedPane).map(id => { const otherImages = id !== active && assigned[active] && currentImages[active] ? [{ panel: active, imageId: currentImages[active] }] : []; return <ViewportPane onHover={()=>{syncSource.current=id;}} projectionViews={projectionViews} anatomyControl={anatomyVolume} anatomyVolume={volumeResultFor(seriesList.find(s=>s.id===assigned[id]))} anatomyVolumeVisible={anatomyVolume.visible} anatomyVolumeOpacity={anatomyVolume.opacity} anatomyLabel={anatomyLabel?.panel===id?anatomyLabel:null} windowLevels={windowLevels} key={`${id}-${datasetVersion}-${assigned[id] || "empty"}`} id={id} initialImageId={currentImages[id]} series={seriesList.find(s => s.id === assigned[id])} selected={active === id} tool={limited ? 'scroll' : tool} cursor={cursor} onCursor={onCursor} hideText={hideText} preset={preset} resetToken={resetToken} clearToken={clearToken} ready={ready} marks={marks} selectedMarkId={selectedMarkId} localizers={localizers && id !== active} otherImages={otherImages} onImageChange={onImageChange} onMoveSource={onMoveSource} onAddMark={onAddMark} onUpdateMark={onUpdateMark} onRemoveMark={onRemoveMark} onSelectMark={markId => { setActive(id); setSelectedMarkId(markId); }} onClearImage={onClearImage} onSelect={() => { setActive(id); setSelectedMarkId(null); }} onToggleMaximize={() => { setActive(id); setMaximizedPane(current => current === id ? null : id); }} onDropSeries={sid => place(sid, id, true)}/>; })}
         </div>}
         {workspace === 'mpr' && <>
           {mprError && <div className="mpr-error-notice" role="alert">{mprError}</div>}
@@ -1427,7 +1481,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
             {(inlinePlanes||(['SAG','COR','AX'] as const)).map(plane=>({plane,index:{SAG:0,COR:1,AX:2}[plane],id:{SAG:'MS',COR:'MC',AX:'MA'}[plane]})).map(({plane,index,id})=>{
               const shown=mprData?.planes[index] || (plane==='AX'?mprPreview:undefined);
               const progress=!shown?.imageIds.length ? mprProgress || sourceLoading : null;
-              return <ViewportPane projectionViews={projectionViews} anatomyControl={anatomyVolume} anatomyVolume={volumeResultFor(seriesList.find(s=>s.id===mprData?.sourceId))} anatomyVolumeVisible={anatomyVolume.visible} anatomyVolumeOpacity={anatomyVolume.opacity} windowLevels={windowLevels} windowingSourceId={mprData?.sourceId || mprPreview?.id} key={`${id}-${mprData?.sourceId || mprPreview?.id || 'waiting'}`} id={id} initialImageId={currentImages[id]} series={shown} loadingProgress={progress} reconstruction={mprSettings[plane]} viewAnchor={mprData?.pivot} expanded={maximizedMprPane===id} concealed={!!maximizedMprPane&&maximizedMprPane!==id} selected={mprActive===id} tool={limited?'scroll':tool} cursor={cursor} onCursor={onCursor} hideText={hideText} preset={preset} resetToken={resetToken} clearToken={clearToken} ready={ready} marks={marks} selectedMarkId={selectedMarkId} localizers={localizers}
+              return <ViewportPane onHover={()=>{syncSource.current=id;}} projectionViews={projectionViews} anatomyControl={anatomyVolume} anatomyVolume={volumeResultFor(seriesList.find(s=>s.id===mprData?.sourceId))} anatomyVolumeVisible={anatomyVolume.visible} anatomyVolumeOpacity={anatomyVolume.opacity} windowLevels={windowLevels} windowingSourceId={mprData?.sourceId || mprPreview?.id} key={`${id}-${mprData?.sourceId || mprPreview?.id || 'waiting'}`} id={id} initialImageId={currentImages[id]} series={shown} loadingProgress={progress} reconstruction={mprSettings[plane]} viewAnchor={mprData?.pivot} expanded={maximizedMprPane===id} concealed={!!maximizedMprPane&&maximizedMprPane!==id} selected={mprActive===id} tool={limited?'scroll':tool} cursor={cursor} onCursor={onCursor} hideText={hideText} preset={preset} resetToken={resetToken} clearToken={clearToken} ready={ready} marks={marks} selectedMarkId={selectedMarkId} localizers={localizers}
                 otherImages={(['MS','MC','MA']).filter(other=>other!==id).map(other=>({panel:other,imageId:currentImages[other] || ''})).filter(item=>item.imageId)}
                 onImageChange={onImageChange} onMoveSource={moveMprSource} onMoveIntersection={moveMprIntersection} onRotateSource={rotateMprSource} onRotateStart={beginMprRotation} onPreviewRotateSource={(source,target,radians)=>updateMprRotation(source,target,radians)}
                 onAddMark={onAddMark} onUpdateMark={onUpdateMark} onRemoveMark={onRemoveMark} onClearImage={onClearImage} onSelectMark={markId=>{setMprActive(id);setSelectedMarkId(markId);}} onSelect={()=>{setMprActive(id);setSelectedMarkId(null);}} onToggleMaximize={()=>{setMprActive(id);setMaximizedMprPane(current=>current===id?null:id);}} onDropSeries={sid=>place(sid,'A')}/>;

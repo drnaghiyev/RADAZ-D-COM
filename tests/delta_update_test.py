@@ -91,6 +91,17 @@ class DeltaUpdates(unittest.TestCase):
         # 0.2.99 has no pending pointer yet: staging publication must not race cleanup.
         for v in ['0.2.28','0.2.29','0.2.30','0.2.99',self.base,self.target]:self.assertTrue((self.root/'versions'/v).is_dir())
 
+    def test_verified_activation_removes_previous_runtime_but_preserves_active_and_data(self):
+        old='0.2.30'
+        with ZipFile(self.package(old)) as z:z.extractall(self.root/'versions'/old)
+        desktop.atomic_json(self.root/'active.json',{'version':self.base,'previousVersion':old})
+        desktop.atomic_json(self.root/'activation-verified.json',{'version':self.base})
+        data=self.root/'user-data';data.mkdir();(data/'archive.txt').write_text('preserve')
+        with patch.object(desktop,'runtime_processes',return_value={'versions':[self.base]}):
+            self.assertEqual(desktop.cleanup_versions(self.root),[old])
+        self.assertTrue(self.source.is_dir())
+        self.assertEqual((data/'archive.txt').read_text(),'preserve')
+
     def test_interrupted_download_resumes_at_verified_offset(self):
         raw=b'0123456789abcdef';asset=dict(name='fixture.zip',size=len(raw),digest='sha256:'+hashlib.sha256(raw).hexdigest(),browser_download_url='https://github.com/fixture.zip')
         class Interrupted(io.BytesIO):

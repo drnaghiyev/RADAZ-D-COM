@@ -1,6 +1,7 @@
 {
   "name": "RADAZ",
-  "version": "0.2.41",
+  "version": "0.2.42",
+  "deltaOnlyUpdates": true,
   "channel": "preview",
   "owner": "Radioloq Rövşən Nağıyev",
   "email": "drnaghiyev@gmail.com",

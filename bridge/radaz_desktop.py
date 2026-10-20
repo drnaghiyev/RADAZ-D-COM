@@ -388,6 +388,10 @@ def check_update(root, approved_version=None):
                    else f'RADAZ {target} — yeni versiya mövcuddur. Avtomatik yükləmək üçün Yenilə düyməsini basın.')
         state(root, 'available', message, target, diagnostic=failed.get('diagnostic') if retry else None)
         return
+    product_path = version_dir(root,active)/'public/product.json'
+    delta_only = product_path.exists() and read_json(product_path).get('deltaOnlyUpdates',False)
+    if delta_only and not asset.get('baseVersion'):
+        raise ValueError('Bu versiya üçün delta paketi yoxdur. Tam paket avtomatik yüklənmədi; radaz.space saytından Setup istifadə edin.')
     state(root, 'downloading', f'RADAZ {target} arxa planda yüklənir. Proqramdan istifadə edə bilərsiniz.', target)
     temporary = download_asset(root,asset,target)
     try:
@@ -396,6 +400,8 @@ def check_update(root, approved_version=None):
             except (ValueError,OSError,KeyError):
                 # Reconstruct from the full signed package if the installed base was modified.
                 temporary.unlink(missing_ok=True);temporary.with_suffix(temporary.suffix+'.json').unlink(missing_ok=True)
+                if delta_only:
+                    raise ValueError('Yerli runtime delta ilə uyğun deyil. Tam paket avtomatik yüklənmədi; Setup ilə bərpa edin.')
                 full=select_asset(release,active)[1]
                 state(root,'downloading','Yerli fayllar uyğun deyil; tam paket ilə bərpa edilir…',target)
                 temporary=download_asset(root,full,target)
@@ -434,7 +440,9 @@ def runtime_processes(root, action, target=None):
 def cleanup_versions(root):
     """Caller holds launch.lock. Retain active, rollback, staged and every live runtime."""
     active=read_json(root/'active.json')
-    keep={active['version'],active.get('previousVersion')}
+    verified = read_json(root/'activation-verified.json') if (root/'activation-verified.json').exists() else {}
+    keep={active['version']}
+    if verified.get('version') != active['version']: keep.add(active.get('previousVersion'))
     for pointer in ('pending.json','failed-update.json'):
         if (root/pointer).exists():keep.add(read_json(root/pointer).get('version'))
     keep.update(runtime_processes(root,'InUse')['versions'])
@@ -612,6 +620,8 @@ def launch(root, no_browser=False):
                 (root / 'pending.json').unlink(missing_ok=True)
                 (root / 'failed-update.json').unlink(missing_ok=True)
                 state(root, 'current', f'RADAZ {target} avtomatik yeniləndi.')
+            # Only a completed health check permits retiring the old rollback copy.
+            atomic_json(root/'activation-verified.json', {'version': target})
         folder = version_dir(root, target)
         run_hidden([str(folder / 'runtime/python/python.exe'), str(folder / 'bridge/radaz_desktop.py'), 'watch', '--install-root', str(root)], root)
         if not no_browser:

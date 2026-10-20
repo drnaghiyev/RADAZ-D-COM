@@ -39,7 +39,7 @@ def stop_test_watchers():
     command=f"Get-CimInstance Win32_Process | Where-Object {{ $_.Name -eq 'python.exe' -and $_.ExecutablePath -and $_.ExecutablePath.StartsWith('{literal}\\') -and $_.CommandLine -match 'radaz_desktop\\.py\"?\\s+watch(?:\\s|$)' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}"
     run([PS,'-NoProfile','-Command',command])
 def variant(value, broken=False, broken_asset=False):
-    source=install/'versions'/VERSION; destination=install/'versions'/value; destination.mkdir()
+    source=STAGE; destination=install/'versions'/value; destination.mkdir()
     manifest=json.loads((source/'SHA256SUMS.json').read_text())
     for name in manifest:
         file=destination/name;file.parent.mkdir(parents=True,exist_ok=True);os.link(source/name,file)
@@ -230,6 +230,12 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
     assert get('/radaz-runtime.json')['version']=='99.0.1'
     assert get('/local-archive-api/status')['appVersion']=='99.0.1'
     assert json.loads((install/'active.json').read_text())['previousVersion']==VERSION
+    for _ in range(120):
+        if not (install/'versions'/VERSION).exists():break
+        time.sleep(.5)
+    assert not (install/'versions'/VERSION).exists(), 'Verified activation must reclaim the previous runtime'
+    for file,digest in preserved.items():assert hashlib.sha256(file.read_bytes()).hexdigest()==digest,file.name
+    print('Verified new runtime removed the previous version and preserved all user data',flush=True)
     variant('99.0.2',broken=True);ps(install/'launcher.ps1','-NoBrowser')
     assert get('/radaz-runtime.json')['version']=='99.0.1'
     assert get('/local-archive-api/status')['appVersion']=='99.0.1'
@@ -253,7 +259,7 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
             launcher.write_text('exit 42')
             refused=subprocess.run([str(install/'unins000.exe'),'/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'],env=env,capture_output=True,timeout=30,creationflags=0x08000000)
             assert refused.returncode!=0
-            assert (install/'versions'/VERSION/'SHA256SUMS.json').is_file()
+            assert (install/'versions'/'99.0.1'/'SHA256SUMS.json').is_file()
             assert get('/radaz-health.json')['ready'] is True
         finally:launcher.write_bytes(original_launcher)
         run([install/'unins000.exe','/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',f'/LOG={install / "logs/uninstall.log"}'])

@@ -59,7 +59,9 @@ export function ViewerInteractionOverlay({ viewport, element, imageId, tool, sli
   const placingAnatomy = tool === 'anatomy' && anatomyLabel?.imageId === imageId;
   const active = ['scroll', 'arrow', 'pencil', 'cursor3d','anatomy-auto'].includes(tool) || placingAnatomy;
   const geometry = imageId ? getLocalizerGeometry(imageId) : null;
-  useEffect(() => { gesture.current = null; edit.current = null; setDraft([]); }, [tool, viewport, imageId]);
+  useEffect(() => { gesture.current = null; edit.current = null; setDraft([]); }, [tool, viewport]);
+  // A rendered slice is the result of scrolling, not the end of the gesture.
+  useEffect(() => { edit.current = null; setDraft([]); }, [imageId]);
   useEffect(() => { if (tool !== 'scroll' && tool !== 'cursor3d') { gesture.current = null; setDraft([]); } }, [tool, imageId]);
   useEffect(() => {
     if (!element) return;

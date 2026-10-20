@@ -4,7 +4,7 @@ import {createPortal} from 'react-dom';
 import {Settings2,Plus,X,RotateCcw,ArrowUp,ArrowDown} from 'lucide-react';
 
 type Placement={group:string;order:number};
-type Saved={groups:{id:string;name:string}[];items:Record<string,Placement>};
+type Saved={names?:Record<string,string>;removed?:string[];rows?:1|2;groupRows?:Record<string,1|2>;groups:{id:string;name:string}[];items:Record<string,Placement>};
 type Item={home:string;label:string;menu:boolean;order:number};
 const mime='application/x-radaz-toolbar-item';
 const empty=():Saved=>({groups:[],items:{}});
@@ -24,6 +24,8 @@ export function ToolbarCustomization({scope,children}:{scope:string;children:Rea
     let value=empty();
     try{const data=JSON.parse(localStorage.getItem(`radaz-toolbar-items-v1:${scope}`)||'null');
       if(Array.isArray(data?.groups)&&data.groups.length<=40&&data.items&&typeof data.items==='object'){
+        value.removed=Array.isArray(data.removed)?data.removed.filter((id:unknown)=>typeof id==='string'):[];value.names=Object.fromEntries(Object.entries(data.names||{}).filter(([,v])=>typeof v==='string'&&v.length<=80)) as Record<string,string>;
+        value.rows=data.rows===2?2:1;value.groupRows=Object.fromEntries(Object.entries(data.groupRows||{}).filter(([,r])=>r===1||r===2)) as Record<string,1|2>;
         value.groups=data.groups.filter((g:{id:string;name:string})=>/^custom-[a-z0-9-]+$/.test(g?.id)&&typeof g.name==='string'&&g.name.length<=80);
         for(const [id,p] of Object.entries(data.items) as [string,Placement][])if(id.length<300&&p&&typeof p.group==='string'&&Number.isFinite(p.order))value.items[id]=p;
       }
@@ -33,7 +35,7 @@ export function ToolbarCustomization({scope,children}:{scope:string;children:Rea
   const register=useRef((id:string,item:Item)=>{setItems(current=>({...current,[id]:item}));return()=>setItems(current=>{const next={...current};delete next[id];return next;});}).current;
   const registerGroup=useRef((id:string,label:string,host:HTMLElement)=>{setGroups(current=>({...current,[id]:{label,host}}));return()=>setGroups(current=>{const next={...current};delete next[id];return next;});}).current;
   const move=(id:string,group:string,before?:string)=>{
-    if(!items[id]||(group!=='menu'&&!groups[group]))return;
+    if(!items[id]||(group!=='menu'&&group!=='pool'&&!groups[group]))return;
     save(current=>{
       const peers=Object.keys(items).filter(key=>key!==id&&(current.items[key]?.group||(items[key].menu?'menu':items[key].home))===group)
         .sort((a,b)=>(current.items[a]?.order??items[a].order)-(current.items[b]?.order??items[b].order));
@@ -78,13 +80,13 @@ function PortableItem({id,home,label,order,menu=false,children,command}:{id:stri
   const context=useContext(Context),register=context?.register;
   useEffect(()=>register?.(id,{home,label,menu,order}),[register,id,home,label,menu,order]);
   if(!context)return children;
-  const destination=context.saved.items[id]?.group||(menu?'menu':home),position=context.saved.items[id]?.order??order;
+  const destination=context.saved.items[id]?.group||(context.saved.removed?.includes(home)?'pool':menu?'menu':home),position=context.saved.items[id]?.order??order;
   const target=destination==='menu'?null:context.groups[destination]?.host;
   const isHome=destination===(menu?'menu':home)||!target;
   const dragProps={draggable:context.editing,onDragStart:(event:DragEvent)=>start(event,id),onDragOver:accept,onDrop:(event:DragEvent)=>{
     if(!event.dataTransfer.types.includes(mime))return;event.preventDefault();event.stopPropagation();context.move(event.dataTransfer.getData(mime),destination,id);
   }};
-  const element=<div className={`toolbar-portable ${menu&&isHome?'toolbar-menu-item':''} ${context.editing?'toolbar-item-editing':''}`} data-toolbar-item={id} style={{order:position}} {...dragProps}>{menu&&!isHome?command:children}</div>;
+  const element=<div className={`toolbar-portable ${menu&&isHome?'toolbar-menu-item':''} ${context.editing?'toolbar-item-editing':''}`} data-toolbar-item={id} style={{order:position,display:destination==='pool'?'none':undefined}} {...dragProps}>{menu&&!isHome?command:children}</div>;
   return isHome?element:createPortal(element,target!,id);
 }
 
@@ -94,6 +96,11 @@ export function PortableMenuItem({id,label,children,command}:{id?:string;label:s
   if(!home)return children;
   return <PortableItem id={`${home}/menu:${id||label}`} home={home} label={label} order={100} menu command={command}>{children}</PortableItem>;
 }
+export function useToolbarGroupConfig(id:string){const c=useContext(Context);return {hidden:!!c?.saved.removed?.includes(id),name:c?.saved.names?.[id]};}
+export function useToolbarRows(){
+  const context=useContext(Context);
+  return {rows:context?.saved.rows||1,groupRows:context?.saved.groupRows||{},setRow:(id:string,row:1|2)=>context?.save(current=>current.groupRows?.[id]===row?current:({...current,groupRows:{...current.groupRows,[id]:row}}))};
+}
 export const toolbarLabel=labelOf;
 export function useCustomToolbarGroups(){return useContext(Context)?.saved.groups||[];}
 
@@ -101,21 +108,23 @@ export function ToolbarCustomizeButton({onReset}:{onReset:()=>void}){
   const context=useContext(Context),[open,setOpen]=useState(false),[name,setName]=useState('');
   if(!context)return null;
   const {saved,save,items,groups,move,editing,setEditing}=context;
-  const names=(id:string)=>saved.groups.find(g=>g.id===id)?.name||groups[id]?.label||id;
-  const options=[...new Set([...Object.keys(groups),...saved.groups.map(g=>g.id)])];
+  const names=(id:string)=>saved.names?.[id]||saved.groups.find(g=>g.id===id)?.name||groups[id]?.label||id;
+  const options=[...new Set([...Object.keys(groups),...saved.groups.map(g=>g.id)])].filter(id=>!saved.removed?.includes(id));
   const ordered=Object.keys(items).sort((a,b)=>(saved.items[a]?.order??items[a].order)-(saved.items[b]?.order??items[b].order));
   return <><button className="toolbar-customize-trigger" title="Alət panelini fərdiləşdir" aria-label="Alət panelini fərdiləşdir" onClick={()=>setOpen(true)}><Settings2/></button>
-    {editing&&<button className="toolbar-edit-done" onClick={()=>setEditing(false)}>Düzülüşü bitir ✓</button>}
+    {editing&&<button className="toolbar-edit-done" onClick={()=>setEditing(false)}>Təsdiq ✓</button>}
     {open&&createPortal(<div className="toolbar-editor-backdrop" onClick={event=>{if(event.target===event.currentTarget)setOpen(false);}}><section role="dialog" aria-modal="true" aria-label="Alət panelinin düzülüşü" className="toolbar-editor" onKeyDown={event=>{if(event.key==='Escape')setOpen(false);}}>
-      <header><h2>Alət panelinin düzülüşü</h2><button aria-label="Bağla" onClick={()=>setOpen(false)}><X/></button></header>
+      <header><h2>Alət panelinin düzülüşü</h2><button onClick={()=>{setEditing(false);setOpen(false);}}>Təsdiq</button><button aria-label="Bağla" onClick={()=>setOpen(false)}><X/></button></header>
       <p>Düymələri və menyu alətlərini qruplar arasında sürüşdürün. Qrupun sağ tutacağı onun yerini dəyişir. Dəyişikliklər avtomatik saxlanılır.</p>
+      <label>Sıra sayı <select aria-label="Alət panelinin sıra sayı" value={saved.rows||1} onChange={e=>save({...saved,rows:Number(e.target.value) as 1|2})}><option value={1}>Bir sıra</option><option value={2}>İki sıra</option></select></label>
+      {saved.rows===2&&<div className="toolbar-row-options">{options.map(id=><label key={id}>{names(id)}<select aria-label={`${names(id)} sırası`} value={saved.groupRows?.[id]||1} onChange={e=>save({...saved,groupRows:{...saved.groupRows,[id]:Number(e.target.value) as 1|2}})}><option value={1}>1-ci sıra</option><option value={2}>2-ci sıra</option></select></label>)}</div>}
       <div className="toolbar-editor-actions"><button onClick={()=>{setEditing(true);setOpen(false);}}>Sürüşdürərək düzəlt</button><button onClick={()=>{save(empty());onReset();}}><RotateCcw/>Standart düzülüşü bərpa et</button></div>
       <form onSubmit={event=>{event.preventDefault();if(!name.trim()||saved.groups.length>=40)return;save({...saved,groups:[...saved.groups,{id:`custom-${crypto.randomUUID()}`,name:name.trim().slice(0,80)}]});setName('');}}><input aria-label="Yeni qrupun adı" value={name} maxLength={80} onChange={e=>setName(e.target.value)} placeholder="Yeni qrupun adı"/><button type="submit"><Plus/>Qrup yarat</button></form>
-      {saved.groups.map(group=><div className="toolbar-editor-custom" key={group.id}><input aria-label="Qrupun adı" value={group.name} maxLength={80} onChange={event=>save({...saved,groups:saved.groups.map(g=>g.id===group.id?{...g,name:event.target.value}:g)})}/><button aria-label={`${group.name} qrupunu sil`} onClick={()=>save({...saved,groups:saved.groups.filter(g=>g.id!==group.id),items:Object.fromEntries(Object.entries(saved.items).filter(([,p])=>p.group!==group.id))})}><X/></button></div>)}
+      {options.map(id=><div className="toolbar-editor-custom" key={id}><input aria-label={`${names(id)} qrupunun adı`} value={names(id)} maxLength={80} onChange={event=>save({...saved,names:{...saved.names,[id]:event.target.value}})}/><button aria-label={`${names(id)} qrupunu sil`} onClick={()=>save({...saved,removed:[...(saved.removed||[]),id],items:{...saved.items,...Object.fromEntries(Object.entries(items).filter(([key,item])=>(saved.items[key]?.group||item.home)===id).map(([key],order)=>[key,{group:'pool',order}]))}})}><X/></button></div>)}
       <div className="toolbar-editor-list">{ordered.map(id=>{
-        const item=items[id],destination=saved.items[id]?.group||(item.menu?'menu':item.home);
+        const item=items[id],destination=saved.items[id]?.group||(saved.removed?.includes(item.home)?'pool':item.menu?'menu':item.home);
         const peers=ordered.filter(key=>(saved.items[key]?.group||(items[key].menu?'menu':items[key].home))===destination),index=peers.indexOf(id);
-        return <div className="toolbar-editor-item" key={id} draggable onDragStart={event=>start(event,id)} onDragOver={accept} onDrop={event=>{if(!event.dataTransfer.types.includes(mime))return;event.preventDefault();move(event.dataTransfer.getData(mime),destination,id);}}><span>{item.label}</span><select aria-label={`${item.label} qrupu`} value={destination} onChange={event=>move(id,event.target.value)}>{item.menu&&<option value="menu">Əsas menyu</option>}{options.map(group=><option value={group} key={group}>{names(group)}</option>)}</select><button disabled={index<1} aria-label={`${item.label} əvvələ`} onClick={()=>move(id,destination,peers[index-1])}><ArrowUp/></button><button disabled={index===peers.length-1} aria-label={`${item.label} sonraya`} onClick={()=>move(id,destination,peers[index+2])}><ArrowDown/></button></div>;
+        return <div className="toolbar-editor-item" key={id} draggable onDragStart={event=>start(event,id)} onDragOver={accept} onDrop={event=>{if(!event.dataTransfer.types.includes(mime))return;event.preventDefault();move(event.dataTransfer.getData(mime),destination,id);}}><span>{item.label}</span><select aria-label={`${item.label} qrupu`} value={destination} onChange={event=>move(id,event.target.value)}><option value="pool">Yerləşdirilməmiş alətlər</option>{item.menu&&<option value="menu">Əsas menyu</option>}{options.map(group=><option value={group} key={group}>{names(group)}</option>)}</select><button disabled={index<1} aria-label={`${item.label} əvvələ`} onClick={()=>move(id,destination,peers[index-1])}><ArrowUp/></button><button disabled={index===peers.length-1} aria-label={`${item.label} sonraya`} onClick={()=>move(id,destination,peers[index+2])}><ArrowDown/></button></div>;
       })}</div>
     </section></div>,document.body)}
   </>;

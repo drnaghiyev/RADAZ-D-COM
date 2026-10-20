@@ -2,13 +2,13 @@
 import {createContext, useContext, useEffect, useRef, useState, type HTMLAttributes, type ReactNode} from 'react';
 import {createPortal} from 'react-dom';
 import {GripVertical, MoreHorizontal} from 'lucide-react';
-import {ToolbarCustomization,CustomizableGroup,ToolbarCustomizeButton,useCustomToolbarGroups} from './toolbar-customization';
+import {ToolbarCustomization,CustomizableGroup,ToolbarCustomizeButton,useCustomToolbarGroups,useToolbarRows,useToolbarGroupConfig} from './toolbar-customization';
 
 type Position = {side: 'top'|'right'; order: number};
 type Layout = Record<string, Position>;
 type Registry = Record<string, number>;
 const Context=createContext<{
-  layout: Layout; drag: string|null; dock: HTMLDivElement|null; overflow: string[]; popup: HTMLDivElement|null;
+  secondRow: HTMLDivElement|null; rows:1|2; groupRows:Record<string,1|2>; layout: Layout; drag: string|null; dock: HTMLDivElement|null; overflow: string[]; popup: HTMLDivElement|null;
   setPopup:(element:HTMLDivElement|null)=>void;
   register:(id:string,order:number)=>()=>void;
   move:(id:string,side:'top'|'right',before?:string)=>void;
@@ -26,6 +26,9 @@ function ToolbarWorkspaceBody({scope,children}:{scope:string;children:ReactNode}
   const [overflow,setOverflow]=useState<string[]>([]),[popup,setPopup]=useState<HTMLDivElement|null>(null);
   const root=useRef<HTMLDivElement>(null);
   const customGroups=useCustomToolbarGroups();
+  const {rows,groupRows,setRow}=useToolbarRows();
+  const rowRef=useRef(setRow);rowRef.current=setRow;
+  const [secondRow,setSecondRow]=useState<HTMLDivElement|null>(null);
   const [headerHost,setHeaderHost]=useState<HTMLElement|null>(null);
   useEffect(()=>setHeaderHost(root.current?.querySelector<HTMLElement>('.topbar,.records-header')||null),[scope]);
   const ghost=useRef<HTMLElement|null>(null);
@@ -89,6 +92,8 @@ function ToolbarWorkspaceBody({scope,children}:{scope:string;children:ReactNode}
       const target=document.elementFromPoint(event.clientX,event.clientY);
       const dock=target?.closest('.right-tool-dock'),header=target?.closest('.topbar,.records-header,.toolbar-overflow-popup');
       const side=dock?'right':header?'top':null;if(!side)return;
+      const row=target?.closest('.toolbar-second-row')?2:1;
+      if(side==='top')rowRef.current(current.id,row);
       const group=target?.closest<HTMLElement>('[data-toolbar-group]');
       if(group?.dataset.toolbarGroup===current.id)return;
       // Resolve the insertion point through gaps too; a gap must not send the group to the end.
@@ -96,7 +101,7 @@ function ToolbarWorkspaceBody({scope,children}:{scope:string;children:ReactNode}
       const peers=[...container.querySelectorAll<HTMLElement>(`[data-dock="${side}"]`)]
         .filter(n=>n.dataset.toolbarGroup!==current.id).sort((a,b)=>Number(a.style.order)-Number(b.style.order));
       const before=peers.find(n=>{const b=n.getBoundingClientRect();return side==='right'?event.clientY<b.top+b.height/2:event.clientX<b.left+b.width/2;})?.dataset.toolbarGroup;
-      const key=`${side}:${before||'end'}`;if(current.last===key)return;current.last=key;
+      const key=`${side}:${row}:${before||'end'}`;if(current.last===key)return;current.last=key;
       moveRef.current(current.id,side,before,true);
     };
     const finish=(event:PointerEvent)=>{
@@ -117,7 +122,7 @@ function ToolbarWorkspaceBody({scope,children}:{scope:string;children:ReactNode}
     const measure=()=>{
       root.current?.style.setProperty('--dock-top',`${header.getBoundingClientRect().height}px`);
       const style=getComputedStyle(header),gap=parseFloat(style.columnGap)||12;
-      const groups=Object.keys(registry).filter(id=>layout[id]?.side!=='right').map(id=>{
+      const groups=Object.keys(registry).filter(id=>layout[id]?.side!=='right' && !(rows===2&&groupRows[id]===2)).map(id=>{
         const node=root.current?.querySelector<HTMLElement>(`[data-toolbar-group="${id}"]`);
         return {id,width:(node?.getBoundingClientRect().width||0)+gap};
       });
@@ -142,11 +147,11 @@ function ToolbarWorkspaceBody({scope,children}:{scope:string;children:ReactNode}
     const mutations=new MutationObserver(schedule);mutations.observe(root.current!,{childList:true,subtree:true});
     window.addEventListener('resize',schedule);schedule();
     return()=>{cancelAnimationFrame(frame);observer.disconnect();mutations.disconnect();window.removeEventListener('resize',schedule);};
-  },[scope,registry,layout]);
-  return <Context.Provider value={{layout,drag,dock,overflow,popup,setPopup,register,move,begin}}>
-    <div ref={root} className={`toolbar-workspace ${hasRight?'has-right-dock':''} ${drag?'toolbar-dragging':''}`} data-toolbar-scope={scope}>
+  },[scope,registry,layout,rows,groupRows]);
+  return <Context.Provider value={{secondRow,rows,groupRows,layout,drag,dock,overflow,popup,setPopup,register,move,begin}}>
+    <div ref={root} className={`toolbar-workspace ${hasRight?'has-right-dock':''} ${drag?'toolbar-dragging':''}`} data-toolbar-scope={scope} data-toolbar-rows={rows}>
       {children}
-      {headerHost&&createPortal(<>{customGroups.map((group,index)=><ToolbarGroup key={group.id} groupId={group.id} order={95+index/100} aria-label={group.name} title={group.name}/>)}</>,headerHost)}
+      {headerHost&&createPortal(<><div className="toolbar-second-row" ref={setSecondRow} hidden={rows!==2}/>{customGroups.map((group,index)=><ToolbarGroup key={group.id} groupId={group.id} order={95+index/100} aria-label={group.name} title={group.name}/>)}</>,headerHost)}
       <aside className="right-tool-dock" aria-label="Sağ alət paneli" hidden={!hasRight&&!drag}>
         <div className="dock-drop-hint">Sağ panelə yerləşdir</div><div ref={setDock} className="right-tool-groups"/>
       </aside>
@@ -156,17 +161,18 @@ function ToolbarWorkspaceBody({scope,children}:{scope:string;children:ReactNode}
 
 export function ToolbarGroup({groupId,order=0,children,className='',...props}:HTMLAttributes<HTMLDivElement>&{groupId:string;order?:number;children?:ReactNode}) {
   const context=useContext(Context),register=context?.register;
+  const config=useToolbarGroupConfig(groupId);
   useEffect(()=>register?.(groupId,order),[register,groupId,order]);
   if(!context)return <div {...props} className={`toolbar-group ${className}`}>{children}</div>;
   const position=context?.layout[groupId]||{side:'top',order};
-  const element=<div {...props} className={`toolbar-group dockable-tool-group ${className}`} data-toolbar-group={groupId} data-dragging={context.drag===groupId||undefined} data-dock={position.side} style={{...props.style,order:position.order,'--group-order':position.order} as React.CSSProperties}>
+  const element=<div {...props} className={`toolbar-group dockable-tool-group ${className}`} data-toolbar-group={groupId} data-group-deleted={config.hidden||undefined} title={config.name||props.title} data-dragging={context.drag===groupId||undefined} data-dock={position.side} style={{...props.style,order:position.order,'--group-order':position.order} as React.CSSProperties}>
     <button type="button" className="toolbar-drag-handle" onPointerDown={event=>context.begin(event,groupId)} aria-label={`${props['aria-label']||groupId} — qrupu daşı`}
       title="Sağ tutacaqdan tutub yanlara sürüşdürün və ya sağ panelə yerləşdirin."
       onDoubleClick={()=>context?.move(groupId,position.side==='top'?'right':'top')}
       onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();context?.move(groupId,position.side==='top'?'right':'top');}}}><GripVertical/></button>
     <CustomizableGroup id={groupId} label={props['aria-label']||groupId}>{children}</CustomizableGroup>
   </div>;
-  const target=position.side==='right'?context.dock:context.overflow.includes(groupId)?context.popup:null;
+  const target=position.side==='right'?context.dock:context.rows===2&&context.groupRows[groupId]===2?context.secondRow:context.overflow.includes(groupId)?context.popup:null;
   return target?createPortal(element,target,groupId):element;
 }
 

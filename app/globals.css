@@ -971,11 +971,20 @@ body .toolbar-workspace .mpr-thickness output{white-space:nowrap;font-variant-nu
 .toolbar-empty-group{padding:0 6px;font-size:12px;color:#b7d4de;white-space:nowrap}
 .toolbar-customize-trigger{order:100;display:flex;align-items:center;justify-content:center;width:var(--command-size,32px);height:var(--command-size,32px);flex:none;border:1px solid #385163;border-radius:5px}
 .toolbar-customize-trigger svg{width:17px;height:17px}
-.toolbar-edit-done{position:fixed;top:calc(var(--dock-top,70px) + 8px);right:18px;background:#225961;color:#fff;padding:8px 14px;border:1px solid #83bdcf;border-radius:5px;z-index:150}
+.toolbar-edit-done{position:fixed;bottom:42px;left:50%;transform:translateX(-50%);background:#225961;color:#fff;padding:10px 20px;border:1px solid #83bdcf;border-radius:5px;z-index:2147483001;max-width:90vw}
 .toolbar-editor-backdrop{position:fixed;inset:0;z-index:1000;background:#0008;display:grid;place-items:center;padding:20px}
 .toolbar-editor{width:min(800px,95vw);max-height:90vh;overflow:auto;background:#101f2c;color:#e3eff5;border:1px solid #496176;border-radius:10px;padding:20px;box-shadow:0 16px 60px #0008;font-size:14px}
 .toolbar-editor header,.toolbar-editor-actions,.toolbar-editor form,.toolbar-editor-custom{display:flex;align-items:center;gap:12px;margin-bottom:14px}
 .toolbar-editor header{justify-content:space-between}.toolbar-editor h2{font-size:20px;font-weight:600}.toolbar-editor p{margin-bottom:16px;color:#b4c5d1}
+.toolbar-editor header{position:sticky;top:-20px;background:#101f2c;z-index:2;padding:12px 0;flex-wrap:wrap}
+.toolbar-row-options{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0}.toolbar-row-options label{display:flex;gap:8px;align-items:center}
+.toolbar-workspace[data-toolbar-rows="2"] .topbar,.toolbar-workspace[data-toolbar-rows="2"] .records-header{flex-wrap:wrap!important;height:auto!important;max-height:none!important}
+.toolbar-second-row{flex:0 0 100%;order:1000;min-height:44px;display:flex;gap:10px;padding:5px 0;align-items:center;border-top:1px solid #314352}
+.toolbar-second-row[hidden]{display:none}
+[data-toolbar-group][data-group-deleted="true"]{display:none!important}
+.import-job-progress{position:fixed;bottom:32px;left:270px;right:24px;z-index:90;background:#101f2cf2;max-width:650px;pointer-events:none}
+@media(max-width:760px){.import-job-progress{left:12px;right:12px}}
+@media(max-width:600px){.toolbar-editor-backdrop{padding:8px}.toolbar-editor{padding:12px;width:100%;max-height:96dvh}.toolbar-editor header{top:-12px}.toolbar-editor-item{grid-template-columns:minmax(80px,1fr) minmax(90px,1fr) 30px 30px;gap:4px}.toolbar-editor form{flex-wrap:wrap}}
 .toolbar-editor button{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid #39556d;border-radius:5px;background:#192f42;cursor:pointer}
 .toolbar-editor button:disabled{opacity:.35}.toolbar-editor svg{width:16px;height:16px}.toolbar-editor input,.toolbar-editor select{background:#091621;border:1px solid #39556d;border-radius:4px;padding:7px;color:#e3eff5;min-width:0}
 .toolbar-editor-item{display:grid;grid-template-columns:minmax(140px,1fr) minmax(150px,220px) 36px 36px;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid #253c4e}.toolbar-editor-item span{overflow-wrap:anywhere}
