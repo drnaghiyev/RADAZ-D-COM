@@ -102,6 +102,24 @@ class DeltaUpdates(unittest.TestCase):
         self.assertTrue(self.source.is_dir())
         self.assertEqual((data/'archive.txt').read_text(),'preserve')
 
+    def test_retention_recognizes_generated_wheels_but_keeps_user_cache_files(self):
+        for old in ['0.2.29','0.2.30']:
+            directory=self.root/'versions'/old
+            with ZipFile(self.package(old)) as z:z.extractall(directory)
+            wheel=directory/'bridge/wheels/pydicom-3.0.2-py3-none-any.whl';wheel.parent.mkdir()
+            with ZipFile(wheel,'w') as z:z.writestr('pydicom/module.py',b'pinned package')
+            manifest=desktop.read_json(directory/'SHA256SUMS.json')
+            manifest[wheel.relative_to(directory).as_posix()]=hashlib.sha256(wheel.read_bytes()).hexdigest()
+            desktop.atomic_json(directory/'SHA256SUMS.json',manifest)
+            cache=directory/'bridge/.radaz-deps-3.0.4'
+            with ZipFile(wheel) as z:z.extractall(cache)
+            (cache/'.complete').write_text('pydicom 3.0.2 · pynetdicom 3.0.4',encoding='utf-8')
+        (self.root/'versions/0.2.30/bridge/.radaz-deps-3.0.4/user-note.txt').write_text('keep')
+        desktop.atomic_json(self.root/'activation-verified.json',{'version':self.base})
+        with patch.object(desktop,'runtime_processes',return_value={'versions':[self.base]}):
+            self.assertEqual(desktop.cleanup_versions(self.root),['0.2.29'])
+        self.assertTrue((self.root/'versions/0.2.30').exists())
+
     def test_interrupted_download_resumes_at_verified_offset(self):
         raw=b'0123456789abcdef';asset=dict(name='fixture.zip',size=len(raw),digest='sha256:'+hashlib.sha256(raw).hexdigest(),browser_download_url='https://github.com/fixture.zip')
         class Interrupted(io.BytesIO):

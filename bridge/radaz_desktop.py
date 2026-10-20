@@ -457,6 +457,21 @@ def cleanup_versions(root):
         try:
             validate_directory(directory,candidate.name)
             known=set(read_json(directory/'SHA256SUMS.json'))|{'SHA256SUMS.json'}
+            # The bridge extracts its pinned wheels on first start. Recognize
+            # only byte-identical generated files, never arbitrary user files.
+            cache=directory/'bridge/.radaz-deps-3.0.4'
+            for name in ('pydicom-3.0.2-py3-none-any.whl','pynetdicom-3.0.4-py3-none-any.whl'):
+                wheel_name='bridge/wheels/'+name
+                if wheel_name not in known:continue
+                with ZipFile(directory/wheel_name) as wheel:
+                    for entry in wheel.infolist():
+                        if entry.is_dir():continue
+                        cached=cache/entry.filename
+                        if cached.is_file() and cached.resolve().is_relative_to(cache.resolve()) and cached.read_bytes()==wheel.read(entry):
+                            known.add(cached.relative_to(directory).as_posix())
+            marker=cache/'.complete'
+            if marker.is_file() and marker.read_bytes()=='pydicom 3.0.2 · pynetdicom 3.0.4'.encode():
+                known.add(marker.relative_to(directory).as_posix())
             files=list(directory.rglob('*'))
             # Refuse junctions and unexpected user files even inside a runtime folder.
             if any(p.is_symlink() or not p.resolve().is_relative_to(directory.resolve()) for p in files):continue

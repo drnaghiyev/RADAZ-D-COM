@@ -42,7 +42,9 @@ def variant(value, broken=False, broken_asset=False):
     source=STAGE; destination=install/'versions'/value; destination.mkdir()
     manifest=json.loads((source/'SHA256SUMS.json').read_text())
     for name in manifest:
-        file=destination/name;file.parent.mkdir(parents=True,exist_ok=True);os.link(source/name,file)
+        file=destination/name;file.parent.mkdir(parents=True,exist_ok=True)
+        try:os.link(source/name,file)
+        except OSError:shutil.copy2(source/name,file)  # CI workspace and TEMP can be on different disks.
     for name in ('public/product.json','desktop.json','dist/server/radaz-build.json'):
         file=destination/name;value_json=json.loads(file.read_text());file.unlink()
         if name.endswith('radaz-build.json'):value_json['product']['version']=value;value_json['buildId']=hashlib.sha256(value.encode()).hexdigest()
