@@ -4,7 +4,7 @@ import {createPortal} from 'react-dom';
 import {Settings2,Plus,X,RotateCcw,ArrowUp,ArrowDown} from 'lucide-react';
 
 type Placement={group:string;order:number};
-type Saved={names?:Record<string,string>;removed?:string[];rows?:1|2;groupRows?:Record<string,1|2>;groups:{id:string;name:string}[];items:Record<string,Placement>};
+type Saved={names?:Record<string,string>;removed?:string[];rows?:1|2;groupRows?:Record<string,1|2>;itemRows?:Record<string,1|2>;groups:{id:string;name:string}[];items:Record<string,Placement>};
 type Item={home:string;label:string;menu:boolean;order:number};
 const mime='application/x-radaz-toolbar-item';
 const empty=():Saved=>({groups:[],items:{}});
@@ -26,6 +26,7 @@ export function ToolbarCustomization({scope,children}:{scope:string;children:Rea
       if(Array.isArray(data?.groups)&&data.groups.length<=40&&data.items&&typeof data.items==='object'){
         value.removed=Array.isArray(data.removed)?data.removed.filter((id:unknown)=>typeof id==='string'):[];value.names=Object.fromEntries(Object.entries(data.names||{}).filter(([,v])=>typeof v==='string'&&v.length<=80)) as Record<string,string>;
         value.rows=data.rows===2?2:1;value.groupRows=Object.fromEntries(Object.entries(data.groupRows||{}).filter(([,r])=>r===1||r===2)) as Record<string,1|2>;
+        value.itemRows=Object.fromEntries(Object.entries(data.itemRows||{}).filter(([,r])=>r===1||r===2)) as Record<string,1|2>;
         value.groups=data.groups.filter((g:{id:string;name:string})=>/^custom-[a-z0-9-]+$/.test(g?.id)&&typeof g.name==='string'&&g.name.length<=80);
         for(const [id,p] of Object.entries(data.items) as [string,Placement][])if(id.length<300&&p&&typeof p.group==='string'&&Number.isFinite(p.order))value.items[id]=p;
       }
@@ -69,7 +70,7 @@ export function CustomizableGroup({id,label,children}:{id:string;label:string;ch
   const context=useContext(Context),[host,setHost]=useState<HTMLDivElement|null>(null);
   const register=context?.registerGroup;
   useEffect(()=>host?register?.(id,label,host):undefined,[id,label,host,register]);
-  return <GroupContext.Provider value={id}><div ref={setHost} className="toolbar-item-host" data-item-group={id}
+  return <GroupContext.Provider value={id}><div ref={setHost} className="toolbar-item-host" data-item-group={id} data-item-rows={context?.saved.itemRows?.[id]||1}
     onDragOver={accept} onDrop={event=>{if(!event.dataTransfer.types.includes(mime))return;event.preventDefault();event.stopPropagation();context?.move(event.dataTransfer.getData(mime),id);}}>
     {flattened(children).map((child,index)=><PortableItem key={child.key||index} id={`${id}/${child.key||index}`} home={id} label={primaryLabel(child)||`${label} ${index+1}`} order={index}>{child}</PortableItem>)}
     {context?.editing&&!Children.count(children)&&<span className="toolbar-empty-group">{label}</span>}
@@ -115,12 +116,12 @@ export function ToolbarCustomizeButton({onReset}:{onReset:()=>void}){
     {editing&&<button className="toolbar-edit-done" onClick={()=>setEditing(false)}>Təsdiq ✓</button>}
     {open&&createPortal(<div className="toolbar-editor-backdrop" onClick={event=>{if(event.target===event.currentTarget)setOpen(false);}}><section role="dialog" aria-modal="true" aria-label="Alət panelinin düzülüşü" className="toolbar-editor" onKeyDown={event=>{if(event.key==='Escape')setOpen(false);}}>
       <header><h2>Alət panelinin düzülüşü</h2><button onClick={()=>{setEditing(false);setOpen(false);}}>Təsdiq</button><button aria-label="Bağla" onClick={()=>setOpen(false)}><X/></button></header>
-      <p>Düymələri və menyu alətlərini qruplar arasında sürüşdürün. Qrupun sağ tutacağı onun yerini dəyişir. Dəyişikliklər avtomatik saxlanılır.</p>
-      <label>Sıra sayı <select aria-label="Alət panelinin sıra sayı" value={saved.rows||1} onChange={e=>save({...saved,rows:Number(e.target.value) as 1|2})}><option value={1}>Bir sıra</option><option value={2}>İki sıra</option></select></label>
-      {saved.rows===2&&<div className="toolbar-row-options">{options.map(id=><label key={id}>{names(id)}<select aria-label={`${names(id)} sırası`} value={saved.groupRows?.[id]||1} onChange={e=>save({...saved,groupRows:{...saved.groupRows,[id]:Number(e.target.value) as 1|2}})}><option value={1}>1-ci sıra</option><option value={2}>2-ci sıra</option></select></label>)}</div>}
+      <p>Düymələri və menyu alətlərini qruplar arasında sürüşdürün. Qrupun sağ tutacağı onu üst və alt sıraya daşıyır. Qrup daxilində “Düymələr: alt-alta” seçimi düymələri cüt-cüt şaquli yerləşdirir. Dəyişikliklər avtomatik saxlanılır.</p>
+      <label>Sıra sayı <select aria-label="Alət panelinin sıra sayı" value={saved.rows||1} onChange={e=>save({...saved,rows:Number(e.target.value) as 1|2,groupRows:Number(e.target.value)===2?Object.fromEntries(options.map((id,index)=>[id,saved.groupRows?.[id]||(index%2?2:1)])):saved.groupRows})}><option value={1}>Bir sıra</option><option value={2}>Alt-alta iki sıra</option></select></label>
+      {saved.rows===2&&<div className="toolbar-row-options">{options.map(id=><label key={id}>{names(id)}<select aria-label={`${names(id)} sırası`} value={saved.groupRows?.[id]||1} onChange={e=>save({...saved,groupRows:{...saved.groupRows,[id]:Number(e.target.value) as 1|2}})}><option value={1}>Üst sıra</option><option value={2}>Alt sıra</option></select></label>)}</div>}
       <div className="toolbar-editor-actions"><button onClick={()=>{setEditing(true);setOpen(false);}}>Sürüşdürərək düzəlt</button><button onClick={()=>{save(empty());onReset();}}><RotateCcw/>Standart düzülüşü bərpa et</button></div>
       <form onSubmit={event=>{event.preventDefault();if(!name.trim()||saved.groups.length>=40)return;save({...saved,groups:[...saved.groups,{id:`custom-${crypto.randomUUID()}`,name:name.trim().slice(0,80)}]});setName('');}}><input aria-label="Yeni qrupun adı" value={name} maxLength={80} onChange={e=>setName(e.target.value)} placeholder="Yeni qrupun adı"/><button type="submit"><Plus/>Qrup yarat</button></form>
-      {options.map(id=><div className="toolbar-editor-custom" key={id}><input aria-label={`${names(id)} qrupunun adı`} value={names(id)} maxLength={80} onChange={event=>save({...saved,names:{...saved.names,[id]:event.target.value}})}/><button aria-label={`${names(id)} qrupunu sil`} onClick={()=>save({...saved,removed:[...(saved.removed||[]),id],items:{...saved.items,...Object.fromEntries(Object.entries(items).filter(([key,item])=>(saved.items[key]?.group||item.home)===id).map(([key],order)=>[key,{group:'pool',order}]))}})}><X/></button></div>)}
+      {options.map(id=><div className="toolbar-editor-custom" key={id}><input aria-label={`${names(id)} qrupunun adı`} value={names(id)} maxLength={80} onChange={event=>save({...saved,names:{...saved.names,[id]:event.target.value}})}/><select aria-label={`${names(id)} daxilində düzülüş`} value={saved.itemRows?.[id]||1} onChange={e=>save({...saved,itemRows:{...saved.itemRows,[id]:Number(e.target.value) as 1|2}})}><option value={1}>Düymələr: bir sıra</option><option value={2}>Düymələr: alt-alta</option></select><button aria-label={`${names(id)} qrupunu sil`} onClick={()=>save({...saved,removed:[...(saved.removed||[]),id],items:{...saved.items,...Object.fromEntries(Object.entries(items).filter(([key,item])=>(saved.items[key]?.group||item.home)===id).map(([key],order)=>[key,{group:'pool',order}]))}})}><X/></button></div>)}
       <div className="toolbar-editor-list">{ordered.map(id=>{
         const item=items[id],destination=saved.items[id]?.group||(saved.removed?.includes(item.home)?'pool':item.menu?'menu':item.home);
         const peers=ordered.filter(key=>(saved.items[key]?.group||(items[key].menu?'menu':items[key].home))===destination),index=peers.indexOf(id);

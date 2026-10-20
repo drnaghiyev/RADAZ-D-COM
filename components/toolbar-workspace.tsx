@@ -99,7 +99,7 @@ function ToolbarWorkspaceBody({scope,children}:{scope:string;children:ReactNode}
       // Resolve the insertion point through gaps too; a gap must not send the group to the end.
       const container=dock||header!;
       const peers=[...container.querySelectorAll<HTMLElement>(`[data-dock="${side}"]`)]
-        .filter(n=>n.dataset.toolbarGroup!==current.id).sort((a,b)=>Number(a.style.order)-Number(b.style.order));
+        .filter(n=>n.dataset.toolbarGroup!==current.id&&(side==='right'||(!!n.closest('.toolbar-second-row'))===(row===2))).sort((a,b)=>Number(a.style.order)-Number(b.style.order));
       const before=peers.find(n=>{const b=n.getBoundingClientRect();return side==='right'?event.clientY<b.top+b.height/2:event.clientX<b.left+b.width/2;})?.dataset.toolbarGroup;
       const key=`${side}:${row}:${before||'end'}`;if(current.last===key)return;current.last=key;
       moveRef.current(current.id,side,before,true);
@@ -121,8 +121,9 @@ function ToolbarWorkspaceBody({scope,children}:{scope:string;children:ReactNode}
     let frame=0;
     const measure=()=>{
       root.current?.style.setProperty('--dock-top',`${header.getBoundingClientRect().height}px`);
+      if(rows===2){setOverflow(current=>current.length?[]:current);return;}
       const style=getComputedStyle(header),gap=parseFloat(style.columnGap)||12;
-      const groups=Object.keys(registry).filter(id=>layout[id]?.side!=='right' && !(rows===2&&groupRows[id]===2)).map(id=>{
+      const groups=Object.keys(registry).filter(id=>layout[id]?.side!=='right').map(id=>{
         const node=root.current?.querySelector<HTMLElement>(`[data-toolbar-group="${id}"]`);
         return {id,width:(node?.getBoundingClientRect().width||0)+gap};
       });

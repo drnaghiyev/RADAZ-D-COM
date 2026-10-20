@@ -1001,3 +1001,11 @@ body .toolbar-workspace .dockable-tool-group button.workspace-options svg{width:
  .toolbar-workspace{--command-size:30px;--command-icon:19px;--command-gap:6px;--group-gap:10px}
  body .toolbar-workspace .dockable-tool-group,body .toolbar-workspace main.workstation.grouped-workstation .topbar .dockable-tool-group{padding:6px 16px 6px 6px!important}
 }
+
+/* Two toolbar lanes stack vertically; each lane wraps before leaving the viewport. */
+body .toolbar-workspace[data-toolbar-rows="2"] main.workstation.grouped-workstation .topbar,
+body .toolbar-workspace[data-toolbar-rows="2"] .topbar,
+body .toolbar-workspace[data-toolbar-rows="2"] .records-header{flex-wrap:wrap!important;align-content:start!important;overflow:visible!important;max-width:100%;row-gap:8px!important}
+.toolbar-second-row{flex-wrap:wrap;min-width:0;max-width:100%;align-content:start;row-gap:8px}
+.toolbar-item-host[data-item-rows="2"]{display:grid;grid-template-rows:repeat(2,minmax(var(--command-size,32px),auto));grid-auto-flow:column;grid-auto-columns:max-content;align-items:center;gap:var(--command-gap,6px)}
+.toolbar-editor-custom{flex-wrap:wrap}.toolbar-editor-custom input{flex:1;min-width:100px}

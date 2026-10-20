@@ -140,7 +140,8 @@ try{
       {name:'nested-study.zip',mimeType:'application/zip',buffer:await zip.generateAsync({type:'nodebuffer'})},
       {name:'extra.dcm',mimeType:'application/dicom',buffer:files.find(f=>f.study==='2.25.411').body},
     ]);
-    await Promise.race([started,new Promise((_,reject)=>setTimeout(async()=>reject(new Error('Import did not reach disk save: '+await fresh.locator('.statusbar').textContent())),20000))]);
+    let importTimer;
+    try{await Promise.race([started,new Promise((_,reject)=>{importTimer=setTimeout(()=>reject(new Error('Import did not reach disk save')),20000);})]);}finally{clearTimeout(importTimer);}
     await fresh.locator('.import-job-progress progress').waitFor();
     await fresh.evaluate(()=>{const c=new BroadcastChannel('radaz-viewer-open-v2');c.postMessage({kind:'OPEN',request:crypto.randomUUID(),target:window.name,studies:['2.25.411']});setTimeout(()=>c.close(),50);});
     await fresh.waitForFunction(()=>document.querySelector('[data-panel="A"] .top-right')?.textContent.includes('SYNTHETIC CR'));
