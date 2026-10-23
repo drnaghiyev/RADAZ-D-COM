@@ -18,6 +18,7 @@ export type Point3 = [number, number, number];
 export type LocalMark = {
   id: string;
   imageId: string;
+  panelId?: string;
   kind: 'hu' | 'deviation' | 'arch' | 'arrow' | 'pencil';
   points: Point3[];
   labelOffset: [number, number];

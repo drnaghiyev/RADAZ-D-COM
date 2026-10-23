@@ -163,10 +163,22 @@ function ToolbarWorkspaceBody({scope,children}:{scope:string;children:ReactNode}
 export function ToolbarGroup({groupId,order=0,children,className='',...props}:HTMLAttributes<HTMLDivElement>&{groupId:string;order?:number;children?:ReactNode}) {
   const context=useContext(Context),register=context?.register;
   const config=useToolbarGroupConfig(groupId);
-  useEffect(()=>register?.(groupId,order),[register,groupId,order]);
+  const [menu,setMenu]=useState<{x:number;y:number}|null>(null);
+  const menuRef=useRef<HTMLDivElement>(null);
+  useEffect(()=>{
+    if(!menu)return;
+    const close=(event:Event)=>{if(event instanceof KeyboardEvent?event.key==='Escape':!menuRef.current?.contains(event.target as Node))setMenu(null);};
+    window.addEventListener('pointerdown',close);window.addEventListener('keydown',close);window.addEventListener('resize',close);
+    return()=>{window.removeEventListener('pointerdown',close);window.removeEventListener('keydown',close);window.removeEventListener('resize',close);};
+  },[menu]);
+  useEffect(()=>config.hidden?undefined:register?.(groupId,order),[register,groupId,order,config.hidden]);
   if(!context)return <div {...props} className={`toolbar-group ${className}`}>{children}</div>;
   const position=context?.layout[groupId]||{side:'top',order};
-  const element=<div {...props} className={`toolbar-group dockable-tool-group ${className}`} data-toolbar-group={groupId} data-group-deleted={config.hidden||undefined} title={config.name||props.title} data-dragging={context.drag===groupId||undefined} data-dock={position.side} style={{...props.style,order:position.order,'--group-order':position.order} as React.CSSProperties}>
+  const element=<div {...props} onContextMenu={event=>{
+    props.onContextMenu?.(event);
+    if(!config.empty||config.hidden)return;
+    event.preventDefault();event.stopPropagation();setMenu({x:Math.max(8,Math.min(event.clientX,window.innerWidth-220)),y:Math.max(8,Math.min(event.clientY,window.innerHeight-60))});
+  }} className={`toolbar-group dockable-tool-group ${className}`} data-toolbar-group={groupId} data-group-deleted={config.hidden||undefined} title={config.name||props.title} data-dragging={context.drag===groupId||undefined} data-dock={position.side} style={{...props.style,order:position.order,'--group-order':position.order} as React.CSSProperties}>
     <button type="button" className="toolbar-drag-handle" onPointerDown={event=>context.begin(event,groupId)} aria-label={`${props['aria-label']||groupId} — qrupu daşı`}
       title="Sağ tutacaqdan tutub yanlara sürüşdürün və ya sağ panelə yerləşdirin."
       onDoubleClick={()=>context?.move(groupId,position.side==='top'?'right':'top')}
@@ -174,7 +186,10 @@ export function ToolbarGroup({groupId,order=0,children,className='',...props}:HT
     <CustomizableGroup id={groupId} label={props['aria-label']||groupId}>{children}</CustomizableGroup>
   </div>;
   const target=position.side==='right'?context.dock:context.rows===2&&context.groupRows[groupId]===2?context.secondRow:context.overflow.includes(groupId)?context.popup:null;
-  return target?createPortal(element,target,groupId):element;
+  return <>{target?createPortal(element,target,groupId):element}{menu&&config.empty&&!config.hidden&&createPortal(
+    <div ref={menuRef} role="menu" aria-label="Boş qrup" className="toolbar-group-context" style={{position:'fixed',left:menu.x,top:menu.y,zIndex:2147483000,padding:8,background:'#102431',border:'1px solid #456579',borderRadius:6}}>
+      <button autoFocus role="menuitem" onClick={()=>{config.removeEmpty();setMenu(null);}}>Boş qrupu sil</button>
+    </div>,document.body)}</>;
 }
 
 export function ToolbarOverflow() {

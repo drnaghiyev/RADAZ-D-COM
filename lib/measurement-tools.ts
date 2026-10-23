@@ -5,6 +5,11 @@ import {displayMeasurement} from './measurement-units';
 const hoverEvents=new WeakMap<HTMLElement,{event:unknown;uid?:string}>();
 const leaveListeners=new WeakSet<HTMLElement>();
 
+export function annotationBelongsToPane(annotation: any, element: HTMLElement) {
+  const owner = annotation.metadata?.radazProjectionPanel;
+  return !owner || owner === element.dataset.radazProjectionPanel;
+}
+
 /** Cancel by tool instance: image-filtered cancellation misses a draft after scrolling. */
 export function cancelMeasurementInteraction(group: any, element: HTMLElement) {
   for (const instance of Object.values(group?.getToolInstances() || {}) as any[]) instance.cancel?.(element);
@@ -15,6 +20,16 @@ export function themedMeasurement(Base: any) {
   return class extends Base {
     constructor(...args: any[]) {
       super(...args);
+      const add = this.addNewAnnotation.bind(this);
+      this.addNewAnnotation = (event: any, ...rest: any[]) => {
+        const annotation = add(event, ...rest);
+        const panel = event.detail.element.dataset.radazProjectionPanel;
+        if (annotation && panel) annotation.metadata.radazProjectionPanel = panel;
+        return annotation;
+      };
+      const filter = this.filterInteractableAnnotationsForElement.bind(this);
+      this.filterInteractableAnnotationsForElement = (element: HTMLElement, annotations: any[]) =>
+        filter(element, (annotations || []).filter(annotation => annotationBelongsToPane(annotation, element)));
       const cancel = this.cancel?.bind(this);
       if (cancel) this.cancel = (element: HTMLElement) => {
         const draft = this.editData?.newAnnotation;
@@ -36,6 +51,10 @@ export function themedMeasurement(Base: any) {
       // Screen-pixel hit targets stay easy to catch regardless of image zoom.
       const near = this.isPointNearTool.bind(this);
       this.isPointNearTool = (element:any, annotation:any, point:any, proximity:number, ...rest:any[]) => {
+        if (!annotationBelongsToPane(annotation, element)) return false;
+        // Cobb exists after its first line, before points 3/4 are drawn. The
+        // stock proximity check assumes all four points and crashes on hover.
+        if (Base.toolName === tools.CobbAngleTool.toolName && annotation.data.handles.points.length < 4) return false;
         if (Base.toolName === tools.EllipticalROITool.toolName) {
           const viewport = getEnabledElement(element)?.viewport;
           if (!viewport) return false;
@@ -53,7 +72,7 @@ export function themedMeasurement(Base: any) {
       };
       const handle = this.getHandleNearImagePoint.bind(this);
       this.getHandleNearImagePoint = (element:any, annotation:any, point:any, proximity:number) =>
-        handle(element, annotation, point, Math.max(proximity, 14));
+        annotationBelongsToPane(annotation, element) ? handle(element, annotation, point, Math.max(proximity, 14)) : undefined;
       const move=this.mouseMoveCallback.bind(this);
       this.mouseMoveCallback=(event:any,annotations:any[])=>{
         let redraw=move(event,annotations);

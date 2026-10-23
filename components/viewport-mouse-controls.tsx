@@ -3,7 +3,7 @@ import {useTranslation as useUiTranslation,translate as tr} from '@/lib/i18n';
 
 import {useEffect,useRef,useState,type RefObject} from 'react';
 import type * as Core from '@cornerstonejs/core';
-import {cancelMeasurementInteraction} from '@/lib/measurement-tools';
+import {cancelMeasurementInteraction,annotationBelongsToPane} from '@/lib/measurement-tools';
 import {getViewer} from '@/lib/cornerstone';
 import type {LocalMark,Point3} from './measurement-overlay';
 
@@ -32,7 +32,7 @@ export function ViewportMouseControls(props:Props){
    if(id&&current.current.marks.some(m=>m.id===id&&m.imageId===current.current.imageId))return {kind:'local',id};
    const tools=viewer.current?.tools;
    const annotation=tools?.utilities.getAnnotationNearPoint(element,point(event),8);
-   if(annotation?.annotationUID&&tools?.annotation.visibility.isAnnotationVisible(annotation.annotationUID))return {kind:'native',id:annotation.annotationUID};
+   if(annotation?.annotationUID&&annotationBelongsToPane(annotation,element)&&tools?.annotation.visibility.isAnnotationVisible(annotation.annotationUID))return {kind:'native',id:annotation.annotationUID};
    return null;
   };
   const isControl=(event:Event)=>event.target instanceof Element&&!!event.target.closest('button,input,textarea,select,.measurement-menu,.arrow-comment-editor,.hu-editor');
@@ -104,7 +104,7 @@ export function ViewportMouseControls(props:Props){
  const clear=()=>{
   const tools=viewer.current?.tools;
    if(tools&&props.element){tools.cancelActiveManipulations(props.element);props.element.dispatchEvent(new Event('radaz-clear-measurements'));}
-  tools?.annotation.state.getAllAnnotations().filter(a=>a.metadata?.referencedImageId===props.imageId).forEach(a=>tools.annotation.state.removeAnnotation(a.annotationUID!));
+  tools?.annotation.state.getAllAnnotations().filter(a=>a.metadata?.referencedImageId===props.imageId&&!!props.element&&annotationBelongsToPane(a,props.element)).forEach(a=>tools.annotation.state.removeAnnotation(a.annotationUID!));
   props.onClear(props.imageId);if(tools&&props.element)tools.utilities.triggerAnnotationRender(props.element);setMenu(null);
  };
  const arrow=menu.target?.kind==='local'&&props.marks.find(m=>m.id===menu.target!.id&&m.kind==='arrow');

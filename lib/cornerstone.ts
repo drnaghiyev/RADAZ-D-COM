@@ -1,3 +1,4 @@
+import {preserveContextSizeOnRemoval} from './render-context-lifecycle';
 import * as core from '@cornerstonejs/core';
 import * as tools from '@cornerstonejs/tools';
 import dicomParser from 'dicom-parser';
@@ -806,6 +807,7 @@ export async function getViewer() {
     [tools.LengthTool, tools.AngleTool, tools.CobbAngleTool, tools.EllipticalROITool].map(themedMeasurement).forEach(tool => tools.addTool(tool as any));
     installMeasurementTheme();
     engine = new core.RenderingEngine('radiology-viewer');
+    if (!core.getShouldUseCPURendering() && core.getConfiguration().rendering?.renderingEngineMode === core.Enums.RenderingEngineModeEnum.ContextPool) preserveContextSizeOnRemoval(engine);
   })();
   await initialized;
   return { core, tools, engine: engine! };

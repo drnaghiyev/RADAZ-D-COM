@@ -12,7 +12,7 @@ import { importFromRadazSite } from '@/lib/site-import';
 import { VolumeRenderControls } from '@/components/volume-render-controls';
 import { WorkProgress } from '@/components/work-progress';
 import { type WorkProgress as LoadingProgress, yieldToBrowser } from '@/lib/work-progress';
-import {cancelMeasurementInteraction} from '@/lib/measurement-tools';
+import {cancelMeasurementInteraction, annotationBelongsToPane} from '@/lib/measurement-tools';
 import {MeasurementSettings,useMeasurementUnit} from '@/components/measurement-settings';
 import { measurementVariables } from '@/lib/measurement-theme';
 import { RadazLogo, RadazTagline } from '@/components/radaz-logo';
@@ -111,6 +111,9 @@ function age(birth: string, study: string) {
   return `${+study.slice(0, 4) - +birth.slice(0, 4) - Number(study.slice(4) < birth.slice(4))} yaş`;
 }
 
+// Reusing a panel ID must wait for its previous viewport's in-flight setStack.
+const paneStackLoads = new Map<string, Promise<void>>();
+
 function ViewportPane({ onHover, projectionViews, anatomyControl, anatomyVolume, anatomyVolumeVisible, anatomyVolumeOpacity, anatomyLabel, windowLevels, windowingSourceId, cursor, onCursor, hideText, id, series, initialImageId, selected, tool, preset, resetToken, clearToken, ready, marks, selectedMarkId, localizers, otherImages, reconstruction, viewAnchor, expanded, concealed, onImageChange, onMoveSource, onMoveIntersection, loadingProgress, onRotateSource, onRotateStart, onPreviewRotateSource, onAddMark, onUpdateMark, onRemoveMark, onSelectMark, onClearImage, onSelect, onToggleMaximize, onDropSeries }: {
   onHover?: () => void;
   projectionViews?: Map<string,ImagePresentation>;
@@ -129,7 +132,7 @@ function ViewportPane({ onHover, projectionViews, anatomyControl, anatomyVolume,
   onRotateStart?: (sourcePanel: string, targetPanel: string) => void;
   onPreviewRotateSource?: (sourcePanel: string, targetPanel: string, angleRadians: number) => void;
   onAddMark: (mark: LocalMark) => void; onUpdateMark: (id: string, patch: Partial<LocalMark>) => void;
-  onRemoveMark: (id: string) => void; onClearImage: (imageId: string) => void;
+  onRemoveMark: (id: string) => void; onClearImage: (imageId: string, panelId?: string) => void;
   onSelectMark: (id: string) => void; onSelect: () => void; onToggleMaximize: () => void; onDropSeries: (id: string) => void;
 }) {
   useUiTranslation();
@@ -159,6 +162,10 @@ function ViewportPane({ onHover, projectionViews, anatomyControl, anatomyVolume,
   const [error, setError] = useState('');
   const viewportId = `panel-${id}`;
   const navigate = useStackNavigation(viewport, imageId, setError);
+  const projectionPanel = !reconstruction && isProjection(series?.modality) ? id : undefined;
+  const paneMarks = marks.filter(mark => !mark.panelId || mark.panelId === projectionPanel);
+  const addPaneMark = useCallback((mark: LocalMark) => onAddMark({...mark, panelId: projectionPanel}), [onAddMark, projectionPanel]);
+  const clearPaneImage = (image: string) => onClearImage(image, projectionPanel);
 
   useEffect(() => {
     if (!selected || concealed || !viewport) return;
@@ -181,6 +188,7 @@ function ViewportPane({ onHover, projectionViews, anatomyControl, anatomyVolume,
     let viewer: Awaited<ReturnType<typeof getViewer>>;
     (async () => {
       viewer = await getViewer();
+      await paneStackLoads.get(id);
       if (disposed) return;
       viewer.engine.enableElement({ viewportId, element, type: viewer.core.Enums.ViewportType.STACK });
       group = viewer.tools.ToolGroupManager.createToolGroup(`group-${id}`);
@@ -203,7 +211,7 @@ function ViewportPane({ onHover, projectionViews, anatomyControl, anatomyVolume,
         id, windowLevels, viewer.core.Enums.Events, getDefaultWindow, () => windowingScope.current);
       const stopProjection = bindProjectionPresentation(viewer.engine.getViewport(viewportId) as Core.Types.IStackViewport,
         projectionViews || new Map(), viewer.core.Enums.Events,
-        image=>viewer.core.metaData.get('sopCommonModule',image)?.sopInstanceUID,
+        image=>{const sop=viewer.core.metaData.get('sopCommonModule',image)?.sopInstanceUID;return sop ? `${id}:${sop}` : undefined;},
         ()=>!windowingScope.current.mpr&&isProjection(windowingScope.current.modality));
       const cancelInteraction = () => cancelMeasurementInteraction(group, element);
       const sync = () => {
@@ -288,7 +296,7 @@ function ViewportPane({ onHover, projectionViews, anatomyControl, anatomyVolume,
       const { engine } = await getViewer();
       const vp = engine.getViewport(viewportId) as Core.Types.IStackViewport;
       if (!vp || token !== requestRef.current) return;
-      const extending = stackSeries.current === series.id;
+      const extending = stackSeries.current === series.id && !!vp.getCurrentImageId();
       const current = vp.getCurrentImageId();
       const initialIndex = series.imageIds.indexOf((series.initialImageId || (extending && current && series.imageIds.includes(current) ? current : initialImageId)) || '');
       const camera = extending ? vp.getCamera() : null;
@@ -296,7 +304,9 @@ function ViewportPane({ onHover, projectionViews, anatomyControl, anatomyVolume,
       const anchorCanvas = camera && viewAnchor ? vp.worldToCanvas(viewAnchor) : null;
       const properties = extending ? vp.getProperties() : null;
       const previousIds = vp.getImageIds();
-      if (previousIds.length === series.imageIds.length && previousIds.every((value, index) => value === series.imageIds[index])) return;
+      if (previousIds.length === series.imageIds.length && previousIds.every((value, index) => value === series.imageIds[index])) {
+        onImageChange(id, vp.getCurrentImageId() || ''); vp.render(); return;
+      }
       if (elementRef.current) cancelMeasurementInteraction(groupRef.current, elementRef.current);
       await vp.setStack(series.imageIds, initialIndex >= 0 ? initialIndex : 0);
       if (token !== requestRef.current) return;
@@ -323,6 +333,7 @@ function ViewportPane({ onHover, projectionViews, anatomyControl, anatomyVolume,
       const range = vp.getProperties().voiRange;
       if (range) { setWW(Math.round(range.upper - range.lower)); setWL(Math.round((range.upper + range.lower) / 2)); }
     }).catch(e => { if (token === requestRef.current) setError(`Seriya açıla bilmədi: ${String(e)}`); });
+    paneStackLoads.set(id, stackQueue.current);
     return () => { requestRef.current++; };
   // The starting image is read once when the stack changes; scrolling should not reset it.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -381,9 +392,9 @@ function ViewportPane({ onHover, projectionViews, anatomyControl, anatomyVolume,
       tools.cancelActiveManipulations(vp.element);
       vp.element.dispatchEvent(new Event('radaz-clear-measurements'));
       tools.annotation.state.getAllAnnotations()
-        .filter(annotation => annotation.metadata?.referencedImageId === currentImage)
+        .filter(annotation => annotation.metadata?.referencedImageId === currentImage && annotationBelongsToPane(annotation, vp.element))
         .forEach(annotation => tools.annotation.state.removeAnnotation(annotation.annotationUID!));
-      onClearImage(currentImage);
+      onClearImage(currentImage, vp.element.dataset.radazProjectionPanel);
       vp.render();
     });
   }, [enabled, selected, clearToken, viewportId, onClearImage]);
@@ -396,16 +407,16 @@ function ViewportPane({ onHover, projectionViews, anatomyControl, anatomyVolume,
     onDragOver={e => { if(e.dataTransfer.types.includes('application/x-series-id')) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'; } }}
     onDrop={e => { const uid = e.dataTransfer.getData('application/x-series-id'); if (uid) { e.preventDefault(); e.stopPropagation(); onDropSeries(uid); } }}
     aria-label={`Görüntü paneli ${id}`}>
-    <div className="dicom-canvas" ref={elementRef} onContextMenu={e => e.preventDefault()} />
-    {!limited&&(!reconstruction||reconstruction.mode==='MPR')&&<AnatomyVolumeOverlay control={anatomyControl} viewport={viewport} element={viewport?.element??null} imageId={imageId} result={anatomyVolume||null} opacity={anatomyVolumeOpacity??.22} visible={!!anatomyVolumeVisible&&!concealed} picking={tool==='anatomy-volume'} onAdd={mark=>{onSelect();onAddMark(mark);}}/>}
-    {!limited && <MeasurementOverlay element={elementRef.current} viewport={viewport} imageId={imageId} modality={series?.modality} tool={tool} marks={marks} selectedMarkId={selectedMarkId}
-      onAdd={onAddMark} onUpdate={onUpdateMark} onRemove={onRemoveMark} onSelectMark={onSelectMark}/>}
+    <div className="dicom-canvas" data-radaz-projection-panel={projectionPanel} ref={elementRef} onContextMenu={e => e.preventDefault()} />
+    {!limited&&(!reconstruction||reconstruction.mode==='MPR')&&<AnatomyVolumeOverlay control={anatomyControl} viewport={viewport} element={viewport?.element??null} imageId={imageId} result={anatomyVolume||null} opacity={anatomyVolumeOpacity??.22} visible={!!anatomyVolumeVisible&&!concealed} picking={tool==='anatomy-volume'} onAdd={mark=>{onSelect();addPaneMark(mark);}}/>}
+    {!limited && <MeasurementOverlay element={elementRef.current} viewport={viewport} imageId={imageId} modality={series?.modality} tool={tool} marks={paneMarks} selectedMarkId={selectedMarkId}
+      onAdd={addPaneMark} onUpdate={onUpdateMark} onRemove={onRemoveMark} onSelectMark={onSelectMark}/>}
     {!limited && <LocalizerOverlay element={elementRef.current} viewport={viewport} imageId={imageId} otherImages={otherImages} enabled={localizers} onMoveSource={onMoveSource} onMoveIntersection={onMoveIntersection} targetPanel={id} onRotateSource={onRotateSource} onRotateStart={onRotateStart} onPreviewRotateSource={onPreviewRotateSource}/>}
     <ViewerInteractionOverlay anatomyLabel={anatomyLabel} viewport={viewport} element={elementRef.current} imageId={imageId} tool={tool} slice={slice} count={series?.imageIds.length || 0}
-      marks={marks} selectedMarkId={selectedMarkId} onSelectMark={onSelectMark} cursor={cursor} onCursor={onCursor} onEditArrow={setEditingArrow} onUpdate={onUpdateMark} onAdd={mark=>{onAddMark(mark);if(mark.kind==='arrow'&&!mark.anatomyId)setEditingArrow(mark.id);}} onRemove={onRemoveMark} onSelect={onSelect} navigate={navigate}/>
-    <ViewportMouseControls container={containerRef} element={elementRef.current} viewport={viewport} imageId={imageId} disabled={limited} marks={marks}
-      onSelect={onSelect} onRemove={onRemoveMark} onClear={onClearImage} onEditArrow={setEditingArrow}/>
-    {editingArrow&&marks.filter(mark=>mark.id===editingArrow&&mark.imageId===imageId&&mark.kind==='arrow').map(mark=><ArrowCommentEditor key={mark.id} mark={mark} onSave={comment=>onUpdateMark(mark.id,{comment})} onClose={()=>setEditingArrow(null)}/>)}
+      marks={paneMarks} selectedMarkId={selectedMarkId} onSelectMark={onSelectMark} cursor={cursor} onCursor={onCursor} onEditArrow={setEditingArrow} onUpdate={onUpdateMark} onAdd={mark=>{addPaneMark(mark);if(mark.kind==='arrow'&&!mark.anatomyId)setEditingArrow(mark.id);}} onRemove={onRemoveMark} onSelect={onSelect} navigate={navigate}/>
+    <ViewportMouseControls container={containerRef} element={elementRef.current} viewport={viewport} imageId={imageId} disabled={limited} marks={paneMarks}
+      onSelect={onSelect} onRemove={onRemoveMark} onClear={clearPaneImage} onEditArrow={setEditingArrow}/>
+    {editingArrow&&paneMarks.filter(mark=>mark.id===editingArrow&&mark.imageId===imageId&&mark.kind==='arrow').map(mark=><ArrowCommentEditor key={mark.id} mark={mark} onSave={comment=>onUpdateMark(mark.id,{comment})} onClose={()=>setEditingArrow(null)}/>)}
     {loadingProgress && <WorkProgress className="viewport-work-progress" progress={loadingProgress}/>}
     <div className="pane-badge">{id}</div>
     {series ? <>
@@ -531,7 +542,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     setCurrentImages(current=>Object.fromEntries(Object.entries(current).filter(([,id])=>!ids.has(id))));
     setMarks(current=>current.filter(mark=>!ids.has(mark.imageId)));setSelectedMarkId(null);
     void getViewer().then(({tools,core})=>{
-      for(const id of ids){const sop=core.metaData.get('sopCommonModule',id)?.sopInstanceUID;if(sop)projectionViews.delete(sop);}
+      for(const id of ids){const sop=core.metaData.get('sopCommonModule',id)?.sopInstanceUID;if(sop)for(const key of projectionViews.keys())if(key.endsWith(`:${sop}`))projectionViews.delete(key);}
       tools.annotation.state.getAllAnnotations().filter(a=>ids.has(a.metadata?.referencedImageId||''))
         .forEach(a=>tools.annotation.state.removeAnnotation(a.annotationUID!));
       // Allow React to detach just the affected panes before releasing their buffers.
@@ -585,7 +596,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   const onAddMark = useCallback((mark: LocalMark) => {setMarks(current => [...current, mark]);if(mark.anatomyId){setAnatomyLabel(null);if(!mark.anatomyId.startsWith('auto:'))setTool('wl');setSelectedMarkId(mark.id);}}, []);
   const onUpdateMark = useCallback((id: string, patch: Partial<LocalMark>) => setMarks(current => current.map(mark => mark.id === id ? { ...mark, ...patch } : mark)), []);
   const onRemoveMark = useCallback((id: string) => { setMarks(current => current.filter(mark => mark.id !== id)); setSelectedMarkId(current => current === id ? null : current); }, []);
-  const onClearImage = useCallback((imageId: string) => setMarks(current => current.filter(mark => mark.imageId !== imageId)), []);
+  const onClearImage = useCallback((imageId: string, panelId?: string) => setMarks(current => current.filter(mark => mark.imageId !== imageId || (!!mark.panelId && mark.panelId !== panelId))), []);
   const onImageChange = useCallback((panel: string, imageId: string) => {
     setCurrentImages(current => current[panel] === imageId ? current : { ...current, [panel]: imageId });
     const source = listRef.current.find(s => s.mediaSession && !s.thumb && s.imageIds.includes(imageId));
@@ -678,7 +689,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
           mpr.owned.forEach(id => ids.add(id)); mprDataRef.current = null; setMprData(null); gestureRef.current = null;
         }
         void getViewer().then(({ tools,core }) => {
-          for(const id of ids){const sop=core.metaData.get('sopCommonModule',id)?.sopInstanceUID;if(sop)projectionViews.delete(sop);}
+          for(const id of ids){const sop=core.metaData.get('sopCommonModule',id)?.sopInstanceUID;if(sop)for(const key of projectionViews.keys())if(key.endsWith(`:${sop}`))projectionViews.delete(key);}
           tools.annotation.state.getAllAnnotations().filter(a => ids.has(a.metadata?.referencedImageId || ''))
             .forEach(a => tools.annotation.state.removeAnnotation(a.annotationUID!));
         });
@@ -1011,11 +1022,14 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         if (selectedMark) { onRemoveMark(selectedMark.id); return; }
         void getViewer().then(({ tools, engine }) => {
           const selected = tools.annotation.selection.getAnnotationsSelected();
+          const vp = engine.getViewport(`panel-${panel}`) as Core.Types.IStackViewport | undefined;
+          if (!vp || vp.getCurrentImageId() !== imageId) return;
+          cancelMeasurementInteraction(tools.ToolGroupManager.getToolGroupForViewport(vp.id, engine.id), vp.element);
           selected.forEach(uid => {
             const annotation = tools.annotation.state.getAnnotation(uid);
-            if (annotation?.metadata?.referencedImageId === imageId) tools.annotation.state.removeAnnotation(uid);
+            if (annotation?.metadata?.referencedImageId === imageId && annotationBelongsToPane(annotation, vp.element)) tools.annotation.state.removeAnnotation(uid);
           });
-          engine.getViewport(`panel-${panel}`)?.render();
+          tools.utilities.triggerAnnotationRender(vp.element);
         });
         return;
       }
@@ -1495,7 +1509,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         {anatomyVolumeOpen&&!limited&&<AnatomyVolumeControls editing={workspace!=='3d'} control={anatomyVolume} source={anatomyVolumeSeries} onFocus={world=>{if(workspace==='3d')setAnatomyFocus(world);else if(workspace==='mpr')moveMprIntersection(world);else if(anatomyVolumeSeries){const index=closestSlice(anatomyVolumeSeries.imageIds,world,getLocalizerGeometry);if(index!==null)void getViewer().then(({engine})=>{const pane=engine.getViewport(`panel-${active}`) as Core.Types.IStackViewport|undefined;if(pane)void pane.setImageIdIndex(index).catch(error=>setStatus(String(error)));});}}} onPick={()=>{setAnatomyLabel(null);setTool('anatomy-volume');}} onClose={()=>{setAnatomyVolumeOpen(false);if(tool==='anatomy-volume')setTool('wl');}}/>}
         {anatomyLabel&&tool==='anatomy'&&<div className="anatomy-placement" role="status"><Crosshair size={18}/><span><strong>{anatomyLabel.text.split('\n')[0]}</strong> {tr('ui._pane_b5c88')}{anatomyLabel.panel}{tr('ui._click_the_structure_once_44e32')}</span><button onClick={()=>{setAnatomyLabel(null);setTool('wl');}}>{tr('ui.cancel_esc_bd665')}</button></div>}
         {workspace === 'viewer' && <div className="viewport-grid" style={{ gridTemplateColumns: `repeat(${maximizedPane ? 1 : layout.columns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${maximizedPane ? 1 : layout.rows}, minmax(0, 1fr))` }}>
-          {Array.from({ length: layout.rows * layout.columns }, (_, index) => paneId(index)).filter(id => !maximizedPane || id === maximizedPane).map(id => { const otherImages = id !== active && assigned[active] && currentImages[active] ? [{ panel: active, imageId: currentImages[active] }] : []; return <ViewportPane onHover={()=>{syncSource.current=id;}} projectionViews={projectionViews} anatomyControl={anatomyVolume} anatomyVolume={volumeResultFor(seriesList.find(s=>s.id===assigned[id]))} anatomyVolumeVisible={anatomyVolume.visible} anatomyVolumeOpacity={anatomyVolume.opacity} anatomyLabel={anatomyLabel?.panel===id?anatomyLabel:null} windowLevels={windowLevels} key={`${id}-${datasetVersion}-${assigned[id] || "empty"}`} id={id} initialImageId={currentImages[id]} series={seriesList.find(s => s.id === assigned[id])} selected={active === id} tool={limited ? 'scroll' : tool} cursor={cursor} onCursor={onCursor} hideText={hideText} preset={preset} resetToken={resetToken} clearToken={clearToken} ready={ready} marks={marks} selectedMarkId={selectedMarkId} localizers={localizers && id !== active} otherImages={otherImages} onImageChange={onImageChange} onMoveSource={onMoveSource} onAddMark={onAddMark} onUpdateMark={onUpdateMark} onRemoveMark={onRemoveMark} onSelectMark={markId => { setActive(id); setSelectedMarkId(markId); }} onClearImage={onClearImage} onSelect={() => { setActive(id); setSelectedMarkId(null); }} onToggleMaximize={() => { setActive(id); setMaximizedPane(current => current === id ? null : id); }} onDropSeries={sid => place(sid, id, true)}/>; })}
+          {Array.from({ length: layout.rows * layout.columns }, (_, index) => paneId(index)).filter(id => !maximizedPane || id === maximizedPane).map(id => { const otherImages = id !== active && assigned[active] && currentImages[active] ? [{ panel: active, imageId: currentImages[active] }] : []; return <ViewportPane onHover={()=>{syncSource.current=id;}} projectionViews={projectionViews} anatomyControl={anatomyVolume} anatomyVolume={volumeResultFor(seriesList.find(s=>s.id===assigned[id]))} anatomyVolumeVisible={anatomyVolume.visible} anatomyVolumeOpacity={anatomyVolume.opacity} anatomyLabel={anatomyLabel?.panel===id?anatomyLabel:null} windowLevels={windowLevels} key={`${id}-${datasetVersion}`} id={id} initialImageId={currentImages[id]} series={seriesList.find(s => s.id === assigned[id])} selected={active === id} tool={limited ? 'scroll' : tool} cursor={cursor} onCursor={onCursor} hideText={hideText} preset={preset} resetToken={resetToken} clearToken={clearToken} ready={ready} marks={marks} selectedMarkId={selectedMarkId} localizers={localizers && id !== active} otherImages={otherImages} onImageChange={onImageChange} onMoveSource={onMoveSource} onAddMark={onAddMark} onUpdateMark={onUpdateMark} onRemoveMark={onRemoveMark} onSelectMark={markId => { setActive(id); setSelectedMarkId(markId); }} onClearImage={onClearImage} onSelect={() => { setActive(id); setSelectedMarkId(null); }} onToggleMaximize={() => { setActive(id); setMaximizedPane(current => current === id ? null : id); }} onDropSeries={sid => place(sid, id, true)}/>; })}
         </div>}
         {workspace === 'mpr' && <>
           {mprError && <div className="mpr-error-notice" role="alert">{mprError}</div>}

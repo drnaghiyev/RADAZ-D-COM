@@ -97,7 +97,13 @@ export function PortableMenuItem({id,label,children,command}:{id?:string;label:s
   if(!home)return children;
   return <PortableItem id={`${home}/menu:${id||label}`} home={home} label={label} order={100} menu command={command}>{children}</PortableItem>;
 }
-export function useToolbarGroupConfig(id:string){const c=useContext(Context);return {hidden:!!c?.saved.removed?.includes(id),name:c?.saved.names?.[id]};}
+export function useToolbarGroupConfig(id:string){
+  const c=useContext(Context);
+  const isEmpty=(saved:Saved)=>!Object.entries(c?.items||{}).some(([key,item])=>
+    (saved.items[key]?.group||(saved.removed?.includes(item.home)?'pool':item.menu?'menu':item.home))===id);
+  return {hidden:!!c?.saved.removed?.includes(id),name:c?.saved.names?.[id],empty:!!c&&isEmpty(c.saved),
+    removeEmpty:()=>c?.save(current=>isEmpty(current)?{...current,removed:[...new Set([...(current.removed||[]),id])]}:current)};
+}
 export function useToolbarRows(){
   const context=useContext(Context);
   return {rows:context?.saved.rows||1,groupRows:context?.saved.groupRows||{},setRow:(id:string,row:1|2)=>context?.save(current=>current.groupRows?.[id]===row?current:({...current,groupRows:{...current.groupRows,[id]:row}}))};
