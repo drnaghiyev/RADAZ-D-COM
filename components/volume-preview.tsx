@@ -57,7 +57,7 @@ export function VolumePreview(props:Props){
  const [ready,setReady]=useState(false),[error,setError]=useState(''),[note,setNote]=useState('');
  const [effectiveQuality,setEffectiveQuality]=useState<Profile>('balanced');
  const [progress,setProgress]=useState<LoadingProgress|null>(null),[diagnostics,setDiagnostics]=useState<ReturnType<typeof performanceSnapshot>|null>(null);
- const ids=useRef({viewport:`RADAZ-3D-${crypto.randomUUID()}`,tools:`RADAZ-3D-TOOLS-${crypto.randomUUID()}`});
+
  const applyQuality=()=>{
   const viewport=viewportRef.current;if(!viewport)return;
   const caps=gpuCapabilities(),currentSettings=resolvedVolumeSettings(propsRef.current.preset,propsRef.current.settings),requested=currentSettings.quality;
@@ -124,6 +124,7 @@ export function VolumePreview(props:Props){
  };
  useEffect(()=>{
   const element=hostRef.current;if(!element||!series){setReady(false);setProgress(null);setError('');return;}
+  const ids={viewport:`RADAZ-3D-${crypto.randomUUID()}`,tools:`RADAZ-3D-TOOLS-${crypto.randomUUID()}`};
   const controller=new AbortController();let disposed=false,viewer:Awaited<ReturnType<typeof getViewer>>|undefined,resize:ResizeObserver|undefined;const lights:any[]=[];
   const opened=performance.now();setReady(false);setError('');setNote('');setProgress({label:'3D hazırlanır',done:0,total:0,phase:'Ortaq volume hazırlanır'});
   (async()=>{
@@ -141,7 +142,7 @@ export function VolumePreview(props:Props){
    if(series.modality!=='CT')notices.push(`${series.modality} siqnalı göstərilir. CT sümük rekonstruksiyası üçün CT seriyası tələb olunur.`);
    else if(Math.max(...current.volume.spacing)>Math.min(...current.volume.spacing)*3)notices.push('Qalın kəsitlər səthdə pillələnmə yarada bilər. Daha incə CT rekonstruksiyasını seçin.');
    setNote(notices.join(' '));
-   const {viewport:viewportId,tools:toolGroupId}=ids.current;
+   const {viewport:viewportId,tools:toolGroupId}=ids;
    engine.enableElement({viewportId,element,type:core.Enums.ViewportType.VOLUME_3D,defaultOptions:{background:[0,0,0]}});
    const gl=(engine.getOffscreenMultiRenderWindow(viewportId).getOpenGLRenderWindow() as any).get3DContext() as WebGL2RenderingContext;
    if(gl)instrumentVolumeUpload(gl);
@@ -184,7 +185,7 @@ export function VolumePreview(props:Props){
    window.addEventListener('blur',finishInteraction,{signal:controller.signal});
   })().catch(cause=>{if(!disposed){setError(cause instanceof Error?cause.message:String(cause));setProgress(null);}});
   return()=>{disposed=true;controller.abort();resize?.disconnect();clearTimeout(finishTimer.current);interacting.current=false;surfaceRef.current?.dispose();surfaceRef.current=null;cutRef.current?.dispose();cutRef.current=null;viewportRef.current=null;volumeRef.current=null;adjust.current=null;
-   if(viewer){viewer.tools.ToolGroupManager.destroyToolGroup(ids.current.tools);if(viewer.engine.getViewport(ids.current.viewport))viewer.engine.disableElement(ids.current.viewport);}
+   if(viewer){viewer.tools.ToolGroupManager.destroyToolGroup(ids.tools);if(viewer.engine.getViewport(ids.viewport))viewer.engine.disableElement(ids.viewport);}
    lights.forEach(light=>light.delete());clippingRef.current.forEach(plane=>plane.delete());clippingRef.current=[];
    // Shared volume remains cached until its source study closes.
   };

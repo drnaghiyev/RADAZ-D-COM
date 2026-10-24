@@ -789,7 +789,11 @@ function sampleOblique(volume: ObliqueVolume, x: number, y: number, z: number): 
 
 export async function getViewer() {
   initialized ??= (async () => {
-    await core.init();
+    // Each detached window owns an engine. Seven contexts per engine exhaust
+    // Chromium's shared GPU-context budget with Viewer + MPR + 3D open.
+    // ContextPool multiplexes any number of panes over these two contexts.
+    await core.init({...core.getConfiguration(),rendering:{...core.getConfiguration().rendering,webGlContextCount:2}});
+
     // Cornerstone 5.10 starts an auxiliary cache promise without consuming its
     // rejection. Observe that branch; callers still receive the original image
     // rejection and IMAGE_LOAD_FAILED, including real decode/IO failures.

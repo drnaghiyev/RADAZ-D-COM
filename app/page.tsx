@@ -1,5 +1,6 @@
 'use client';
 import {ToolbarWorkspace, ToolbarGroup, ToolbarOverflow} from '@/components/toolbar-workspace';
+import {bindPresentationSync} from '@/lib/presentation-sync';
 import {bindProjectionPresentation,isProjection,synchronizedSlice,type ImagePresentation} from '@/lib/viewer-navigation';
 import {viewerTitle,releaseVersion} from '@/lib/product-version';
 import ArchivePage from './archive/page';
@@ -162,7 +163,7 @@ function ViewportPane({ onHover, projectionViews, anatomyControl, anatomyVolume,
   const [error, setError] = useState('');
   const viewportId = `panel-${id}`;
   const navigate = useStackNavigation(viewport, imageId, setError);
-  const projectionPanel = !reconstruction && isProjection(series?.modality) ? id : undefined;
+  const projectionPanel = id;
   const paneMarks = marks.filter(mark => !mark.panelId || mark.panelId === projectionPanel);
   const addPaneMark = useCallback((mark: LocalMark) => onAddMark({...mark, panelId: projectionPanel}), [onAddMark, projectionPanel]);
   const clearPaneImage = (image: string) => onClearImage(image, projectionPanel);
@@ -752,6 +753,8 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     let firstError = '';
     let published = false;
     let finished = false;
+    let registered = false;
+    const decodedIds = new Set<string>();
     let firstDecoded = false;
     const discardUnpublished = () => {
       const visible = new Set(listRef.current.flatMap(s => s.imageIds));
@@ -760,7 +763,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     const publish = () => {
       const imported = [...found.values()].map(({ ordered, sopUIDs, ...s }) => {
         const imageIds = ordered.sort((a, b) => a.n - b.n).map(o => o.id);
-        return { ...s, imageIds, loading: !finished||!!job?.pending?.(s.id), thumb: s.thumb || thumbnailLocalDicom(imageIds[0]) };
+        return { ...s, imageIds, loading: (!finished && (!registered || ordered.some(o => filesById.has(o.id) && !decodedIds.has(o.id)))) || !!job?.pending?.(s.id), thumb: s.thumb || thumbnailLocalDicom(imageIds[0]) };
       });
       if (!imported.length) return;
       if (!published && (!job || job.select())) {
@@ -843,12 +846,13 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       if(!current()){discardUnpublished();return false;}
     }
     if(!current()){discardUnpublished();return false;}
+    registered=true;
     if(!createdIds.length)finished=true;
     publish();
     for (const imageId of createdIds) {
       if(invalidIds.has(imageId))continue;
       if (!current()) { discardUnpublished(); return false; }
-      try { await viewer.core.imageLoader.loadAndCacheImage(imageId); decoded++; }
+      try { await viewer.core.imageLoader.loadAndCacheImage(imageId); decodedIds.add(imageId); decoded++; }
       catch (err) {
         rejectImage(imageId,err);
       }
@@ -1165,10 +1169,20 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     : seriesList.filter(s => s.studyId === currentSeries?.studyId && s.imageIds.length >= 3)
       .sort((a, b) => b.imageIds.length - a.imageIds.length)[0];
   const grouped = groupSeries(seriesList.filter(s=>!s.sourceId));
-  const syncEligible=workspace==='viewer'&&Object.entries(assigned).filter(([panel,id])=>paneIndex(panel)<layout.rows*layout.columns&&seriesList.some(s=>s.id===id&&['CT','MR'].includes(s.modality)&&s.imageIds.length>1)).length>=2;
+  const syncEligible=workspace==='viewer'&&Object.entries(assigned).filter(([panel,id])=>paneIndex(panel)<layout.rows*layout.columns&&seriesList.some(s=>s.id===id&&s.imageIds.length>0)).length>=2;
   const syncSource=useRef('A');
   const syncSignature=useRef('');
   const syncRevision=useRef(0);
+  useEffect(()=>{
+    if(!syncScroll||!syncEligible)return;
+    let disposed=false,stop:(()=>void)|undefined;
+    void getViewer().then(({engine})=>{
+      if(disposed)return;
+      stop=bindPresentationSync(document.body,()=>engine.getViewports().filter(v=>
+        Object.keys(assigned).some(panel=>v.id===`panel-${panel}`&&paneIndex(panel)<layout.rows*layout.columns)),()=>syncSource.current);
+    });
+    return()=>{disposed=true;stop?.();};
+  },[syncScroll,syncEligible,assigned,layout]);
   useEffect(()=>{
     if(!syncScroll||!syncEligible){syncSignature.current='';syncRevision.current++;return;}
     const sourcePanel=syncSource.current;
@@ -1276,7 +1290,6 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   const openMpr = () => {
     const source = currentSeries?.imageIds.length && currentSeries.imageIds.length >= 3 ? currentSeries : volumeSeries;
     if (!source) { setMprError('MPR üçün əvvəlcə seriya seçin'); setWorkspace('mpr'); return; }
-    if(source.loading){setWorkspace('mpr');return;}
     if (mprDataRef.current?.sourceId === source.id) { setWorkspace('mpr'); return; }
     try {
       const keepOrientation = mprDataRef.current?.sourceId === source.id && mprDataRef.current.orientations;
@@ -1328,10 +1341,10 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   const rotateMprSource = (source: string, target: string, radians: number) => updateMprRotation(source, target, radians, true);
 
   useEffect(() => {
-    if (workspace === 'mpr' && ready && !mprData && !mprError && !mprProgress && volumeSeries && !volumeSeries.loading) openMpr();
+    if (workspace === 'mpr' && ready && !mprData && !mprError && !mprProgress && volumeSeries) openMpr();
   // Load the reconstructed planes once the handoff series is available.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspace, ready, mprData, mprError, !!mprProgress, volumeSeries?.id, volumeSeries?.loading]);
+  }, [workspace, ready, mprData, mprError, !!mprProgress, volumeSeries?.id, volumeSeries?.imageIds.length, volumeSeries?.loading]);
   const moveMprSource = (panel: string, world: Point3) => {
     const stack = mprData?.stacks[panel === 'MS' ? 'SAG' : panel === 'MC' ? 'COR' : 'AX'];
     if (!stack) return;
@@ -1446,7 +1459,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className="header-control" title={tr('ui.window_preset_b14ad')} aria-label={tr('ui.window_preset_menu_148b6')}><SlidersHorizontal size={17}/><span>{tr('ui.window_preset_b14ad')}</span><ChevronDown size={14}/></Button></DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="header-menu preset-menu">{presets.map(p => <DropdownMenuItem key={p.label} onSelect={() => { if (workspace === 'mpr' && mprData) { const plane = mprData.planes[{ MS:0, MC:1, MA:2 }[mprActive as 'MS'|'MC'|'MA'] || 0]; setPreset({ ...p, token: Date.now(), panel: mprActive, seriesId: plane.id, imageId: currentImages[mprActive] || '' }); } else if (assigned[active]) setPreset({ ...p, token: Date.now(), panel: active, seriesId: assigned[active], imageId: currentImages[active] || '' }); }}><span>{p.label}</span><small>WL {p.wl} · WW {p.ww}</small></DropdownMenuItem>)}</DropdownMenuContent>
         </DropdownMenu>
-        <Button variant="ghost" className={`header-control sync-scroll ${syncScroll?'is-on':''}`} disabled={!syncEligible} aria-label="Sync Scroll" aria-pressed={syncScroll} title="Sync Scroll · uyğun KT/MRT kəsiklərini sinxron vərəqlə" onClick={()=>setSyncScroll(value=>!value)}><MoveVertical size={17}/><b className="sync-symbol">↔</b></Button><Button variant="ghost" className={`header-control localizer-toggle ${localizers ? 'is-on' : ''}`} aria-label={tr('ui.localizer_lines_1e289')} aria-pressed={localizers} title={tr('ui.show_localizer_lines_between_compatible_serie_67285')} onClick={() => setLocalizers(value => !value)}><Crosshair size={17}/><span>{tr('ui.localizer_8c497')}</span></Button></ToolbarGroup>}
+        <Button variant="ghost" className={`header-control sync-scroll ${syncScroll?'is-on':''}`} disabled={!syncEligible} aria-label="Sync Scroll" aria-pressed={syncScroll} title="Sync · kəsiklər, zoom, pan və WW/WL" onClick={()=>setSyncScroll(value=>!value)}><MoveVertical size={17}/><b className="sync-symbol">↔</b></Button><Button variant="ghost" className={`header-control localizer-toggle ${localizers ? 'is-on' : ''}`} aria-label={tr('ui.localizer_lines_1e289')} aria-pressed={localizers} title={tr('ui.show_localizer_lines_between_compatible_serie_67285')} onClick={() => setLocalizers(value => !value)}><Crosshair size={17}/><span>{tr('ui.localizer_8c497')}</span></Button></ToolbarGroup>}
         {!limited && detachedMode !== '3d' && <ToolbarGroup className="toolbar-group" role="group" aria-label={tr('ui.pane_layout_and_size_6ffc9')} groupId="layout" order={90}>
         {workspace === 'viewer' && <DropdownMenu open={layoutOpen} onOpenChange={setLayoutOpen}><DropdownMenuTrigger asChild><Button variant="outline" className="header-control layout-trigger" title={`${layout.columns}×${layout.rows} panel düzülüşü`} aria-label={tr('ui.pane_layout_586c7')}><Grid2X2 size={18}/><span>{layout.columns}×{layout.rows}</span><ChevronDown size={14}/></Button></DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="layout-menu" onMouseLeave={() => setLayoutHover(layout)}><div className="layout-caption">{tr('ui.pane_layout_586c7')}<strong>{layoutHover.columns} × {layoutHover.rows}</strong></div><div className="layout-matrix" role="grid" aria-label="1–6 sətir və sütun seçin">
