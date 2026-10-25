@@ -2,7 +2,7 @@
 import {useEffect,useState} from 'react';
 type Vector=[number,number,number];
 type Camera={viewUp:Vector;viewPlaneNormal:Vector;position:Vector;focalPoint:Vector};
-type Viewport={element:HTMLElement;getCamera:()=>Camera;setCamera:(camera:Partial<Camera>)=>void;render:()=>void;getRenderer:()=>{resetCameraClippingRange:()=>void}};
+type Viewport={id?:string;isDisabled?:boolean;element:HTMLElement;getCamera:()=>Camera;setCamera:(camera:Partial<Camera>)=>void;render:()=>void;getRenderer:()=>{resetCameraClippingRange:()=>void}};
 const dot=(a:Vector,b:Vector)=>a.reduce((sum,n,i)=>sum+n*b[i],0);
 const cross=(a:Vector,b:Vector):Vector=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
 const faces:{name:string;normal:Vector;up:Vector;color:string}[]=[
@@ -16,7 +16,7 @@ const faces:{name:string;normal:Vector;up:Vector;color:string}[]=[
 /** Patient LPS axes, projected with the live volume camera, not screen-fixed labels. */
 export function VolumeOrientation({viewport}:{viewport:Viewport}){
  const [camera,setCamera]=useState(()=>viewport.getCamera());
- useEffect(()=>{const update=()=>setCamera(viewport.getCamera());viewport.element.addEventListener('CORNERSTONE_CAMERA_MODIFIED',update);return()=>viewport.element.removeEventListener('CORNERSTONE_CAMERA_MODIFIED',update);},[viewport]);
+ useEffect(()=>{const update=(event:Event)=>{const source=(event as CustomEvent).detail?.viewportId;if(viewport.isDisabled||(source&&viewport.id&&source!==viewport.id))return;setCamera(viewport.getCamera());};viewport.element.addEventListener('CORNERSTONE_CAMERA_MODIFIED',update);return()=>viewport.element.removeEventListener('CORNERSTONE_CAMERA_MODIFIED',update);},[viewport]);
  const right=cross(camera.viewUp,camera.viewPlaneNormal);
  const project=(p:Vector)=>[50+dot(p,right)*23,50-dot(p,camera.viewUp)*23];
  const visible=faces.filter(face=>dot(face.normal,camera.viewPlaneNormal)>.001);

@@ -56,6 +56,8 @@ class AiTests(unittest.TestCase):
         self.assertEqual(request.full_url, 'https://api.openai.com/v1/responses')
         self.assertEqual(request.headers['Authorization'], 'Bearer ' + self.key)
         body = json.loads(request.data)
+        self.assertEqual(body['model'], 'gpt-6-astra')
+        self.assertEqual(body['reasoning'], {'effort': 'low'})
         self.assertFalse(body['store'])
         self.assertIn('RADAZ Radiology AI',body['instructions'])
         self.assertIn('Nəticə',body['instructions'])

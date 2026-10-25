@@ -1,0 +1,28 @@
+"use client";
+import {createContext,useContext,useEffect,useRef,useState,type ReactNode} from 'react';
+import {createPortal} from 'react-dom';
+import {GripVertical} from 'lucide-react';
+type Placement={side:'top'|'right';order:number};
+type Dock={top:HTMLElement|null;right:HTMLElement|null;layout:Record<string,Placement>;overflow:string[];move:(id:string,side:'top'|'right',before?:string)=>void};
+const Context=createContext<Dock|null>(null);
+export function SmartDock({scope,children}:{scope:string;children:ReactNode}){
+ const root=useRef<HTMLDivElement>(null),[top,setTop]=useState<HTMLElement|null>(null),[right,setRight]=useState<HTMLElement|null>(null),[layout,setLayout]=useState<Record<string,Placement>>({});
+ useEffect(()=>{const node=root.current!;setTop(node.querySelector<HTMLElement>('.smart-dock-top'));setRight(node.querySelector<HTMLElement>('.smart-dock-right'));try{setLayout(JSON.parse(localStorage.getItem('radaz-smart-dock:'+scope)||'{}'));}catch{}},[scope]);
+ const [overflow,setOverflow]=useState<string[]>([]);const widths=useRef(new Map<string,number>());
+ useEffect(()=>{if(!top||!right)return;const view=top.ownerDocument.defaultView!;let frame=0;
+ const measure=()=>{const nodes=[...root.current!.querySelectorAll<HTMLElement>('[data-smart-group]')].filter(n=>n.dataset.preferred==='top').sort((a,b)=>Number(a.style.order)-Number(b.style.order));let used=0;const hidden:string[]=[];for(const n of nodes){const id=n.dataset.smartGroup!;if(n.dataset.side==='top')widths.current.set(id,n.getBoundingClientRect().width);const width=widths.current.get(id)||n.scrollWidth;used+=width+8;if(used>top.clientWidth)hidden.push(id);}setOverflow(old=>old.join('|')===hidden.join('|')?old:hidden);};
+ const schedule=()=>{view.cancelAnimationFrame(frame);frame=view.requestAnimationFrame(measure);};const observer=new ResizeObserver(schedule);observer.observe(top);const mutations=new MutationObserver(schedule);mutations.observe(root.current!,{childList:true,subtree:true});schedule();return()=>{view.cancelAnimationFrame(frame);observer.disconnect();mutations.disconnect();};
+ },[top,right,layout]);
+ const move=(id:string,side:'top'|'right',before?:string)=>setLayout(old=>{const nodes=[...root.current!.querySelectorAll<HTMLElement>('[data-smart-group]')].filter(n=>n.dataset.smartGroup!==id&&n.dataset.side===side).sort((a,b)=>Number(a.style.order)-Number(b.style.order));const ids=nodes.map(n=>n.dataset.smartGroup!);let index=before?ids.indexOf(before):-1;ids.splice(index<0?ids.length:index,0,id);const next={...old};ids.forEach((key,order)=>next[key]={side,order});try{localStorage.setItem('radaz-smart-dock:'+scope,JSON.stringify(next));}catch{}return next;});
+ return <Context.Provider value={{top,right,layout,overflow,move}}><div ref={root} className="smart-dock-root">{children}</div></Context.Provider>;
+}
+export function SmartDockGroup({id,side='top',order=0,children}:{id:string;side?:'top'|'right';order?:number;children:ReactNode}){
+ const context=useContext(Context)!,position=context.layout[id]||{side,order};const node=useRef<HTMLDivElement>(null),cleanup=useRef<()=>void>(()=>{});useEffect(()=>()=>cleanup.current(),[]);
+ const begin=(event:React.PointerEvent<HTMLButtonElement>)=>{if(event.button!==0)return;event.preventDefault();const doc=event.currentTarget.ownerDocument,view=doc.defaultView!,group=node.current!,box=group.getBoundingClientRect(),ghost=group.cloneNode(true) as HTMLElement;ghost.removeAttribute('data-smart-group');ghost.classList.add('smart-dock-ghost');Object.assign(ghost.style,{position:'fixed',left:box.left+'px',top:box.top+'px',width:box.width+'px',height:box.height+'px',zIndex:'999999',pointerEvents:'none'});doc.body.appendChild(ghost);doc.body.classList.add('smart-dock-dragging');const start={x:event.clientX,y:event.clientY};let target:HTMLElement|null=null;
+ const slide=(e:PointerEvent)=>{ghost.style.transform=`translate(${e.clientX-start.x}px,${e.clientY-start.y}px)`;target?.classList.remove('smart-dock-target');target=doc.elementFromPoint(e.clientX,e.clientY)?.closest<HTMLElement>('[data-smart-group],.smart-dock-top,.smart-dock-right')||null;target?.classList.add('smart-dock-target');};
+ const finish=(e:PointerEvent)=>{slide(e);const zone=target?.closest('.smart-dock-top')?'top':target?.closest('.smart-dock-right')?'right':null;const before=target?.dataset.smartGroup;cleanup.current();if(zone)context.move(id,zone,before===id?undefined:before);};
+ cleanup.current=()=>{ghost.remove();target?.classList.remove('smart-dock-target');doc.body.classList.remove('smart-dock-dragging');view.removeEventListener('pointermove',slide);view.removeEventListener('pointerup',finish);view.removeEventListener('blur',cleanup.current);};view.addEventListener('pointermove',slide);view.addEventListener('pointerup',finish,{once:true});view.addEventListener('blur',cleanup.current,{once:true});};
+ const actual=context.overflow.includes(id)&&position.side==='top'?'right':position.side;
+ const element=<div ref={node} className="smart-dock-group" data-smart-group={id} data-side={actual} data-preferred={position.side} style={{order:position.order}}>{children}<button className="smart-dock-grip" aria-label={`${id} qrupunu daşı`} title="Tutub yuxarıya və ya sağa sürüşdürün; iki kliklə tərəfi dəyişin" onPointerDown={begin} onDoubleClick={()=>context.move(id,position.side==='top'?'right':'top')} onKeyDown={e=>{if(e.key==='Enter')context.move(id,position.side==='top'?'right':'top');}}><GripVertical/></button></div>;
+ const target=actual==='top'?context.top:context.right;return target?createPortal(element,target,id):element;
+}

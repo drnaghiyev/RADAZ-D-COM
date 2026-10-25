@@ -1,0 +1,21 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {loadTypeScript} from './load-typescript.mjs';
+const {SmartSliceEngine}=loadTypeScript('lib/smart-volume/slice-renderer.ts');
+test('draw synchronizes backing dimensions and clears full frame after independent panel resize',()=>{
+ const contexts=new WeakMap();
+ globalThis.document={createElement:()=>{const canvas={style:{},remove(){}};const ctx={calls:[],createImageData:(w,h)=>({data:new Uint8ClampedArray(w*h*4)}),putImageData(){},setTransform(...a){this.calls.push(['transform',...a]);},clearRect(...a){this.calls.push(['clear',...a]);},fillRect(){},drawImage(...a){this.calls.push(['draw',...a.slice(1)]);}};contexts.set(canvas,ctx);canvas.getContext=()=>ctx;return canvas;}};
+ globalThis.CustomEvent=class{};
+ const owner={devicePixelRatio:1.25,requestAnimationFrame:()=>1,cancelAnimationFrame(){}};
+ const hosts=Array.from({length:3},()=>({clientWidth:400,clientHeight:600,ownerDocument:{defaultView:owner},appendChild(){},dispatchEvent(){}}));
+ const g={dimensions:[10,10,10],spacing:[1,1,2],origin:[0,0,0],direction:[1,0,0,0,1,0,0,0,1]};
+ const engine=new SmartSliceEngine(g,new Float32Array(1000),new Uint8Array(1000),hosts,['x','y','z']);
+ const view=engine.getViewport('z');
+ hosts[2].clientWidth=550;hosts[2].clientHeight=330;
+ view.draw();
+ assert.equal(view.canvas.width,688);assert.equal(view.canvas.height,413);
+ const calls=contexts.get(view.canvas).calls;
+ assert.ok(calls.some(c=>JSON.stringify(c)===JSON.stringify(['clear',0,0,688,413])));
+ const draw=calls.find(c=>c[0]==='draw');assert.equal(draw[3],draw[4],'square physical pixels remain square in CSS coordinates');
+ engine.destroy();
+});

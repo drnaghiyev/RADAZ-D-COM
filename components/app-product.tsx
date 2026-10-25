@@ -14,7 +14,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { RadazLogo } from './radaz-logo';
 import { DesktopUpdatePanel } from './desktop-update-panel';
 import {LanguageSettings} from './language-settings';
-import {AnatomyLicenseSettings} from './anatomy-license-settings';
+import {SmartVolumeSettings} from './smart-volume-settings';
 import {useTranslation} from '@/lib/i18n';
 import { AiSettings } from './ai-settings';
 
@@ -80,7 +80,7 @@ export function AppHelpMenu({initial=''}:{initial?:Panel}) {
   {panel && typeof document!=='undefined' && createPortal(<dialog ref={dialog} className="product-dialog" onCancel={()=>setPanel('')} onClick={e=>{if(e.target===dialog.current)setPanel('');}} aria-label={title}>
     <header><RadazLogo size={42}/><div><small>RADAZ · {product?.version||'…'}</small><h2>{title}</h2></div><button type="button" onClick={()=>setPanel('')} aria-label={tr('ui.close_c1cf9')}><X size={20}/></button></header>
     <div className="product-dialog-body">
-    {panel==='settings'&&<><LanguageSettings/><AnatomyLicenseSettings/></>}
+    {panel==='settings'&&<><LanguageSettings/><SmartVolumeSettings/></>}
     {panel==='ai'&&<AiSettings/>}
     {panel==='help'&&<><p>{tr('ui.load_a_dicom_file_or_folder_or_open_a_study_f_a9700')}</p><div className="help-cards"><article><b>{tr('ui.scroll_through_images_08ed8')}</b><p><strong>S</strong> {tr('ui.or_the_scroll_tool_drag_up_or_down_on_the_ima_4f08e')}</p></article><article><b>{tr('ui.printing_and_export_1ae88')}</b><p>{tr('ui.use_image_selection_to_build_a_print_list_cho_1a615')}</p></article><article><b>{tr('ui.ai_assistant_and_report_fd718')}</b><p>{tr('ui.all_series_from_the_active_study_open_in_the_e8828')}</p></article><article><b>{tr('ui.receive_dicom_from_a_device_7b268')}</b><p>{tr('ui.the_local_archive_shows_its_ae_title_ip_and_p_9c768')}</p></article></div><button onClick={()=>open('support')}>{tr('ui.contact_support_9352c')}</button></>}
     {panel==='keys'&&<dl className="shortcut-list">{[['N','Neqativ / pozitiv'],['O','Ox'],['Q','Qələm'],['K','3D kursor'],['S','Listələ / barmaqla sürüşdür'],['W','Pəncərələmə'],['Orta düymə + sürüklə','Görüntünü daşı'],['Sağ düymə + sürüklə','Zoom'],['Sağ klik','Ölçmə üçün silmə menyusu'],['Ctrl+D','Cari kəsitdə bütün ölçüləri sil'],['Delete','Seçilmiş ölçünü sil'],['P','Görüntünü sürüşdür'],['Z','Yaxınlaşdır'],['Ctrl + siçan çarxı','Görüntünü böyüt / kiçilt'],['Siçan çarxı','Əvvəlki / növbəti kəsit'],['Ctrl+[ / Ctrl+]','90° sola / sağa fırlat'],['Ctrl+Shift+[ / ]','Üfüqi / şaquli çevir'],['F11','Siçan görüntü üzərindədirsə tam ekran'],['F1','Yardım'],['Ctrl+F1','Proqram haqqında']].map(([k,v])=><div key={k}><dt><kbd>{k}</kbd></dt><dd>{v}</dd></div>)}</dl>}

@@ -1,0 +1,11 @@
+'use client';
+import {useEffect,useState} from 'react';
+import {Box,Download} from 'lucide-react';
+type Setup={installed?:boolean;state?:string;message?:string};
+export function SmartVolumeSettings(){
+ const [setup,setSetup]=useState<Setup>({}),[accepted,setAccepted]=useState(false),[busy,setBusy]=useState(false);
+ useEffect(()=>{const controller=new AbortController();const check=()=>fetch('/smart-volume-api/setup',{signal:controller.signal}).then(r=>r.ok?r.json() as Promise<Setup>:Promise.reject()).then(setSetup).catch(()=>{if(!controller.signal.aborted)setSetup({message:'Modulun vəziyyəti oxunmadı'});});void check();const timer=setInterval(check,2000);return()=>{clearInterval(timer);controller.abort();};},[]);
+ async function install(){setBusy(true);try{const r=await fetch('/smart-volume-api/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({researchAccepted:accepted})});const value=await r.json() as Setup & {error?:string};if(!r.ok)throw Error(value.error);setSetup(value);}catch(error){setSetup({state:'error',message:error instanceof Error?error.message:String(error)});}finally{setBusy(false);}}
+ return <fieldset className="language-settings"><legend><Box size={18}/> Smart Volume</legend><p>KT və MRT üçün kontur, maska redaktəsi, həcm ölçməsi və 3D səth.</p><p role="status">{setup.installed?'MedSAM2 · lokal tədqiqat modulu qurulub':setup.message||'MedSAM2 yoxlanılır…'}</p>{!setup.installed&&<><p>MedSAM2 ayrıca yüklənir və bu kompüterdə işləyir. İlk quraşdırma internet və əlavə disk sahəsi tələb edir. CPU ilə böyük seriyalar daha gec emal olunur.</p><label><input type="checkbox" checked={accepted} onChange={e=>setAccepted(e.target.checked)}/> Modeli yalnız tədqiqat və təhsil məqsədilə istifadə edəcəyəm.</label><a href="https://huggingface.co/wanglab/MedSAM2" target="_blank" rel="noreferrer">Modelin istifadə şərtləri</a><button disabled={!accepted||busy||setup.state==='installing'} onClick={()=>void install()}><Download size={16}/> MedSAM2-ni quraşdır</button>{setup.state==='installing'&&<progress aria-label="MedSAM2 quraşdırılması"/>}</>}<p>Viewer-də KT/MRT seriyasını seçin və Smart Volume düyməsini basın. AI nəticəsini qəbul etməzdən əvvəl yoxlayın. Livewire və DICOM SEG bu buraxılışda hazır deyil.</p></fieldset>;
+}
+

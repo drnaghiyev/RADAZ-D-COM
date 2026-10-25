@@ -110,6 +110,11 @@ try:
     run([folder/'runtime/python/python.exe', '-c', f"from PIL import Image; icon=Image.open({str(install/'radaz.ico')!r}); assert {{(16,16),(32,32),(48,48),(256,256)}} <= icon.ico.sizes()"])
     ps(install/'launcher.ps1','-NoBrowser')
     first=get('/radaz-runtime.json');assert first['version']==base_version
+    if base_version == VERSION:
+        assert (folder/'vendor/medsam2/sam2/build_sam.py').is_file()
+        assert (folder/'bridge/smart_volume_service.py').is_file()
+        assert get('/smart-volume-api/setup')['installed'] is False
+        print('Smart Volume packaged; optional model not silently downloaded', flush=True)
     for route in ('/','/archive','/pacs','/mpr','/3d'):
         with urlopen(base+route,timeout=10) as response:assert response.status==200
     assert get('/radaz-installation.json')['managed'] is True

@@ -12,6 +12,9 @@ import {qualityProfiles,resolvedVolumeSettings,volumePresetConfig,volumeLights,t
 import {viewerPerformance,performanceSnapshot,instrumentVolumeUpload} from '@/lib/viewer-performance';
 import {WorkProgress} from './work-progress';
 import type {WorkProgress as LoadingProgress} from '@/lib/work-progress';
+import {copyVolumeScalars} from '@/lib/volume-source-copy';
+import {createVolumeRenderSource} from '@/lib/volume-render-source';
+import contextWorkerUrl from '@/lib/smart-volume/context.worker.ts?worker&url';
 import vtkPlane from '@kitware/vtk.js/Common/DataModel/Plane';
 import {cropPlanes,transferArrays} from '@/lib/transfer-function';
 import {createAnatomySurfaces} from '@/lib/anatomy-surfaces';
@@ -23,6 +26,7 @@ type Props={focusPoint?:[number,number,number]|null;anatomy?:AnatomyVolumeResult
  preset:VolumePreset;threshold:number;opacity:number;settings:VolumeRenderSettings;resetToken:number;
  onThresholdChange:(v:number)=>void;onOpacityChange:(v:number)=>void;onSettingsChange:(v:VolumeRenderSettings)=>void};
 type Profile=keyof typeof qualityProfiles;
+const currentSettingsHeadlight=(mode:VolumeRenderSettings['lighting'])=>mode!=='studio';
 const clamp=(v:number,a:number,b:number)=>Math.max(a,Math.min(b,v));
 const serialize=(values:number[][])=>{const flat=values.flat();return [flat.length,...flat].join(' ');};
 export function VolumePreview(props:Props){
@@ -51,7 +55,7 @@ export function VolumePreview(props:Props){
   const timer=setInterval(()=>setSeries(propsRef.current.series),750);
   return()=>clearInterval(timer);
  },[inputSeries?.id,inputSeries?.loading,inputSeries?.imageIds.length]);
- const interacting=useRef(false),lastFrame=useRef(0),finishTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);
+ const settling=useRef(false);const interacting=useRef(false),lastFrame=useRef(0),finishTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);
  const adjust=useRef<{mode:"zoom"|"tissue"|"width";x:number;y:number;scale:number;threshold:number;opacity:number;width:number}|null>(null);
  const autoProfile=useRef<Profile>('balanced'),applyRef=useRef<()=>void>(()=>{});
  const [ready,setReady]=useState(false),[error,setError]=useState(''),[note,setNote]=useState('');
@@ -61,13 +65,13 @@ export function VolumePreview(props:Props){
  const applyQuality=()=>{
   const viewport=viewportRef.current;if(!viewport)return;
   const caps=gpuCapabilities(),currentSettings=resolvedVolumeSettings(propsRef.current.preset,propsRef.current.settings),requested=currentSettings.quality;
-  let selected:Profile=requested==='auto'?autoProfile.current:requested;
+  let selected:Profile=settling.current?'balanced':requested==='auto'?autoProfile.current:requested;
   if(caps.tier==='low'&&interacting.current)selected='performance';
   if(caps.tier==='medium'&&selected==='ultra')selected='high';
   const config=qualityProfiles[selected],actor=viewport.getDefaultActor()?.actor,mapper=actor?.getMapper();
   const spacing=volumeRef.current?.volume.spacing||[1,1,1];
-  const preview=interacting.current||!(volumeRef.current?.volume as any)?.loadStatus?.loaded;
-  mapper?.setSampleDistance(Math.min(...spacing)*.7*(preview?config.interaction:config.sample*Math.max(caps.tier==='low'?1:.5,currentSettings.sampling)));
+  const preview=interacting.current;
+  mapper?.setSampleDistance(Math.min(...spacing)*(preview?config.interaction:config.sample*Math.max(caps.tier==='low'?1:.5,currentSettings.sampling)));
   mapper?.setImageSampleDistance(preview?Math.max(3,config.imageSample):config.imageSample);
   const definition=volumePresetConfig[propsRef.current.preset];
   const property=actor?.getProperty();
@@ -82,7 +86,7 @@ export function VolumePreview(props:Props){
   mapper?.setInteractionSampleDistanceFactor(1);mapper?.setInitialInteractionScale(1);
   // Our explicit drag/final profiles own sampling. VTK auto-scaling can leave
   // a stationary image blurred after a slow frame, even after mouse-up.
-  mapper?.setAutoAdjustSampleDistances(false);mapper?.setMaximumSamplesPerRay(caps.tier==='low'?1536:4096);
+  mapper?.setAutoAdjustSampleDistances(false);mapper?.setMaximumSamplesPerRay(4096);
   hostRef.current?.setAttribute('data-lighting',currentSettings.lighting);hostRef.current?.setAttribute('data-quality',selected);hostRef.current?.setAttribute('data-interacting',String(interacting.current));
   setEffectiveQuality(selected);
   elementMaterialState();
@@ -99,11 +103,13 @@ export function VolumePreview(props:Props){
   const options=resolvedVolumeSettings(preset,settings);
   const coordinate=(value:number)=>{const scalar=(value-definition.threshold)*options.transferWidth+definition.threshold+shift;return ct?scalar:range[0]+(scalar+1024)/4095*Math.max(1,range[1]-range[0]);};
   const custom=settings.customTransfer&&settings.customTransfer.domain===(ct?'ct-hu':'relative')?transferArrays(settings.customTransfer,range,opacity):null;
-  viewport.setPreset({name:`RADAZ-${preset}`,scalarOpacity:serialize(custom?.scalar??definition.scalar.map(([x,y])=>[coordinate(x),clamp(y*opacity,0,1)])),
-   colorTransfer:serialize(custom?.color??definition.color.map(([x,...rgb])=>[coordinate(x),...rgb])),gradientOpacity:serialize([definition.gradient[0],definition.gradient.at(-1)!]),
-   shade:definition.shade?'1':'0',ambient:String(settings.ambient),diffuse:String(settings.diffuse),specular:String(settings.specular),
-   specularPower:String(settings.specularPower),interpolation:String(definition.interpolation)},current.volumeId,true);
   const actor=viewport.getDefaultActor()?.actor,mapper=actor?.getMapper(),property=actor?.getProperty();
+  // Apply physical transfer nodes directly, exactly as Smart Volume does.
+  const color=property.getRGBTransferFunction(0),alpha=property.getScalarOpacity(0);
+  color.removeAllPoints();alpha.removeAllPoints();
+  for(const [x,r,g,b] of custom?.color??definition.color.map(([x,...rgb])=>[coordinate(x),...rgb]))color.addRGBPoint(x,r,g,b);
+  for(const [x,a] of custom?.scalar??definition.scalar.map(([x,y])=>[coordinate(x),clamp(y*opacity,0,1)]))alpha.addPoint(x,a);
+  property.setAmbient(settings.ambient);property.setDiffuse(settings.diffuse);property.setSpecular(settings.specular);property.setSpecularPower(settings.specularPower);
   if(cutRef.current)property?.getScalarOpacity(0).addPoint(cutRef.current.floor,0);
   mapper?.removeAllClippingPlanes();clippingRef.current.forEach(plane=>plane.delete());clippingRef.current=[];
   if(settings.crop?.enabled){for(const config of cropPlanes(settings.crop,{origin:Array.from(current.volume.origin),spacing:Array.from(current.volume.spacing),direction:Array.from(current.volume.direction),dimensions:Array.from(current.volume.dimensions)})){
@@ -117,7 +123,7 @@ export function VolumePreview(props:Props){
   property?.setGradientOpacityMinimumOpacity(0,0);
   property?.setGradientOpacityMaximumOpacity(0,1);
   if(options.interpolation==='nearest')property?.setInterpolationTypeToNearest();else property?.setInterpolationTypeToLinear();
-  viewport.getRenderer().getLights().forEach((light:any,i:number)=>{const config=volumeLights(options.lighting)[i];if(config){light.setPosition(...config.position);light.setColor(...config.color);light.setIntensity(config.intensity*options.lightIntensity);}});
+  viewport.getRenderer().getLights().forEach((light:any,i:number)=>{const config=volumeLights(options.lighting)[i];if(!config){light.setIntensity(0);return;}if(config){if(currentSettingsHeadlight(options.lighting)){light.setLightTypeToHeadLight();}else{light.setLightTypeToCameraLight();light.setPosition(...config.position);}light.setColor(...config.color);light.setIntensity(config.intensity*options.lightIntensity);}});
   if(definition.blend==='maximum')mapper?.setBlendModeToMaximumIntensity();
   else if(definition.blend==='minimum')mapper?.setBlendModeToMinimumIntensity();else mapper?.setBlendModeToComposite();
   applyQuality();viewport.render();
@@ -125,14 +131,14 @@ export function VolumePreview(props:Props){
  useEffect(()=>{
   const element=hostRef.current;if(!element||!series){setReady(false);setProgress(null);setError('');return;}
   const ids={viewport:`RADAZ-3D-${crypto.randomUUID()}`,tools:`RADAZ-3D-TOOLS-${crypto.randomUUID()}`};
-  const controller=new AbortController();let disposed=false,viewer:Awaited<ReturnType<typeof getViewer>>|undefined,resize:ResizeObserver|undefined;const lights:any[]=[];
+  const controller=new AbortController();let disposed=false,viewer:Awaited<ReturnType<typeof getViewer>>|undefined,resize:ResizeObserver|undefined;const lights:any[]=[];let renderSource:ReturnType<typeof createVolumeRenderSource>|undefined;let sourceWorker:Worker|undefined;
   const opened=performance.now();setReady(false);setError('');setNote('');setProgress({label:'3D hazırlanır',done:0,total:0,phase:'Ortaq volume hazırlanır'});
   (async()=>{
    const caps=gpuCapabilities();viewer=await getViewer();if(disposed)return;
    element.style.maxWidth=`${Math.floor(caps.maxTextureSize/Math.max(1,devicePixelRatio))}px`;
    element.style.maxHeight=`${Math.floor(caps.maxTextureSize/Math.max(1,devicePixelRatio))}px`;
    const {core,tools,engine}=viewer;
-   const current=await getSeriesVolume(series.imageIds,{maxDimension:caps.max3DTextureSize,budgetBytes:caps.budgetBytes});
+   const current=await getSeriesVolume(series.imageIds,{maxDimension:caps.max3DTextureSize,budgetBytes:Number.POSITIVE_INFINITY,preserveSlices:true});
    if(disposed)return;
    volumeRef.current=current;viewerPerformance.estimatedGpuBytes=current.bytes;
    const notices:string[]=[];
@@ -149,9 +155,22 @@ export function VolumePreview(props:Props){
    const uploadStart=performance.now();await core.setVolumesForViewports(engine,[{volumeId:current.volumeId}],[viewportId],false);
    if(disposed)return;
    const viewport=engine.getViewport(viewportId) as any;viewportRef.current=viewport;
+   // Do not render through Cornerstone's streaming texture mapper: use the same
+   // complete scalar array, lossless packing worker and VTK mapper as Smart Volume.
+   while(!current.volume.loadStatus?.loaded){if(disposed)return;await new Promise(resolve=>setTimeout(resolve,30));}
+   if(disposed)return;
+   const values=await copyVolumeScalars({length:current.volume.dimensions.reduce((a,b)=>a*b,1),getAtIndex:i=>Number(current.volume.voxelManager!.getAtIndex(i))},()=>disposed,current.volume.dataType==='Int16Array'?'int16':'float32');
+   if(disposed)return;const display=await new Promise<any>((resolve,reject)=>{
+    sourceWorker=new Worker(new URL(contextWorkerUrl,window.location.origin),{type:'module'});
+    sourceWorker.onmessage=({data})=>{sourceWorker?.terminate();data.error?reject(Error(data.error)):resolve(data);};sourceWorker.onerror=()=>reject(Error('3D mənbə hazırlana bilmədi.'));
+    controller.signal.addEventListener('abort',()=>{sourceWorker?.terminate();reject(Error('3D bağlandı.'));},{once:true});
+    sourceWorker.postMessage({geometry:{dimensions:[...current.volume.dimensions],spacing:[...current.volume.spacing],origin:[...current.volume.origin],direction:[...current.volume.direction]},values,quality:propsRef.current.settings.sourceQuality||'full'},[values.buffer]);
+   });
+   if(disposed)return;renderSource=createVolumeRenderSource(display);viewport.getDefaultActor().actor.setMapper(renderSource.mapper);
+   element.setAttribute('data-scalar-bytes',String(display.values.byteLength));element.setAttribute('data-render-mapper','shared-vtk');element.setAttribute('data-render-dimensions',display.dimensions.join(','));
    const renderer=viewport.getRenderer();renderer.removeAllLights();renderer.setAutomaticLightCreation(false);
-   for(const config of volumeLights(propsRef.current.settings.lighting)){const light=renderer.makeLight();light.setLightTypeToCameraLight();light.setPosition(...config.position);light.setFocalPoint(0,0,0);light.setIntensity(config.intensity);light.setColor(...config.color);renderer.addLight(light);lights.push(light);}
-   element.setAttribute('data-volume-id',current.volumeId);element.setAttribute('data-volume-dimensions',current.volume.dimensions.join(','));
+   for(const config of volumeLights('studio')){const light=renderer.makeLight();if(currentSettingsHeadlight(propsRef.current.settings.lighting))light.setLightTypeToHeadLight();else light.setLightTypeToCameraLight();light.setPosition(...config.position);light.setFocalPoint(0,0,0);light.setIntensity(config.intensity);light.setColor(...config.color);renderer.addLight(light);lights.push(light);}
+   element.setAttribute('data-render-profile','smart-volume');element.setAttribute('data-volume-id',current.volumeId);element.setAttribute('data-volume-dimensions',current.volume.dimensions.join(','));
    const modified=(event:Event)=>{const detail=(event as CustomEvent).detail;if(detail.volumeId!==current.volumeId)return;
     const done=detail.framesProcessed??0,total=current.imageIds.length;setProgress(done<total?{label:'3D kəsitləri yüklənir',done,total}:null);};
    core.eventTarget.addEventListener(core.Enums.Events.IMAGE_VOLUME_MODIFIED,modified);
@@ -180,18 +199,18 @@ export function VolumePreview(props:Props){
    const group=tools.ToolGroupManager.createToolGroup(toolGroupId);group?.addTool(tools.TrackballRotateTool.toolName);group?.addTool(tools.PanTool.toolName);
    group?.setToolActive(tools.TrackballRotateTool.toolName,{bindings:[{mouseButton:tools.Enums.MouseBindings.Primary}]});
    group?.setToolActive(tools.PanTool.toolName,{bindings:[{mouseButton:tools.Enums.MouseBindings.Auxiliary}]});group?.addViewport(viewportId,engine.id);
-   resize=new ResizeObserver(()=>{if(!disposed){engine.resize(true,true);viewport.render();}});resize.observe(element);
+   let lastWidth=element.clientWidth,lastHeight=element.clientHeight;resize=new ResizeObserver(()=>{if(!disposed&&(element.clientWidth!==lastWidth||element.clientHeight!==lastHeight)){lastWidth=element.clientWidth;lastHeight=element.clientHeight;engine.resize(true,true);viewport.render();}});resize.observe(element);
    window.addEventListener('pointerup',finishInteraction,{signal:controller.signal});
    window.addEventListener('blur',finishInteraction,{signal:controller.signal});
   })().catch(cause=>{if(!disposed){setError(cause instanceof Error?cause.message:String(cause));setProgress(null);}});
   return()=>{disposed=true;controller.abort();resize?.disconnect();clearTimeout(finishTimer.current);interacting.current=false;surfaceRef.current?.dispose();surfaceRef.current=null;cutRef.current?.dispose();cutRef.current=null;viewportRef.current=null;volumeRef.current=null;adjust.current=null;
    if(viewer){viewer.tools.ToolGroupManager.destroyToolGroup(ids.tools);if(viewer.engine.getViewport(ids.viewport))viewer.engine.disableElement(ids.viewport);}
-   lights.forEach(light=>light.delete());clippingRef.current.forEach(plane=>plane.delete());clippingRef.current=[];
+   sourceWorker?.terminate();renderSource?.dispose();lights.forEach(light=>light.delete());clippingRef.current.forEach(plane=>plane.delete());clippingRef.current=[];
    // Shared volume remains cached until its source study closes.
   };
- },[series?.id,series?.imageIds.length]);
- useEffect(()=>{const viewport=viewportRef.current;if(ready&&viewport){viewport.getDefaultActor()?.actor.setVisibility(showVolume);viewport.render();}},[showVolume,ready]);
- useEffect(()=>{if(ready)applyRef.current();},[preset,threshold,opacity,settings,ready]);
+ },[series?.id,series?.imageIds.length,settings.sourceQuality]);
+ useEffect(()=>{const viewport=viewportRef.current;if(ready&&viewport&&viewport.getDefaultActor()?.actor.getVisibility()!==showVolume){viewport.getDefaultActor()?.actor.setVisibility(showVolume);viewport.render();}},[showVolume,ready]);
+ useEffect(()=>{if(ready)applyRef.current();},[preset,threshold,opacity,settings]);
  useEffect(()=>{
   const viewport=viewportRef.current;if(!ready||!viewport||!surfaces||!props.anatomy||!props.anatomyAppearance)return;
   const count=Object.keys(props.anatomy.classes).filter(id=>!props.anatomyAppearance!.hidden.has(+id)).length;
@@ -203,9 +222,9 @@ export function VolumePreview(props:Props){
   return()=>{disposed=true;resources?.dispose();surfaceRef.current=null;};
  },[ready,surfaces,props.anatomy,props.anatomyAppearance,series?.id]);
  useEffect(()=>{const viewport=viewportRef.current,point=props.focusPoint;if(!ready||!viewport||!point)return;const camera=viewport.getCamera();viewport.setCamera({focalPoint:point,position:camera.position.map((n:number,i:number)=>n+point[i]-camera.focalPoint[i]) as [number,number,number]});viewport.render();},[props.focusPoint,ready]);
- useEffect(()=>{if(ready){viewportRef.current?.resetCamera({resetPan:true,resetZoom:true});viewportRef.current?.render();}},[resetToken,ready]);
- const startInteraction=()=>{clearTimeout(finishTimer.current);if(!interacting.current){interacting.current=true;lastFrame.current=performance.now();applyQuality();}};
- const finishInteraction=()=>{adjust.current=null;clearTimeout(finishTimer.current);finishTimer.current=setTimeout(()=>{interacting.current=false;lastFrame.current=0;applyQuality();viewportRef.current?.render();},120);};
+ useEffect(()=>{if(ready){viewportRef.current?.resetCamera({resetPan:true,resetZoom:true});viewportRef.current?.render();}},[resetToken]);
+ const startInteraction=()=>{settling.current=false;clearTimeout(finishTimer.current);if(!interacting.current){interacting.current=true;lastFrame.current=performance.now();applyQuality();}};
+ const finishInteraction=()=>{adjust.current=null;clearTimeout(finishTimer.current);finishTimer.current=setTimeout(()=>{interacting.current=false;lastFrame.current=0;settling.current=true;applyQuality();viewportRef.current?.render();finishTimer.current=setTimeout(()=>{settling.current=false;applyQuality();viewportRef.current?.render();},400);},120);};
  return <section className="volume-workspace" aria-label={tr('ui.3d_volume_view_a64d6')}><div className="volume-stage cornerstone-volume-stage" data-ready={ready} onContextMenu={e=>e.preventDefault()}
    onDoubleClick={()=>{viewportRef.current?.resetCamera({resetPan:true,resetZoom:true});viewportRef.current?.render();}}
    onPointerDownCapture={e=>{

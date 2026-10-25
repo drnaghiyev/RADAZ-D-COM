@@ -7,8 +7,8 @@ import { aiRequest, type AiSettings as Settings } from '@/lib/ai-client';
 export function AiSettings() {
   useUiTranslation();
   const [settings, setSettings] = useState<Settings | null>(null), [key, setKey] = useState('');
-  const [model, setModel] = useState('gpt-4.1'), [busy, setBusy] = useState(false), [message, setMessage] = useState('');
-  useEffect(() => { let alive = true; void aiRequest<Settings>('settings').then(value => { if(alive){setSettings(value);setModel(value.model);} }).catch(error => {if(alive)setMessage(error.message);}); return () => {alive=false;}; }, []);
+  const [model, setModel] = useState('gpt-6-astra'), [busy, setBusy] = useState(false), [message, setMessage] = useState('');
+  useEffect(() => { let alive = true; void aiRequest<Settings>('settings').then(value => { if(alive){setSettings(value);setModel(value.configured?value.model:'gpt-6-astra');} }).catch(error => {if(alive)setMessage(error.message);}); return () => {alive=false;}; }, []);
   const action = async (kind: 'save' | 'test' | 'clear') => {
     setBusy(true); setMessage('');
     try {

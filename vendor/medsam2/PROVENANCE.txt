@@ -1,0 +1,5 @@
+MedSAM2 code, Apache-2.0
+https://github.com/bowang-lab/MedSAM2
+Commit: 332f30d420f1d1b08e2a79b3ae6a602458808383
+Unmodified tracked sam2 source only. No weights included.
+Weights: https://huggingface.co/wanglab/MedSAM2 (research and education only).

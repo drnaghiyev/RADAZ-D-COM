@@ -45,7 +45,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           pnpm install --frozen-lockfile
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pip install 'Pillow>=10,<13'
+          python -m pip install 'Pillow>=10,<13' 'numpy==2.2.6' 'fastapi==0.115.12'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           choco install ffmpeg --yes --no-progress
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -85,6 +85,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $releaseVersion = (Get-Content public/product.json -Raw | ConvertFrom-Json).version
           python scripts/package-delta.py --previous-release "outputs/releases/RADAZ-$releaseVersion-Windows-x64.zip"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify optional MedSAM2 research runtime on clean Windows
+        if: steps.plan.outputs.publish == 'true'
+        shell: pwsh
+        run: |
+          python scripts/install-smart-volume.py --module-root outputs/medsam-ci --research-accepted
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/smart-volume-installed.py outputs/medsam-ci
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Test fresh Windows Setup and rollback
         if: steps.plan.outputs.publish == 'true'

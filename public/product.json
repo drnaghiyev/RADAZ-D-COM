@@ -1,9 +1,9 @@
 {
   "name": "RADAZ",
-  "version": "0.2.48",
+  "version": "0.2.49",
   "deltaOnlyUpdates": true,
   "channel": "preview",
-  "owner": "Radioloq RÃ¶vÅŸÉ™n NaÄŸÄ±yev",
+  "owner": "Radioloq Rövşən Nağıyev",
   "email": "drnaghiyev@gmail.com",
   "telegram": "TNNZsfjfHuP",
   "repository": "drnaghiyev/RADAZ-D-COM",
@@ -16,5 +16,6 @@
   "billingUrl": "",
   "modules": [
     "anatomy_ai"
-  ]
+  ],
+  "localModules": []
 }

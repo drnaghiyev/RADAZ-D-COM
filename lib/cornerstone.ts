@@ -472,10 +472,11 @@ export function anatomyVolumeSource(imageIds:string[]) {
   }};
 }
 /** One streaming volume and the same decoded slice buffers serve MPR and 3D. */
-export async function getSeriesVolume(imageIds:string[],limits?:{maxDimension:number;budgetBytes:number}):Promise<SeriesVolume> {
+export async function getSeriesVolume(imageIds:string[],limits?:{maxDimension:number;budgetBytes:number;preserveSlices?:boolean}):Promise<SeriesVolume> {
   const geometry=seriesGeometry(imageIds),ids=geometry.imageIds;
   const dimension=limits?.maxDimension||Infinity,budget=limits?.budgetBytes||Infinity;
-  const dimensions=volumeDimensions(geometry.dimensions,dimension,budget,ids.some(id=>records.get(id)?.bits===32)?4:2);
+  let dimensions=volumeDimensions(geometry.dimensions,dimension,budget,ids.some(id=>records.get(id)?.bits===32)?4:2);
+  if(limits?.preserveSlices){const [x,y,z]=geometry.dimensions;if(z>dimension)throw Error('GPU bütün mənbə kəsiklərini dəstəkləmir; kəsiklər buraxılmadı.');const scale=Math.min(1,dimension/x,dimension/y,Math.sqrt(budget/(x*y*z*4)));dimensions=[Math.max(2,Math.floor(x*scale)),Math.max(2,Math.floor(y*scale)),z];}
   const reduced=dimensions.some((n,i)=>n!==geometry.dimensions[i]);
   const key=ids.join('|')+`@${dimensions.join('x')}`;
   const cached=seriesVolumes.get(key);
