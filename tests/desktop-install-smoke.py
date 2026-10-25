@@ -221,10 +221,7 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
     assert get('/radaz-runtime.json')['startedAt']!=before_recovery
     print('Background watcher restored stopped server; active version and archive preserved',flush=True)
     if base_version!=VERSION:
-        for _ in range(150):
-            if not (install/'versions'/base_version).exists():break
-            time.sleep(.5)
-        assert not (install/'versions'/base_version).exists(), 'Superseded controller must release its runtime for cleanup'
+        assert (install/'versions'/base_version/'SHA256SUMS.json').is_file(), 'The original stable version remains the first rollback'
     variant('99.0.1')
     # Exercise HTTP apply with a live watcher as well as a detached controller.
     with urlopen(Request(base+'/radaz-update',data=json.dumps({'action':'apply','confirmed':True,'version':'99.0.1'}).encode(),headers={'Origin':base,'Content-Type':'application/json'}),timeout=5) as response:
@@ -243,6 +240,11 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
         time.sleep(.5)
     assert set((VERSION,'99.0.1')) <= set(json.loads(retention.read_text())['kept'])
     assert (install/'versions'/VERSION/'SHA256SUMS.json').is_file(), 'Keep one stable rollback after verified activation'
+    if base_version!=VERSION:
+        for _ in range(150):
+            if not (install/'versions'/base_version).exists():break
+            time.sleep(.5)
+        assert not (install/'versions'/base_version).exists(), 'After a second successful upgrade, reclaim the older third runtime'
     for file,digest in preserved.items():assert hashlib.sha256(file.read_bytes()).hexdigest()==digest,file.name
     print('Verified new runtime retained one stable rollback and preserved all user data',flush=True)
     variant('99.0.2',broken=True);ps(install/'launcher.ps1','-NoBrowser')
