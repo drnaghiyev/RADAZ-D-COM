@@ -12,7 +12,7 @@ from zipfile import ZipFile
 from urllib.request import Request, urlopen
 
 ROOT=Path(__file__).resolve().parents[1]
-STAGE=ROOT/'outputs/desktop-stage'
+STAGE=Path(os.environ.get('RADAZ_TEST_STAGE', str(ROOT/'outputs/desktop-stage'))).resolve()
 VERSION=json.loads((STAGE/'public/product.json').read_text())['version']
 SYSTEM=Path(os.environ['SystemRoot'])/'System32'
 PS=SYSTEM/'WindowsPowerShell/v1.0/powershell.exe'
@@ -238,11 +238,13 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
     assert get('/local-archive-api/status')['appVersion']=='99.0.1'
     assert json.loads((install/'active.json').read_text())['previousVersion']==VERSION
     for _ in range(120):
-        if not (install/'versions'/VERSION).exists():break
+        retention=install/'version-retention.json'
+        if retention.exists() and '99.0.1' in json.loads(retention.read_text()).get('kept',[]):break
         time.sleep(.5)
-    assert not (install/'versions'/VERSION).exists(), 'Verified activation must reclaim the previous runtime'
+    assert set((VERSION,'99.0.1')) <= set(json.loads(retention.read_text())['kept'])
+    assert (install/'versions'/VERSION/'SHA256SUMS.json').is_file(), 'Keep one stable rollback after verified activation'
     for file,digest in preserved.items():assert hashlib.sha256(file.read_bytes()).hexdigest()==digest,file.name
-    print('Verified new runtime removed the previous version and preserved all user data',flush=True)
+    print('Verified new runtime retained one stable rollback and preserved all user data',flush=True)
     variant('99.0.2',broken=True);ps(install/'launcher.ps1','-NoBrowser')
     assert get('/radaz-runtime.json')['version']=='99.0.1'
     assert get('/local-archive-api/status')['appVersion']=='99.0.1'

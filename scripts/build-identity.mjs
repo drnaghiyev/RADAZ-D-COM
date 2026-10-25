@@ -9,6 +9,8 @@ function digestFiles(root, inputs) {
     const absolute = path.join(root, relative);
     if (!existsSync(absolute)) return;
     for (const entry of readdirSync(absolute, { withFileTypes: true }).sort((a,b) => a.name.localeCompare(b.name))) {
+      // Python test/build bytecode is generated locally, never shipped input.
+      if (entry.name === '__pycache__' || entry.name.endsWith('.pyc')) continue;
       const name = `${relative}/${entry.name}`;
       if (entry.isDirectory()) visit(name);
       else if (entry.isFile() && entry.name !== 'radaz-build.json') { hash.update(name); hash.update(readFileSync(path.join(root, name))); }

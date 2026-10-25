@@ -579,9 +579,11 @@ def verify_activation(root,target):
 def cleanup_versions(root):
     """Caller holds launch.lock. Retain active, rollback, staged and every live runtime."""
     active=read_json(root/'active.json')
-    verified = read_json(root/'activation-verified.json') if (root/'activation-verified.json').exists() else {}
     keep={active['version']}
-    if verified.get('version') != active['version']: keep.add(active.get('previousVersion'))
+    # A successful health check must not discard the last stable rollback.
+    # Active examinations and staged candidates may temporarily require more
+    # than two directories; the process/pointer protections below take priority.
+    keep.add(active.get('previousVersion'))
     for pointer in ('pending.json','failed-update.json'):
         if (root/pointer).exists():keep.add(read_json(root/pointer).get('version'))
     keep.update(runtime_processes(root,'InUse')['versions'])

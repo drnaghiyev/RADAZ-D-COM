@@ -92,14 +92,16 @@ class DeltaUpdates(unittest.TestCase):
         # 0.2.99 has no pending pointer yet: staging publication must not race cleanup.
         for v in ['0.2.28','0.2.29','0.2.30','0.2.99',self.base,self.target]:self.assertTrue((self.root/'versions'/v).is_dir())
 
-    def test_verified_activation_removes_previous_runtime_but_preserves_active_and_data(self):
+    def test_verified_activation_keeps_one_rollback_but_removes_older_runtime(self):
         old='0.2.30'
         with ZipFile(self.package(old)) as z:z.extractall(self.root/'versions'/old)
+        with ZipFile(self.package('0.2.29')) as z:z.extractall(self.root/'versions/0.2.29')
         desktop.atomic_json(self.root/'active.json',{'version':self.base,'previousVersion':old})
         desktop.atomic_json(self.root/'activation-verified.json',{'version':self.base})
         data=self.root/'user-data';data.mkdir();(data/'archive.txt').write_text('preserve')
         with patch.object(desktop,'runtime_processes',return_value={'versions':[self.base]}):
-            self.assertEqual(desktop.cleanup_versions(self.root),[old])
+            self.assertEqual(desktop.cleanup_versions(self.root),['0.2.29'])
+        self.assertTrue((self.root/'versions'/old).is_dir())
         self.assertTrue(self.source.is_dir())
         self.assertEqual((data/'archive.txt').read_text(),'preserve')
 

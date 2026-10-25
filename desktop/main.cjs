@@ -8,6 +8,9 @@ const port=Number(process.env.RADAZ_PORT||5173),workerPort=Number(process.env.RA
 const origin=`http://localhost:${port}`,archivePort=Number(process.env.RADAZ_ARCHIVE_PORT||8766);
 const profile=process.env.RADAZ_DESKTOP_PROFILE||path.join(app.getPath('appData'),'RADAZ Desktop');
 app.setName('RADAZ Desktop');app.setPath('userData',profile);app.setAppUserModelId('RADAZ.Desktop');
+// Bound Chromium's disposable HTTP cache only. Never clear IndexedDB,
+// localStorage or the clinical archive: those may contain the only DICOM copy.
+app.commandLine.appendSwitch('disk-cache-size',String(256*1024*1024));
 let tray,mainWindow,quitting=false;
 const windows=new Set();
 const local=url=>{try{return new URL(url).origin===origin;}catch{return false;}};

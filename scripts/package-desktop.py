@@ -10,11 +10,14 @@ import time
 from pathlib import Path
 from urllib.request import Request, urlopen
 from zipfile import ZipFile, ZIP_DEFLATED
+from windows_signing import sign_artifact
+from desktop_payload import include_electron_member
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / 'outputs/releases'
+LOCAL_TEST = False  # Public release packaging never accepts private builds.
+OUT = ROOT / ('outputs/storage-test' if LOCAL_TEST else 'outputs/releases')
 CACHE = ROOT / 'outputs/desktop-downloads'
-STAGE = ROOT / 'outputs/desktop-stage'
+STAGE = OUT / 'stage' if LOCAL_TEST else ROOT / 'outputs/desktop-stage'
 LOCK = json.loads((ROOT / 'scripts/desktop-runtime-lock.json').read_text())
 
 def fetch(item):
@@ -32,14 +35,15 @@ def checksum(file):
     file.with_suffix(file.suffix + '.sha256').write_text(f'{hashlib.sha256(file.read_bytes()).hexdigest()}  {file.name}\n', encoding='ascii')
 
 def main():
-    if json.loads((ROOT / 'public/product.json').read_text(encoding='utf-8-sig')).get('channel') == 'local-anatomy':
+    if json.loads((ROOT / 'public/product.json').read_text(encoding='utf-8-sig')).get('channel') == 'local-anatomy' and not LOCAL_TEST:
         raise SystemExit('Private Anatomy AI development must not be packaged as a public Setup.')
     version = json.loads((ROOT / 'public/product.json').read_text(encoding='utf-8-sig'))['version']
     CACHE.mkdir(parents=True, exist_ok=True)
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
         inputs = dict(zip(LOCK, pool.map(fetch, LOCK.values())))
     if STAGE.exists():
-        assert STAGE.resolve() == (ROOT / 'outputs/desktop-stage').resolve() and STAGE.resolve().parent == (ROOT / 'outputs').resolve()
+        expected = ROOT / ('outputs/storage-test/stage' if LOCAL_TEST else 'outputs/desktop-stage')
+        assert STAGE.resolve() == expected.resolve() and not STAGE.is_symlink()
         shutil.rmtree(STAGE)
     STAGE.mkdir()
     with ZipFile(OUT / f'RADAZ-{version}-Windows-preview.zip') as source:
@@ -62,7 +66,9 @@ def main():
             if 'license' in name.lower() or 'copying' in name.lower():
                 (ffmpeg / Path(name).name).write_bytes(package.read(name))
     electron = STAGE / 'runtime/electron'; electron.mkdir()
-    with ZipFile(inputs['electron']) as package: package.extractall(electron)
+    with ZipFile(inputs['electron']) as package:
+        for member in package.infolist():
+            if include_electron_member(member.filename): package.extract(member, electron)
     (electron / 'electron.exe').rename(electron / 'RADAZ.exe')
     shell = electron / 'resources/app'; shell.mkdir(parents=True)
     for name in ('main.cjs', 'package.json'):
@@ -96,13 +102,15 @@ def main():
         with tempfile.TemporaryDirectory(prefix='radaz-setup-',dir=temporary_root) as temporary:
             output=Path(temporary).resolve()
             assert output.parent==temporary_root.resolve()
-            compiled = subprocess.run([str(compiler), f'/O{output}', f'/DProductVersion={version}', str(ROOT / 'installer/radaz.iss')],
+            compiled = subprocess.run([str(compiler), f'/O{output}', f'/DProductVersion={version}', f'/DStageRoot={STAGE}', str(ROOT / 'installer/radaz.iss')],
                                       cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=0x08000000)
             if not compiled.returncode:
                 os.replace(output/installer.name,installer);break
             detail=compiled.stdout.decode('utf-8',errors='replace')
             if attempt==2 or 'EndUpdateResource' not in detail:raise RuntimeError(detail[-5000:])
         time.sleep(1+attempt)
+    # Sign before checksums, delta indexes or publishing consume the installer.
+    sign_artifact(installer)
     checksum(installer)
     print(f'Offline package: {archive.stat().st_size/1024**2:.1f} MiB; {len(manifest)} verified files; Setup: {installer.name}', flush=True)
 
