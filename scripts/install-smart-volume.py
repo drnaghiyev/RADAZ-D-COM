@@ -7,13 +7,28 @@ from zipfile import ZipFile
 def download(url, target, digest):
     if target.exists() and hashlib.sha256(target.read_bytes()).hexdigest() == digest: return
     part = target.with_suffix(target.suffix + '.part')
-    with urlopen(Request(url, headers={'User-Agent':'RADAZ-SmartVolume'}), timeout=120) as response, part.open('wb') as stream:
-        shutil.copyfileobj(response, stream)
+    for attempt in range(3):
+        try:
+            with urlopen(Request(url, headers={'User-Agent':'RADAZ-SmartVolume'}), timeout=30) as response, part.open('wb') as stream:
+                started=time.monotonic(); received=0; reported=0
+                while True:
+                    chunk=response.read1(65536)
+                    if not chunk: break
+                    stream.write(chunk); received+=len(chunk)
+                    if received-reported>=16*1024*1024:
+                        print(target.name+': '+str(received//(1024*1024))+' MB',flush=True);reported=received
+                    if time.monotonic()-started>3600: raise TimeoutError('Download deadline exceeded')
+            break
+        except (OSError, TimeoutError):
+            if attempt==2: raise
+            print('Yükləmə təkrar edilir',flush=True);time.sleep(2)
     with part.open('rb') as stream:
         if hashlib.file_digest(stream, 'sha256').hexdigest() != digest: raise ValueError('Download checksum mismatch')
     os.replace(part, target)
 
 def main():
+    sys.stdout.reconfigure(encoding="utf-8",errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8",errors="replace")
     parser=argparse.ArgumentParser(); parser.add_argument('--module-root', required=True); parser.add_argument('--research-accepted', action='store_true')
     args=parser.parse_args()
     if not args.research_accepted: raise ValueError('Research and education terms must be accepted')
