@@ -135,9 +135,21 @@ class AiService:
             if not raw.startswith(b'\xff\xd8\xff'): raise AiError('JPEG görüntüsü düzgün deyil.')
             content.extend([{'type': 'input_text', 'text': label}, {'type': 'input_image', 'image_url': data, 'detail': 'high'}])
         if not images and not instruction.strip() and not notes.strip(): raise AiError('Əlavə tapşırıq yazın və ya görüntü seçin.')
-        result = self._request('responses', {'store': False, 'instructions': INSTRUCTIONS + '\n' + rules,
-            'input': [{'role': 'user', 'content': content}], 'max_output_tokens': 6000})
-        if result.get('status') != 'completed': raise AiError('AI cavabı tamamlanmadı. Hesabata natamam nəticə əlavə edilmədi.', 502)
+        request = {'store': False, 'instructions': INSTRUCTIONS + '\n' + rules,
+            'input': [{'role': 'user', 'content': content}], 'max_output_tokens': 6000}
+        result = self._request('responses', request)
+        # Reasoning consumes the same output budget. Retry the original input once;
+        # never use a truncated clinical answer as the basis for the final report.
+        if (result.get('status') == 'incomplete' and
+                (result.get('incomplete_details') or {}).get('reason') == 'max_output_tokens'):
+            result = self._request('responses', dict(request, max_output_tokens=25000))
+        if result.get('status') != 'completed':
+            reason = (result.get('incomplete_details') or {}).get('reason')
+            message = {
+                'max_output_tokens': 'AI cavab limiti doldu. Daha az görüntü seçin və ya tapşırığı hissələrə bölün.',
+                'content_filter': 'AI cavabı təhlükəsizlik filtri tərəfindən dayandırıldı.',
+            }.get(reason, 'AI cavabı tamamlanmadı. Yenidən cəhd edin.')
+            raise AiError(message + ' Hesabata natamam nəticə əlavə edilmədi.', 502)
         parts = [part for item in result.get('output', []) if item.get('type') == 'message' for part in item.get('content', [])]
         if any(p.get('type') == 'refusal' for p in parts): raise AiError('AI bu tapşırıq üçün cavab vermədi.', 422)
         text = '\n'.join(p['text'] for p in parts if p.get('type') == 'output_text' and isinstance(p.get('text'), str)).strip()

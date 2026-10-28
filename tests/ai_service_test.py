@@ -86,5 +86,32 @@ class AiTests(unittest.TestCase):
         with self.assertRaises(AiError): self.service.status()
         self.assertTrue(self.save()['configured'])
 
+    def test_token_limit_retries_original_input_once(self):
+        self.save()
+        incomplete = {'status':'incomplete','incomplete_details':{'reason':'max_output_tokens'},
+                      'output':[{'type':'message','content':[{'type':'output_text','text':'PARTIAL'}]}]}
+        responses = [incomplete, self.response]
+        def opener(req, **kwargs):
+            self.requests.append(req)
+            return io.BytesIO(json.dumps(responses.pop(0)).encode())
+        self.service.opener = opener
+        self.assertEqual(self.service.report({'instruction':'Test'})['text'], 'Sınaq layihəsi')
+        bodies = [json.loads(r.data) for r in self.requests]
+        self.assertEqual([b['max_output_tokens'] for b in bodies], [6000,25000])
+        self.assertEqual(bodies[0]['input'], bodies[1]['input'])
+        self.assertNotIn('PARTIAL', json.dumps(bodies[1]))
+        self.assertFalse(bodies[1]['store'])
+
+    def test_repeated_limit_and_filter_never_return_partial_report(self):
+        self.save()
+        for reason, count in [('max_output_tokens',2),('content_filter',1)]:
+            self.requests.clear()
+            self.response.update(status='incomplete',incomplete_details={'reason':reason})
+            with self.assertRaises(AiError) as caught:
+                self.service.report({'instruction':'Test'})
+            self.assertEqual(len(self.requests),count)
+            self.assertNotIn('Sınaq layihəsi',str(caught.exception))
+            self.assertIn('natamam nəticə',str(caught.exception))
+
 
 if __name__ == '__main__': unittest.main()
