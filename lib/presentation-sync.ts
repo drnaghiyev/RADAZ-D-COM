@@ -1,6 +1,12 @@
 /** Share presentation only; never copy camera orientation or annotation state. */
-export function bindPresentationSync(root: HTMLElement, viewports: () => any[], source: () => string) {
+export function bindPresentationSync(root: HTMLElement, viewports: () => any[], source: () => string, modality: (id: string) => string = () => '') {
   let applying = false;
+  const family = (v:any) => {
+    const range=v.getProperties().voiRange;
+    if(!range)return 'unknown';
+    const width=range.upper-range.lower,level=(range.upper+range.lower)/2;
+    return level < -250 ? 'lung' : width > 1200 || level > 250 ? 'bone' : 'soft';
+  };
   const copy = (event: Event) => {
     if (applying) return;
     const panes = viewports();
@@ -17,6 +23,10 @@ export function bindPresentationSync(root: HTMLElement, viewports: () => any[], 
       for (const to of panes) {
         if (to === from || !to.getCurrentImageId?.()) continue;
         if (event.type === 'CORNERSTONE_VOI_MODIFIED') {
+          // Preserve different CT tissue windows, including explicit preset changes.
+          if(modality(from.id)==='CT' || modality(to.id)==='CT'){
+            if(modality(from.id)!==modality(to.id) || family(from)!==family(to))continue;
+          }
           const voiRange = from.getProperties().voiRange;
           if (voiRange) to.setProperties({voiRange: {...voiRange}});
         } else {

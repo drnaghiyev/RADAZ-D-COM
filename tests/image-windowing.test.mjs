@@ -28,7 +28,7 @@ test('a queued render cannot apply a previous image window after a newer navigat
  assert.deepEqual(a.range(),{lower:-200,upper:600});a.stop();
 });
 
-for(const modality of ['CT','MR'])test(`${modality} shares edits across slices, panels and rebuilt MPR, but not another series`,async()=>{
+for(const modality of ['MR'])test(`${modality} shares edits across slices, panels and rebuilt MPR, but not another series`,async()=>{
  const values=new WindowLevels(),scope={modality,seriesId:'study/series'};
  const a=pane('A',values,scope),b=pane('B',values,scope),mpr=pane('MC',values,{...scope,mpr:true});
  const other=pane('C',values,{modality,seriesId:'study/other'});
@@ -45,7 +45,7 @@ for(const modality of ['CT','MR'])test(`${modality} shares edits across slices, 
 
 test('only CT/MR and MPR use shared keys; optical/archive identity is normalized',()=>{
  for(const modality of ['CR','DX','MG','RF','XA','',undefined])assert.notEqual(windowingKey('A','one',{modality,seriesId:'s'}),windowingKey('B','two',{modality,seriesId:'s'}));
- assert.equal(windowingKey('A','one',{modality:'CT',seriesId:'media:archive:study/series'}),windowingKey('MC','rebuilt',{mpr:true,seriesId:'study/series'}));
+ assert.equal(windowingKey('A','one',{modality:'MR',seriesId:'media:archive:study/series'}),windowingKey('MC','rebuilt',{mpr:true,seriesId:'study/series'}));
 });
 
 test('separate Viewer/MPR windows exchange series changes and initial state, never projection windows',async()=>{
@@ -58,4 +58,20 @@ test('separate Viewer/MPR windows exchange series changes and initial state, nev
   await snapshot;assert.deepEqual(b.get(key),{lower:0,upper:160});assert.equal(b.get(image),undefined);
   const changed=received(a,key);b.set(key,{lower:10,upper:30});await changed;assert.deepEqual(a.get(key),{lower:10,upper:30});
  }finally{stopA();stopB();}
+});
+
+test('CT windows remain independent per pane and persist across its slices',async()=>{
+ const values=new WindowLevels(),scope={modality:'CT',seriesId:'study/s'};
+ const a=pane('A',values,scope),b=pane('B',values,scope);
+ a.begin('one');b.begin('one');await Promise.all([a.show(),b.show()]);
+ a.edit({lower:-1000,upper:400});assert.deepEqual(b.range(),{lower:-100,upper:300});
+ a.begin('two');await a.show();assert.deepEqual(a.range(),{lower:-1000,upper:400});a.stop();b.stop();
+});
+
+test('CT MPR planes retain their shared window independently of primary CT panes',async()=>{
+ const values=new WindowLevels(),scope={modality:'CT',seriesId:'study/s',mpr:true};
+ const a=pane('MA',values,scope),b=pane('MC',values,scope),main=pane('A',values,{...scope,mpr:false});
+ for(const p of [a,b,main])p.begin('one');await Promise.all([a.show(),b.show(),main.show()]);
+ a.edit({lower:-10,upper:180});assert.deepEqual(b.range(),{lower:-10,upper:180});assert.deepEqual(main.range(),{lower:-100,upper:300});
+ for(const p of [a,b,main])p.stop();
 });

@@ -1,4 +1,4 @@
-export type AiSettings = { configured: boolean; model: string };
+export type AiSettings = { configured: boolean; model: string; reasoning: 'low' | 'medium' | 'high' };
 
 export async function aiRequest<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch(`/local-archive-api/ai/${path}`, {

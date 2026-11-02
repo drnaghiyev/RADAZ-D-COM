@@ -10,6 +10,29 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @unittest.skipUnless(os.name == 'nt', 'Windows process ownership protocol')
 class DesktopProcessSafety(unittest.TestCase):
+    def test_owner_uses_bound_endpoint_and_still_rejects_foreign_process(self):
+        harness = r"""
+param($TargetScript, $Mode)
+$owner=[pscustomobject]@{Name='node.exe';ProcessId=99123;ParentProcessId=0;CreationDate=[datetime]'2026-01-01';ExecutablePath='C:\RADAZ-test\versions\0.2.49\runtime\node\node.exe';CommandLine='node.exe C:\RADAZ-test\versions\0.2.49\scripts\start-release.mjs'}
+if($Mode -eq 'foreign') {$owner.ExecutablePath='C:\other\node.exe'}
+function Get-CimInstance {param($ClassName) return $owner}
+function Get-NetTCPConnection {param($LocalPort,$ErrorAction)
+ [pscustomobject]@{RemotePort=0;RemoteAddress='0.0.0.0';OwningProcess=99123;State='FinWait1'}
+ [pscustomobject]@{RemotePort=59000;RemoteAddress='127.0.0.1';OwningProcess=0;State='Listen'}
+}
+& $TargetScript -InstallRoot 'C:\RADAZ-test' -Action Owner -Version '0.2.49'
+"""
+        with tempfile.TemporaryDirectory(prefix='radaz-endpoint-test-') as folder:
+            file=Path(folder)/'endpoint.ps1'; file.write_text(harness)
+            for mode in ('owned','foreign'):
+                result=subprocess.run(['powershell.exe','-NoProfile','-ExecutionPolicy','Bypass','-File',str(file),str(ROOT/'scripts/desktop-processes.ps1'),mode],capture_output=True,text=True,timeout=20,creationflags=0x08000000)
+                if mode=='owned':
+                    self.assertEqual(result.returncode,0,result.stderr)
+                    self.assertEqual(json.loads(result.stdout)['pid'],99123)
+                else:
+                    self.assertNotEqual(result.returncode,0)
+                    self.assertIn('not owned',result.stderr)
+
     def test_exited_and_recycled_processes_are_not_killed_or_reported_as_live(self):
         harness = r'''
 param($TargetScript, $Mode)

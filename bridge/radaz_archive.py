@@ -433,7 +433,7 @@ def handler_for(archive, removable=None):
             try:
                 parsed = urlsplit(self.path)
                 length = int(self.headers.get('Content-Length','0'))
-                limit = MAX_FILE if self.path in ('/import','/media/prepare','/video') or parsed.path == '/bridge/file' else 192 * 1024 * 1024 if self.path == '/print' else 17 * 1024 * 1024 if self.path == '/ai/report' else 65536 if self.path == '/studies/delete' else 8192
+                limit = MAX_FILE if self.path in ('/import','/media/prepare','/video') or parsed.path == '/bridge/file' else 192 * 1024 * 1024 if self.path == '/print' else 29 * 1024 * 1024 if self.path == '/ai/transcribe' else 6 * 1024 * 1024 + 1024 if self.path == '/ai/template' else 17 * 1024 * 1024 if self.path == '/ai/report' else 65536 if self.path == '/studies/delete' else 8192
                 if not 0 < length <= limit:
                     self.respond({'error':'Sorğu ölçüsü düzgün deyil'},413); return
                 data = self.rfile.read(length)
@@ -471,6 +471,10 @@ def handler_for(archive, removable=None):
                     elif not product.allowed(): self.respond({'error': 'Lisenziya aktiv deyil'}, 402)
                     elif self.path == '/ai/test': self.respond(ai.test())
                     elif self.path == '/ai/report': self.respond(ai.report(payload))
+                    elif self.path == '/ai/transcribe': self.respond(ai.transcribe(payload))
+                    elif self.path == '/ai/template':
+                        from radaz_voice import template_text
+                        self.respond(template_text(payload))
                     else: self.respond({'error': 'Ünvan tapılmadı'}, 404)
                     return
                 if self.path in ('/window/minimize', '/window/maximize', '/window/register', '/window/register-records', '/window/focus-records', '/window/maximize-records'):

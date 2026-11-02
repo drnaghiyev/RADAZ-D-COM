@@ -7,15 +7,20 @@ import { ChevronLeft, ChevronRight, Sparkles, Settings2 } from 'lucide-react';
 import { renderReportImage, defaultReportWindow, reportWindowKey, type ReportWindow, type ReportImage } from '@/lib/report-dicom';
 import {ChatGPTTransfer} from './chatgpt-transfer';
 import profile from '../bridge/radiology-profile.json' with {type:'json'};
-import { aiRequest, openAiSettings, type AiSettings } from '@/lib/ai-client';
+import {Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription,DialogTrigger} from './ui/dialog';
+import {AiSettings as AiSettingsPanel} from './ai-settings';
+import { aiRequest, type AiSettings } from '@/lib/ai-client';
 
-export function ReportAssistant({ images, windowMode, instruction, onInstruction, onReport, enabled }: {
+export function ReportAssistant({ images, windowMode, instruction, onInstruction, onReport, enabled, language = 'az' }: {
   images: ReportImage[]; windowMode: 'metadata' | 'lung' | 'soft' | 'bone'; instruction: string; onInstruction: (text: string) => void;
-  onReport: (text: string) => void; enabled: boolean;
+  onReport: (text: string) => void; enabled: boolean; language?: string;
 }) {
   useUiTranslation();
   const [index, setIndex] = useState(0), [preview, setPreview] = useState(''), [error, setError] = useState('');
   const [configured, setConfigured] = useState(false), [busy, setBusy] = useState(false), [status, setStatus] = useState('');
+  const [showSettings,setShowSettings]=useState(false),[model,setModel]=useState('');
+  const [progress,setProgress]=useState(0);
+  const languageInstruction=`Write the complete report and headings in ${{az:'Azerbaijani',en:'English',ru:'Russian',tr:'Turkish'}[language] || 'Azerbaijani'}.\n${instruction}`;
   const [provider,setProvider]=useState<'api'|'chatgpt'>('api');
   useEffect(()=>{if(new URLSearchParams(location.search).get('provider')==='chatgpt')setProvider('chatgpt');},[]);
   const [windows,setWindows]=useState<Record<string,ReportWindow>>({});
@@ -36,17 +41,19 @@ export function ReportAssistant({ images, windowMode, instruction, onInstruction
   const active = useRef<AbortController | null>(null);
   useEffect(() => {
     let alive = true;
-    const refresh = () => {void aiRequest<AiSettings>('settings').then(value => {if(alive)setConfigured(value.configured);}).catch(() => {if(alive)setConfigured(false);});};
+    const refresh = () => {void aiRequest<AiSettings>('settings').then(value => {if(alive){setConfigured(value.configured);setModel(value.model);}}).catch(() => {if(alive)setConfigured(false);});};
     refresh(); window.addEventListener('radaz-ai-change',refresh);
     const channel = new BroadcastChannel('radaz-ai-settings'); channel.onmessage = refresh;
     return () => {alive=false;window.removeEventListener('radaz-ai-change',refresh);channel.close();};
   }, []);
   useEffect(() => {active.current?.abort();active.current=null;setBusy(false);setStatus('');return () => {active.current?.abort();active.current=null;};}, [images, windowMode]);
   const analyze = async () => {
-    const controller = new AbortController(); active.current=controller;setBusy(true);setStatus('Hesabat hazırlanır…');
+    const controller = new AbortController(); active.current=controller;setBusy(true);setProgress(0);setStatus('Hesabat hazırlanır…');
     const modalities=[...new Set(images.map(image=>image.modality))].map(m=>['CT','MR','CR','DX','XA','RF','MG','US','OT','PT','NM','XR'].includes(m)?m:'DICOM');
-    const request = (body: Record<string,unknown>) => aiRequest<{text:string}>('report',{...body,modalities},controller.signal);
+    const request = (body: Record<string,unknown>) => aiRequest<{text:string}>('report',{...body,modalities,language},controller.signal);
     try {
+      if (!configured) throw new Error('AI ayarlarında API açarını saxlayın.');
+      await aiRequest('test',{},controller.signal);
       if (images.some(image => !image.supported)) throw new Error('Seçimdə analiz üçün dəstəklənməyən görüntülər var. Həmin seriyaları seçimdən çıxarın.');
       const series = [...new Set(images.map(image => image.seriesUID))];
       let observations = '';
@@ -60,6 +67,7 @@ export function ReportAssistant({ images, windowMode, instruction, onInstruction
         }
         setStatus(`Görüntülər incələnir: ${start+1}–${start+batch.length} / ${images.length}`);
         observations += '\n' + (await request({instruction,images:batch,phase:'observations'})).text;
+        setProgress(Math.round((start+batch.length)/Math.max(1,images.length)*100));
         if (observations.length > 110000) {
           setStatus('Seriyaların müşahidələri birləşdirilir…');
           observations = (await request({phase:'summary',instruction:'Aralıq müşahidələri yığcamlaşdır; bütün tapıntıları, görüntü nömrələrini və qeyri-müəyyənliyi saxla. Bu son hesabat deyil.',observations})).text;
@@ -82,7 +90,8 @@ export function ReportAssistant({ images, windowMode, instruction, onInstruction
     return () => { alive = false;clearTimeout(timer); };
   }, [current, windowMode,windowForImage]);
   return <div className="report-assistant">
-    <div className="assistant-heading"><Sparkles size={21}/><strong>{tr('ui.ai_assistant_eb79d')}</strong><button type="button" onClick={openAiSettings} aria-label={tr('ui.ai_settings_b1308')}><Settings2 size={18}/></button></div>
+    <div className="assistant-heading"><Sparkles size={21}/><strong>{tr('ui.ai_assistant_eb79d')}</strong><Dialog open={showSettings} onOpenChange={setShowSettings}><DialogTrigger asChild><button type="button" disabled={busy} aria-label={tr('ui.ai_settings_b1308')} title="AI ayarları"><Settings2 size={18}/></button></DialogTrigger><DialogContent className="assistant-settings-dialog"><DialogHeader><DialogTitle>AI ayarları</DialogTitle><DialogDescription>Model, düşünmə səviyyəsi və API bağlantısı</DialogDescription></DialogHeader><AiSettingsPanel/></DialogContent></Dialog></div>
+    <div className="assistant-model">{model || 'Model yoxlanılır…'} · {configured?'Açar saxlanılıb':'Açar tələb olunur'}</div>
     <p className="assistant-selection">{new Set(images.map(image => image.seriesUID)).size} {tr('ui.series_cbc9e')} {images.length} {tr('ui.images_992d4')}</p>
     {!!images.length && <div className="assistant-preview">
       <label className="assistant-series">Seriya<select aria-label="AI seriyası" value={current.seriesUID} disabled={busy} onChange={e=>setIndex(images.findIndex(im=>im.seriesUID===e.target.value))}>{[...new Map(images.map(im=>[im.seriesUID,im])).values()].map(im=><option key={im.seriesUID} value={im.seriesUID}>{im.modality} · {im.seriesName}</option>)}</select></label>
@@ -91,10 +100,11 @@ export function ReportAssistant({ images, windowMode, instruction, onInstruction
     </div>}
     <small className="assistant-mouse-help">Sol düymə ilə sürükləyin: kontrast / parlaqlıq. Təkər: seçilmiş seriyanın kəsikləri.</small>
     <p className="assistant-profile">{profile.name} · {profile.version} · hesabat qaydaları</p>
-    <div className="assistant-providers" role="group" aria-label="Hesabat mənbəyi"><button aria-pressed={provider==='api'} disabled={busy} onClick={()=>setProvider('api')}>OpenAI API</button><button aria-pressed={provider==='chatgpt'} disabled={busy} onClick={()=>setProvider('chatgpt')}>ChatGPT</button></div>
-    <label className="assistant-instruction">{tr('ui.additional_instructions_8b533')}<textarea aria-label={tr('ui.additional_ai_instructions_89d7a')} value={instruction} onChange={event => onInstruction(event.target.value)} disabled={busy} maxLength={8000} rows={4} placeholder={tr('ui.for_example_draft_a_bronchitis_report_6bb65')}/></label>
-    {provider==='chatgpt'?<ChatGPTTransfer images={images} windowMode={windowMode} modality={[...new Set(images.map(im=>im.modality))].join(',')} onPaste={onReport} instruction={instruction} windowForImage={windowForImage} enabled={enabled}/>:<>
-    <button className="assistant-analyze" disabled={busy || !enabled || !configured || (!images.length && !instruction.trim())} onClick={() => void analyze()} aria-describedby="assistant-connection"><Sparkles size={17}/>{tr('ui.review_thoroughly_and_draft_a_report_0de23')}</button>
+    <div className="assistant-providers" role="group" aria-label="Hesabat mənbəyi"><button aria-pressed={provider==='api'} disabled={busy} onClick={()=>setProvider('api')}>Analiz et və rapor yaz</button><button aria-pressed={provider==='chatgpt'} disabled={busy} onClick={()=>setProvider('chatgpt')}>OpenAI</button></div>
+    <details className="assistant-instruction-details"><summary>Əlavə tapşırıq</summary><label className="assistant-instruction">{tr('ui.additional_instructions_8b533')}<textarea aria-label={tr('ui.additional_ai_instructions_89d7a')} value={instruction} onChange={event => onInstruction(event.target.value)} disabled={busy} maxLength={8000} rows={4} placeholder={tr('ui.for_example_draft_a_bronchitis_report_6bb65')}/></label></details>
+    {provider==='chatgpt'?<ChatGPTTransfer images={images} windowMode={windowMode} modality={[...new Set(images.map(im=>im.modality))].join(',')} onPaste={onReport} instruction={languageInstruction} windowForImage={windowForImage} enabled={enabled}/>:<>
+    <button className="assistant-analyze" disabled={busy || !enabled || !configured || (!images.length && !instruction.trim())} onClick={() => void analyze()} aria-describedby="assistant-connection"><Sparkles size={17}/>Analiz et və rapor yaz</button>
+    {busy&&<div className="assistant-progress" role="status"><progress max="100" value={progress<100?progress:undefined}/><span>{progress<100?`Görüntü analizi: ${progress}%`:'Yekun hesabat hazırlanır…'}</span></div>}
     {busy&&<button className="assistant-stop" onClick={() => active.current?.abort()}>{tr('ui.cancel_01781')}</button>}
     <p id="assistant-connection" className="assistant-connection" role="status">{status || (configured ? 'Hazırdır. Düyməni basdıqda seçilmiş görüntülər və tapşırıq OpenAI-a göndərilir.' : 'AI ayarlarında OpenAI API açarını daxil edib saxlayın.')}</p>
     </>}

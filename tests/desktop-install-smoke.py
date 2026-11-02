@@ -22,7 +22,7 @@ def port():
         sock.bind(('127.0.0.1',0));return sock.getsockname()[1]
 
 def run(args):
-    result=subprocess.run(list(map(str,args)),env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,creationflags=0x08000000,timeout=150)
+    result=subprocess.run(list(map(str,args)),env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,creationflags=0x08000000,timeout=360 if 'Setup' in str(args[0]) else 150)
     assert result.returncode==0,result.stdout.decode('utf-8',errors='replace')
     return result.stdout.decode('utf-8',errors='replace')
 
@@ -72,8 +72,14 @@ try:
     if os.environ.get('RADAZ_TEST_BASE_PACKAGE'):
         baseline=temporary/'baseline-package'
         with ZipFile(os.environ['RADAZ_TEST_BASE_PACKAGE']) as package: package.extractall(baseline)
+    if os.environ.get('RADAZ_TEST_BASE_SETUP'):
+        baseline_root=temporary/'baseline-setup'
+        run([os.environ['RADAZ_TEST_BASE_SETUP'],'/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/NoRegistry=1','/NoShortcuts=1','/NoStartup=1',f'/DIR={baseline_root}',f'/LOG={ROOT / "outputs/baseline-setup-058.log"}'])
+        old=json.loads((baseline_root/'active.json').read_text())['version']
+        baseline=baseline_root/'versions'/old
+        run([baseline/'runtime/python/python.exe',baseline/'bridge/radaz_desktop.py','uninstall','--install-root',baseline_root])
     base_version=json.loads((baseline/'public/product.json').read_text())['version']
-    if not os.environ.get('RADAZ_TEST_BASE_PACKAGE') and (os.environ.get('GITHUB_ACTIONS')=='true' or os.environ.get('RADAZ_TEST_SETUP')=='1'):
+    if not os.environ.get('RADAZ_TEST_BASE_PACKAGE') and not os.environ.get('RADAZ_TEST_BASE_SETUP') and (os.environ.get('GITHUB_ACTIONS')=='true' or os.environ.get('RADAZ_TEST_SETUP')=='1'):
         setup = os.environ.get('RADAZ_TEST_SETUP_PATH') or ROOT/f'outputs/releases/RADAZ-Setup-v{VERSION}.exe'
         icon_root = os.environ.get('RADAZ_TEST_ICON_ROOT')
         icon_options = [] if icon_root else ['/NoShortcuts=1','/NoStartup=1']
@@ -118,15 +124,19 @@ try:
     for route in ('/','/archive','/pacs','/mpr','/3d'):
         with urlopen(base+route,timeout=10) as response:assert response.status==200
     assert get('/radaz-installation.json')['managed'] is True
+    if os.environ.get('RADAZ_TEST_NATIVE_ONLY')=='1':
+        print(run([folder/'runtime/node/node.exe', ROOT/'tests/native-electron-browser.mjs', install]), flush=True)
+        raise SystemExit(0)
     # The real gateway wakes the bundled updater. The network is deliberately
-    # unavailable in this smoke test, so it must report failure, never success.
+    # blocked through the proxy. Direct fallback may recover; never report a download.
     (install/'update-state.json').write_text(json.dumps({'state':'current','message':'Synthetic idle state'}))
     with urlopen(Request(base+'/radaz-update',data=b'{}',headers={'Origin':base,'Content-Type':'application/json'}),timeout=5) as response:
         assert response.status==202
-    for _ in range(50):
-        if get('/radaz-installation.json')['state']=='error':break
-        time.sleep(.2)
-    assert get('/radaz-installation.json')['state']=='error'
+    for _ in range(240):
+        status=get('/radaz-installation.json')
+        if status['state'] in ('error','current') and status.get('message')!='Synthetic idle state' and not (install/'update-request.json').exists():break
+        time.sleep(.5)
+    assert get('/radaz-installation.json')['state'] in ('error','current')
     assert not (install/'update-request.json').exists()
     assert get('/local-archive-api/status')['running'] is True
     assert get('/local-archive-api/status')['databasePath']==str(data/'archive.sqlite3')
@@ -304,3 +314,6 @@ finally:
     if (install/'logs').exists():shutil.copytree(install/'logs',logs,dirs_exist_ok=True)
     assert temporary.parent==Path(tempfile.gettempdir()).resolve() and temporary.name.startswith('radaz-desktop-test-')
     shutil.rmtree(temporary)
+
+
+

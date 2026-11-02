@@ -17,13 +17,13 @@ if ($status.version -eq 1) {
     if ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 409) { exit 17 }
     # The receiver may already have finished its graceful shutdown after the
     # status probe. Connection refused is harmless only once its port is free.
-    if (Get-NetTCPConnection -State Listen -LocalPort $archivePort -ErrorAction SilentlyContinue) { throw }
+    if (Get-NetTCPConnection -LocalPort $archivePort -ErrorAction SilentlyContinue | Where-Object { $_.RemotePort -eq 0 -and $_.RemoteAddress -in @('0.0.0.0','::') -and $_.OwningProcess -gt 0 }) { throw }
   }
   foreach ($attempt in 1..60) {
-    if (-not (Get-NetTCPConnection -State Listen -LocalPort $archivePort -ErrorAction SilentlyContinue)) { break }
+    if (-not (Get-NetTCPConnection -LocalPort $archivePort -ErrorAction SilentlyContinue | Where-Object { $_.RemotePort -eq 0 -and $_.RemoteAddress -in @('0.0.0.0','::') -and $_.OwningProcess -gt 0 })) { break }
     Start-Sleep -Milliseconds 200
   }
-  if (Get-NetTCPConnection -State Listen -LocalPort $archivePort -ErrorAction SilentlyContinue) { throw 'Previous archive did not release its port; no replacement was started.' }
+  if (Get-NetTCPConnection -LocalPort $archivePort -ErrorAction SilentlyContinue | Where-Object { $_.RemotePort -eq 0 -and $_.RemoteAddress -in @('0.0.0.0','::') -and $_.OwningProcess -gt 0 }) { throw 'Previous archive did not release its port; no replacement was started.' }
 }
 $pythonPath = Join-Path $projectRoot 'runtime\python\python.exe'
 if (-not (Test-Path -LiteralPath $pythonPath)) {

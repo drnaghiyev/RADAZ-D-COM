@@ -7,6 +7,8 @@ const validRange = (range: Range) => Number.isFinite(range?.lower) && Number.isF
 const isSeriesKey = (key: string) => key.startsWith('["series",');
 
 export function windowingKey(panel: string, image: string, scope: Scope) {
+  // CT panes may display the same series with independent lung/mediastinal windows.
+  if(scope.seriesId && !scope.mpr && scope.modality?.trim().toUpperCase()==='CT')return JSON.stringify(['ct-pane',panel,scope.seriesId]);
   if (scope.seriesId && (scope.mpr || ['CT', 'MR'].includes(scope.modality?.trim().toUpperCase() || ''))) {
     // CD and archive openings of the same DICOM series share a stable identity.
     return JSON.stringify(['series', scope.seriesId.replace(/^media:[^:]+:/, '')]);

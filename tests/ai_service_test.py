@@ -47,6 +47,23 @@ class AiTests(unittest.TestCase):
         self.assertTrue(self.service.status()['configured'])
         self.assertFalse(self.service.save({'clear':True})['configured'])
 
+    def test_reasoning_persistence_validation_and_provider_payload(self):
+        self.save()
+        self.assertEqual(self.service.status()['reasoning'], 'low')
+        for level in ('medium', 'high', 'low'):
+            self.service.save({'model':'gpt-6-astra','reasoning':level})
+            self.assertEqual(AiService(self.root).status()['reasoning'], level)
+            self.service.report({'instruction':'Synthetic test'})
+            self.assertEqual(json.loads(self.requests[-1].data)['reasoning'], {'effort':level})
+        before = self.service.path.read_bytes()
+        for invalid in ('invalid', [], 4):
+            with self.assertRaises(AiError): self.service.save({'reasoning':invalid})
+            self.assertEqual(self.service.path.read_bytes(), before)
+        self.service.save({'model':'gpt-4.1-mini','reasoning':'high'})
+        self.service.report({'instruction':'Synthetic test'})
+        self.assertNotIn('reasoning', json.loads(self.requests[-1].data))
+        self.assertEqual(self.service._read()['key'], self.key)
+
     def test_report_payload_no_storage_fixed_host_and_all_images(self):
         self.save()
         jpeg = 'data:image/jpeg;base64,' + base64.b64encode(b'\xff\xd8\xffsynthetic').decode()
@@ -81,6 +98,23 @@ class AiTests(unittest.TestCase):
         self.assertNotIn(self.key, str(caught.exception))
         self.assertEqual(caught.exception.request_id, 'req_test')
 
+    def test_voice_transcription_fixed_endpoint_and_draft(self):
+        self.save()
+        self.response={'text':'Sağ böyrəkdə 5 mm konkrement izlənir.'}
+        audio=base64.b64encode(b'RIFFsynthetic-audio').decode()
+        self.assertEqual(self.service.transcribe({'audio':audio,'mime':'audio/wav'})['text'],self.response['text'])
+        req=self.requests[-1]
+        self.assertEqual(req.full_url,'https://api.openai.com/v1/audio/transcriptions')
+        self.assertIn(b'gpt-transcribe',req.data)
+        self.assertNotIn(self.key.encode(),req.data)
+        for payload in ({'audio':audio,'mime':'text/plain'},{'audio':'!','mime':'audio/wav'},{'audio':'','mime':'audio/wav'}):
+            with self.assertRaises(AiError): self.service.transcribe(payload)
+        self.response={'status':'completed','output':[{'type':'message','content':[{'type':'output_text','text':'Diktə layihəsi'}]}]}
+        self.service.report({'phase':'dictation','observations':'Sağ böyrəkdə 5 mm konkrement.'})
+        body=json.loads(self.requests[-1].data)
+        self.assertIn('Do not infer findings',body['input'][0]['content'][0]['text'])
+        self.assertFalse(body['store'])
+
     def test_corrupt_record_can_be_replaced(self):
         self.service.path.write_bytes(b'corrupt ciphertext')
         with self.assertRaises(AiError): self.service.status()
@@ -112,6 +146,16 @@ class AiTests(unittest.TestCase):
             self.assertEqual(len(self.requests),count)
             self.assertNotIn('Sınaq layihəsi',str(caught.exception))
             self.assertIn('natamam nəticə',str(caught.exception))
+
+    def test_requested_report_languages_and_revision(self):
+        self.save()
+        for code, name in [('az','Azerbaijani'),('en','English'),('ru','Russian'),('tr','Turkish')]:
+            self.service.report({'phase':'revision','language':code,'instruction':'Correct stone to 10 mm','observations':'Stone: 8 mm'})
+            body=json.loads(self.requests[-1].data)
+            self.assertIn('in '+name,body['instructions'])
+            self.assertIn('complete replacement',body['input'][0]['content'][0]['text'])
+            self.assertFalse(body['store'])
+        with self.assertRaises(AiError): self.service.report({'instruction':'test','language':'xx'})
 
 
 if __name__ == '__main__': unittest.main()

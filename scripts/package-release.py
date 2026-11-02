@@ -27,7 +27,7 @@ explicit.append('bridge/radaz_send.py')
 explicit.append('scripts/release-health.mjs')
 explicit.append('scripts/desktop-processes.ps1')
 explicit.extend(['scripts/release-signature.mjs','public/update-public.pem'])
-explicit.extend(['scripts/local-ai-request.mjs', 'bridge/radaz_ai.py', 'bridge/radiology-profile.json'])
+explicit.extend(['scripts/local-ai-request.mjs', 'bridge/radaz_ai.py', 'bridge/radaz_voice.py', 'bridge/radiology-profile.json'])
 explicit.extend(['scripts/local-anatomy-volume.mjs','scripts/anatomy-access.mjs','bridge/anatomy-models.json','bridge/anatomy_providers.py','bridge/radaz_anatomy_volume.py'])
 explicit.extend(['scripts/smart-volume-service.mjs','scripts/install-smart-volume.py','bridge/smart_volume_service.py','bridge/smart_volume_medsam.py','bridge/smart_volume_prompts.py'])
 files={p:ROOT/p for p in explicit}

@@ -1,3 +1,4 @@
+import {reportLabels} from './report-language';
 import type { SavedReport } from './report-store';
 import { plainReportHtml, safeReportLogo, sanitizeReportHtml } from './report-rich';
 
@@ -75,16 +76,17 @@ function logoDrawing(data: string): { base64: string; xml: string } | null {
 }
 
 export async function buildReportDocx(report: SavedReport): Promise<Blob> {
+  const labels=reportLabels(report.language);
   const JSZip = (await import('jszip')).default;
   const zip = new JSZip();
   const logo = logoDrawing(report.logoData || '');
   const heading = report.header.split('\n').map((line, index) => paragraph(run(line, index === 0 ? { bold: true, size: 15 } : {}), 'center')).join('');
   const fields = [
-    `Pasiyent: ${report.patient || '—'}     Təvəllüd: ${report.birth || '—'}`,
-    `Müayinə tarixi: ${report.date || '—'}     Müayinə: ${report.modality || '—'}`,
+    `${labels.patient}: ${report.patient || '—'}     ${labels.birth}: ${report.birth || '—'}`,
+    `${labels.date}: ${report.date || '—'}     ${labels.study}: ${report.modality || '—'}`,
   ].map(line => paragraph(run(line))).join('');
   const formatted = report.bodyHtml?.trim() || plainReportHtml(report.body);
-  const content = `${logo?.xml || ''}${heading}${paragraph(run('RADİOLOJİ HESABAT', { bold: true, size: 16 }), 'center')}${fields}${paragraph('')}${bodyParagraphs(formatted)}`;
+  const content = `${logo?.xml || ''}${heading}${paragraph(run(labels.title, { bold: true, size: 16 }), 'center')}${fields}${paragraph('')}${bodyParagraphs(formatted)}`;
   zip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>${logo ? '<Default Extension="png" ContentType="image/png"/>' : ''}<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>`);
   zip.file('_rels/.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
   zip.file('word/_rels/document.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>${logo ? '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/logo.png"/>' : ''}</Relationships>`);

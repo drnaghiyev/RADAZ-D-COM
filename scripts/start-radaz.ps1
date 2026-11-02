@@ -1,4 +1,5 @@
 param([switch]$NoBrowser)
+# Match bound endpoints rather than unreliable TCP State labels; keep process/build checks.
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $radazPort = if ($env:RADAZ_PORT) { [int]$env:RADAZ_PORT } else { 5173 }
@@ -84,7 +85,7 @@ if (Test-RadazServer) {
   if (-not $NoBrowser) { Start-Process "${url}?radaz-build=$($expectedBuild.buildId)" }
   exit 0
 }
-if (Get-NetTCPConnection -State Listen -LocalPort $radazPort -ErrorAction SilentlyContinue) {
+if (Get-NetTCPConnection -LocalPort $radazPort -ErrorAction SilentlyContinue | Where-Object { $_.RemotePort -eq 0 -and $_.RemoteAddress -in @('0.0.0.0','::') -and $_.OwningProcess -gt 0 }) {
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'stop-web-server.ps1') -Port $radazPort
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }

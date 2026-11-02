@@ -1,6 +1,6 @@
 const {app,BrowserWindow,Menu,Tray,dialog,shell,session,webContents}=require('electron');
 const {spawn}=require('node:child_process');
-const {existsSync,mkdirSync,openSync,closeSync,readFileSync}=require('node:fs');
+const {existsSync,mkdirSync,openSync,closeSync,readFileSync,appendFileSync}=require('node:fs');
 const path=require('node:path');
 const installRoot=process.env.RADAZ_DESKTOP_RUNTIME||process.env.RADAZ_INSTALL_ROOT||path.resolve(__dirname,'../../../../../..');
 let runtime=path.join(installRoot,'versions',require('./package.json').version);
@@ -14,17 +14,26 @@ app.commandLine.appendSwitch('disk-cache-size',String(256*1024*1024));
 let tray,mainWindow,quitting=false;
 const windows=new Set();
 const local=url=>{try{return new URL(url).origin===origin;}catch{return false;}};
+const cloudVoice=url=>{try{return new URL(url).origin==='https://radaz.space';}catch{return false;}};
+const cloudWindows=new Set();
+function configureCloud(win){
+ windows.add(win);cloudWindows.add(win.webContents.id);win.setMenuBarVisibility(false);win.maximize();
+ const id=win.webContents.id;win.on('closed',()=>{windows.delete(win);cloudWindows.delete(id);});
+ win.webContents.setWindowOpenHandler(({url})=>{if(cloudVoice(url)){void win.loadURL(url);return {action:'deny'};}external(url);return {action:'deny'};});
+ for(const event of ['will-navigate','will-redirect'])win.webContents.on(event,(e,url)=>{if(!cloudVoice(url)){e.preventDefault();external(url);}});
+}
 const external=url=>{try{if(['https:','http:','mailto:'].includes(new URL(url).protocol))void shell.openExternal(url);}catch{}};
 const show=()=>{if(mainWindow&&!mainWindow.isDestroyed()){if(mainWindow.isMinimized())mainWindow.restore();mainWindow.show();mainWindow.focus();}};
 function configure(win){
- windows.add(win);win.setMenuBarVisibility(false);win.on('closed',()=>windows.delete(win));
+ windows.add(win);win.setMenuBarVisibility(false);if(win!==mainWindow)win.maximize();win.on('closed',()=>windows.delete(win));
  win.webContents.setWindowOpenHandler(({url,frameName})=>{
+  if(frameName==='radaz-cloud-voice'&&url==='https://radaz.space/voice/')return {action:'allow',overrideBrowserWindowOptions:{width:1280,height:900,minWidth:600,minHeight:600,autoHideMenuBar:true,title:'RADAZ Voice · sayt hesabı',webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,webSecurity:true}}};
   if(frameName==='radaz-system-report'&&local(url)&&new URL(url).pathname==='/report'){external(url);return {action:'deny'};}
   // Native window.open retains opener and BroadcastChannel for MPR/report handoffs.
-  if(local(url)||url==='about:blank'||url==='')return {action:'allow',overrideBrowserWindowOptions:{width:1500,height:980,minWidth:1000,minHeight:680,autoHideMenuBar:true,icon:path.join(runtime,'public/radaz.ico'),webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,webSecurity:true}}};
+  if(local(url)||url==='about:blank'||url==='')return {action:'allow',overrideBrowserWindowOptions:{width:1500,height:980,minWidth:480,minHeight:400,autoHideMenuBar:true,icon:path.join(runtime,'public/radaz.ico'),webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,webSecurity:true}}};
   external(url);return {action:'deny'};
  });
- win.webContents.on('did-create-window',child=>configure(child));
+ win.webContents.on('did-create-window',(child,details)=>{if(cloudVoice(details.url))configureCloud(child);else configure(child);});
  win.webContents.on('will-navigate',(event,url)=>{if(!local(url)&&url!=='about:blank'){event.preventDefault();external(url);}});
  win.webContents.on('will-redirect',(event,url)=>{if(!local(url))event.preventDefault();});
 }
@@ -42,7 +51,22 @@ async function boot(){
  const active=JSON.parse(readFileSync(path.join(installRoot,'active.json'),'utf8')).version;
  if(!/^\d+\.\d+\.\d+$/.test(active))throw Error('RADAZ versiya məlumatı düzgün deyil.');
  runtime=path.join(installRoot,'versions',active);
- await run('launch');await waitForReady();
+ const handedBuild=process.argv.find(arg=>arg.startsWith('--radaz-ready-build='))?.split('=')[1];
+ let handedReady=false;
+ if(handedBuild){
+  const expected=JSON.parse(readFileSync(path.join(runtime,'dist/server/radaz-build.json'),'utf8'));
+  try{
+   const [served,health]=await Promise.all(['/radaz-runtime.json','/radaz-health.json'].map(async route=>{
+    const response=await fetch(origin+route,{signal:AbortSignal.timeout(3000)});if(!response.ok)throw Error('Health unavailable');return response.json();
+   }));
+   handedReady=handedBuild===expected.buildId&&served.buildId===handedBuild&&served.version===active&&health.buildId===handedBuild&&health.ready===true;
+  }catch{}
+ }
+ // A shortcut's controller already validated the package and listener. Avoid
+ // launching a second controller for its newly opened native window.
+ if(!handedReady)await run('launch');
+ await waitForReady();
+ runtime=path.join(installRoot,'versions',JSON.parse(readFileSync(path.join(installRoot,'active.json'),'utf8')).version);
  // Existing RADAZ receivers deliberately accept the original 5173 origin.
  // Translate only requests from our own sandboxed local windows to the two
  // fixed loopback services. Their authentication and endpoint checks remain.
@@ -65,10 +89,25 @@ async function boot(){
   let ready=false;try{const r=await fetch(bridge+'/health',{headers:{Origin:'http://localhost:5173'},signal:AbortSignal.timeout(1500)});ready=r.ok;}catch{}
   if(!ready){const log=openSync(path.join(profile,'logs/pacs.log'),'a');try{const child=spawn(path.join(runtime,'runtime/python/python.exe'),['bridge/radaz_pacs_bridge.py','--origin','http://localhost:5173'],{cwd:runtime,windowsHide:true,detached:true,stdio:['ignore',log,log]});child.on('error',()=>{});child.unref();}finally{closeSync(log);}}
  }
- session.defaultSession.setPermissionRequestHandler((contents,permission,callback,details)=>callback(local(contents.getURL())&&(!details.requestingUrl||local(details.requestingUrl))&&['fullscreen','clipboard-sanitized-write','fileSystem'].includes(permission)));
- session.defaultSession.setPermissionCheckHandler((contents,permission,requestingOrigin)=>!!contents&&local(contents.getURL())&&local(requestingOrigin)&&['fullscreen','clipboard-sanitized-write','fileSystem'].includes(permission));
+ const microphoneGrants=new Set();
+ session.defaultSession.setPermissionRequestHandler(async(contents,permission,callback,details)=>{
+  const trusted=local(contents.getURL())&&(!details.requestingUrl||local(details.requestingUrl));
+  const trustedAudio=trusted||(cloudWindows.has(contents.id)&&cloudVoice(contents.getURL())&&cloudVoice(details.requestingUrl||contents.getURL()));
+  if(trustedAudio&&permission==='media'&&details.mediaTypes?.length&&details.mediaTypes.every(t=>t==='audio')){
+   if(microphoneGrants.has(contents.id)){callback(true);return;}
+   const answer=await dialog.showMessageBox(BrowserWindow.fromWebContents(contents),{type:'question',buttons:['İcazə ver','İmtina'],defaultId:1,cancelId:1,title:'RADAZ Voice',message:'Diktə üçün mikrofona icazə verilsin?',detail:'Yazma yalnız Danışmağa başla düyməsi ilə başlayır. Dayandırdıqda səs OpenAI-a göndərilir.'});
+   if(answer.response===0&&!contents.isDestroyed()){microphoneGrants.add(contents.id);contents.once('destroyed',()=>microphoneGrants.delete(contents.id));callback(true);}else callback(false);
+   return;
+  }
+  callback(trusted&&['fullscreen','clipboard-sanitized-write','fileSystem'].includes(permission));
+ });
+ session.defaultSession.setPermissionCheckHandler((contents,permission,requestingOrigin,details)=>{
+  if(!contents)return false;const trusted=local(contents.getURL())&&local(requestingOrigin);
+  if(permission==='media')return details.mediaType==='audio'&&microphoneGrants.has(contents.id)&&(trusted||(cloudWindows.has(contents.id)&&cloudVoice(contents.getURL())&&cloudVoice(requestingOrigin)));
+  return trusted&&['fullscreen','clipboard-sanitized-write','fileSystem'].includes(permission);
+ });
  Menu.setApplicationMenu(null);
- mainWindow=new BrowserWindow({width:1500,height:980,minWidth:1000,minHeight:680,title:'RADAZ',backgroundColor:'#071017',show:false,autoHideMenuBar:true,icon:path.join(runtime,'public/radaz.ico'),webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,webSecurity:true}});
+ mainWindow=new BrowserWindow({width:1500,height:980,minWidth:480,minHeight:400,title:'RADAZ',backgroundColor:'#071017',show:false,autoHideMenuBar:true,icon:path.join(runtime,'public/radaz.ico'),webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,webSecurity:true}});
  configure(mainWindow);mainWindow.on('close',event=>{if(!quitting){event.preventDefault();mainWindow.hide();}});
  void mainWindow.loadURL(origin).catch(error=>{if(!quitting&&error.code!=='ERR_ABORTED'&&error.errno!==-3)dialog.showErrorBox('RADAZ',error.message);});
  tray=new Tray(path.join(runtime,'public/radaz.ico'));tray.setToolTip('RADAZ Desktop');tray.on('double-click',show);
@@ -77,5 +116,5 @@ async function boot(){
 }
 if(!app.requestSingleInstanceLock())app.quit();else{
  app.on('second-instance',show);app.on('activate',show);app.on('window-all-closed',()=>{});app.on('before-quit',()=>{quitting=true;});
- app.whenReady().then(boot).catch(error=>{dialog.showErrorBox('RADAZ açıla bilmədi',error.message);quitting=true;app.quit();});
+ app.whenReady().then(boot).catch(error=>{try{mkdirSync(path.join(profile,'logs'),{recursive:true});appendFileSync(path.join(profile,'logs/desktop.log'),new Date().toISOString()+' '+String(error.stack||error)+'\n');}catch{}dialog.showErrorBox('RADAZ açıla bilmədi',error.message);quitting=true;app.quit();});
 }

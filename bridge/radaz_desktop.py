@@ -14,7 +14,7 @@ import time
 import zlib
 from http.client import HTTPException
 from pathlib import Path, PurePosixPath
-from urllib.request import Request, urlopen
+from urllib.request import Request, urlopen, build_opener, ProxyHandler
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from zipfile import ZipFile
@@ -139,20 +139,57 @@ def failure(root, error, phase, target=None):
     print('[RADAZ update] ' + json.dumps(detail, ensure_ascii=True), flush=True)
     return detail
 
+def local_or_remote_open(request, timeout=15):
+    url = request.full_url if isinstance(request, Request) else request
+    if urlsplit(url).hostname in ('localhost', '127.0.0.1', '::1'):
+        return build_opener(ProxyHandler({})).open(request, timeout=timeout)
+    try:
+        return urlopen(request, timeout=timeout)
+    except URLError:
+        # A stale Windows proxy must not make every update source unreachable.
+        # Direct retry retains normal TLS certificate verification.
+        return build_opener(ProxyHandler({})).open(request, timeout=timeout)
+
+
 def get_json(url, timeout=15):
-    with urlopen(Request(url, headers={'User-Agent': 'RADAZ-desktop-updater', 'Accept': 'application/vnd.github+json'}), timeout=timeout) as response:
+    with local_or_remote_open(Request(url, headers={'User-Agent': 'RADAZ-desktop-updater', 'Accept': 'application/vnd.github+json'}), timeout=timeout) as response:
         return json.load(response)
+
+
+class UpdateSourcesError(ValueError):
+    pass
 
 
 def get_latest_release(repo=UPDATE_REPOSITORY):
     if not re.fullmatch(r'[\w.-]+/[\w.-]+', repo): raise ValueError('Invalid update repository')
-    # Public release assets do not consume GitHub's unauthenticated REST quota
-    # shared by all workstations behind the same hospital/router address.
+    errors = []
+    sources = [f'https://github.com/{repo}/releases/latest/download/radaz-update.json?check={int(time.time())//60}']
+    if repo == UPDATE_REPOSITORY:
+        sources.append('https://radaz.space/radaz-update.json')
+    for url in sources:
+        try:
+            release = get_json(url)
+            authenticate_release(release)
+            return release
+        except (OSError, ValueError, KeyError) as error:
+            errors.append(urlsplit(url).hostname + ': ' + update_error_message(error))
     try:
-        return get_json(f'https://github.com/{repo}/releases/latest/download/radaz-update.json?check={int(time.time())//60}')
-    except (HTTPError, URLError, TimeoutError, ValueError):
-        # Existing releases predate the static feed; API remains a compatible fallback.
-        return get_json(f'https://api.github.com/repos/{repo}/releases/latest')
+        release = get_json(f'https://api.github.com/repos/{repo}/releases/latest')
+        # GitHub API metadata is NOT a signed updater manifest. Fetch the exact
+        # feed asset; never pass unsigned modern API metadata to installation.
+        if version(release['tag_name'].removeprefix('v')) >= (0,2,41):
+            tag = release['tag_name']
+            expected = f'https://github.com/{repo}/releases/download/{tag}/radaz-update.json'
+            asset = next((a for a in release.get('assets',[]) if a.get('name')=='radaz-update.json' and a.get('browser_download_url')==expected),None)
+            if not asset: raise ValueError('Release signature manifest is missing')
+            signed = get_json(expected)
+            if signed.get('tag_name') != tag: raise ValueError('Release signature version mismatch')
+            release = signed
+        authenticate_release(release)
+        return release
+    except (OSError, ValueError, KeyError) as error:
+        errors.append('api.github.com: ' + update_error_message(error))
+    raise UpdateSourcesError('Yenilənmə mənbələri yoxlanmadı. ' + ' | '.join(errors))
 
 
 def open_release_download(url, offset=0):
@@ -662,7 +699,7 @@ def open_app(root, build):
     if active:
         native = version_dir(root, active) / 'runtime/electron/RADAZ.exe'
         if native.is_file():
-            return run_hidden([str(native)], root)
+            return run_hidden([str(native), '--radaz-ready-build=' + build], root)
     port = int(os.environ.get('RADAZ_PORT', '5173'))
     if not 0 < port < 65536: raise ValueError('Invalid RADAZ port')
     from urllib.parse import quote
@@ -700,7 +737,7 @@ def open_version(root, target):
         owner = runtime_processes(root, 'Owner', target)
         if served.get('pid') is not None and served['pid'] != owner['pid']:
             raise RuntimeError('Runtime listener changed during health check')
-        with urlopen(base + '/', timeout=3) as response:
+        with local_or_remote_open(base + '/', timeout=3) as response:
             return response.status == 200
     try:
         if healthy(): return build
@@ -818,13 +855,19 @@ def install(root, shortcuts=True):
     return initialize(root, shortcuts)
 
 def update_error_message(error):
+    if isinstance(error, UpdateSourcesError): return str(error)
+    if isinstance(error, ValueError) and any(word in str(error).lower() for word in ('signature','authenticity')):
+        return 'Buraxılışın rəqəmsal imzası yoxdur və ya düzgün deyil. Təhlükəsizlik yoxlaması yenilənməni saxladı.'
     if isinstance(error, HTTPError):
         if error.code == 404:
             return 'Yenilənmə mənbəyi və ya yayımlanmış buraxılış tapılmadı (404). Yenilənmə ünvanını dəstəklə yoxlayın.'
         if error.code in (403, 429):
             return 'GitHub yenilənmə sorğusunu məhdudlaşdırdı. Bir qədər sonra yenidən yoxlayın.'
     if isinstance(error, (URLError, TimeoutError)):
-        return 'Yenilənmə serveri ilə əlaqə qurulmadı. İnternet bağlantısını yoxlayıb yenidən cəhd edin.'
+        detail = str(error).lower()
+        if 'getaddrinfo' in detail or '11001' in detail: return 'Yenilənmə serverinin adı DNS vasitəsilə tapılmadı. Şəbəkənin DNS/proxy ayarlarını yoxlayın.'
+        if 'certificate' in detail or 'ssl' in detail: return 'HTTPS sertifikatı yoxlanmadı. Kompüterin tarixini və şəbəkə sertifikatlarını yoxlayın.'
+        return 'Yenilənmə serveri cavab vermədi. Firewall/proxy və ya serverə çıxışı yoxlayın.'
     return 'Yeniləmə yüklənmədi. Mövcud versiya işləyir; növbəti yoxlamada yenidən cəhd ediləcək.'
 
 
@@ -986,7 +1029,12 @@ def main():
         # A fresh Setup starts the local services even if its optional window is
         # not opened. Installing an update must never interrupt an examination.
         if fresh and args.start_background: launch(root, no_browser=True)
-    elif args.command == 'launch': launch(root, args.no_browser)
+    elif args.command == 'launch':
+        try: launch(root, args.no_browser)
+        except Exception as error:
+            diagnostic = failure(root, error, 'launch-controller')
+            state(root, 'error', 'RADAZ açılışı tamamlanmadı: ' + str(error), diagnostic=diagnostic)
+            raise
     elif args.command == 'uninstall':
         try: stop_installation(root)
         except Exception as error:

@@ -266,7 +266,8 @@ class ProductService:
                 if newer: self.cached_update['url']=f'https://github.com/{repo}/releases/tag/{release["tag_name"]}'
             except HTTPError as error:
                 self.cached_update=dict(state='unpublished' if error.code==404 else 'error',message='Repoya giriş yoxdur və ya hələ yayımlanmış buraxılış mövcud deyil.' if error.code==404 else f'GitHub yoxlaması alınmadı (HTTP {error.code}).')
-            except (OSError, URLError, ValueError, KeyError):
-                self.cached_update=dict(state='error',message='Yeniləmə yoxlanmadı. İnternet bağlantısını və repozitoriyanı yoxlayın.')
+            except (OSError, URLError, ValueError, KeyError) as error:
+                from radaz_desktop import update_error_message
+                self.cached_update=dict(state='error',message=update_error_message(error))
             self.last_check=now
             return self.cached_update

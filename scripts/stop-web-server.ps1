@@ -1,6 +1,7 @@
 param([int]$Port = 5173)
+# Match bound endpoints rather than unreliable TCP State labels; keep process/build checks.
 $ErrorActionPreference = 'Stop'
-$listeners = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
+$listeners = @(Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue | Where-Object { $_.RemotePort -eq 0 -and $_.RemoteAddress -in @('0.0.0.0','::') -and $_.OwningProcess -gt 0 })
 if (-not $listeners.Count) { exit 0 }
 $owners = @($listeners.OwningProcess | Sort-Object -Unique)
 if ($owners.Count -ne 1) { throw "Port $Port has unexpected listeners. No process was stopped." }
@@ -43,7 +44,7 @@ function Stop-IdentifiedProcess($snapshot, [switch]$MayHaveExited) {
 Stop-IdentifiedProcess $candidate
 foreach ($renderer in $renderers) { Stop-IdentifiedProcess $renderer -MayHaveExited }
 foreach ($attempt in 1..30) {
-  if (-not (Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)) { exit 0 }
+  if (-not (Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue | Where-Object { $_.RemotePort -eq 0 -and $_.RemoteAddress -in @('0.0.0.0','::') -and $_.OwningProcess -gt 0 })) { exit 0 }
   Start-Sleep -Milliseconds 200
 }
 throw "Port $Port was not released."

@@ -6,7 +6,7 @@ const {_electron}=createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE||
 const install=process.argv[2],version=JSON.parse(readFileSync(path.join(install,'active.json'))).version;
 const runtime=path.join(install,'versions',version),profile=path.join(install,'synthetic-electron-profile');
 assert.equal(JSON.parse(readFileSync(path.join(runtime,'runtime/electron/resources/app/package.json'))).version,version);
-const electron=await _electron.launch({executablePath:path.join(runtime,'runtime/electron/RADAZ.exe'),args:['--background'],timeout:90000,env:{...process.env,RADAZ_DESKTOP_RUNTIME:install,RADAZ_DESKTOP_PROFILE:profile,RADAZ_DESKTOP_SKIP_PACS:'1'}});
+const electron=await _electron.launch({executablePath:path.join(runtime,'runtime/electron/RADAZ.exe'),args:['--background',...(process.env.RADAZ_TEST_VERIFIED_HANDOFF==='1'?['--radaz-ready-build='+JSON.parse(readFileSync(path.join(runtime,'dist/server/radaz-build.json'))).buildId]:[])],timeout:90000,env:{...process.env,RADAZ_DESKTOP_RUNTIME:install,RADAZ_DESKTOP_PROFILE:profile,RADAZ_DESKTOP_SKIP_PACS:'1'}});
 try{
  const page=await electron.firstWindow({timeout:90000});await page.waitForURL(`http://localhost:${process.env.RADAZ_PORT}/`,{timeout:90000,waitUntil:'domcontentloaded'});
  assert.equal(await electron.evaluate(({app})=>app.getVersion()),version);
@@ -16,6 +16,7 @@ try{
  await page.evaluate(()=>window.open('/report?archive-study=2.25.111&provider=chatgpt','radaz-system-report'));
  assert.deepEqual(await electron.evaluate(()=>globalThis.radazTestExternal),[`http://localhost:${process.env.RADAZ_PORT}/report?archive-study=2.25.111&provider=chatgpt`]);
  assert.equal(await electron.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().length),1);
+ if(process.env.RADAZ_TEST_STARTUP_ONLY==='1'){console.log('PASS packaged Electron startup, correct version, sandbox and report handoff');}else{
  const token='RADAZ_RECORDS_'+ 'a'.repeat(32);
  const popupPromise=electron.waitForEvent('window');
  const registration=electron.context().waitForEvent('response',{predicate:r=>r.url().endsWith('/window/register-records'),timeout:45000});
@@ -38,4 +39,6 @@ try{
  await mpr.close();
  console.log('PASS native MPR window restores maximized without duplication');
  console.log('PASS packaged Electron version, sandboxed hidden launch and explicit system-browser report handoff');
+ }
 }finally{await electron.close();}
+

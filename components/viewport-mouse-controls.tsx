@@ -8,7 +8,7 @@ import {getViewer} from '@/lib/cornerstone';
 import type {LocalMark,Point3} from './measurement-overlay';
 
 type Target={kind:'local'|'native';id:string};
-type Props={container:RefObject<HTMLElement|null>;element:HTMLDivElement|null;viewport:Core.Types.IStackViewport|null;
+type Props={tool:string;container:RefObject<HTMLElement|null>;element:HTMLDivElement|null;viewport:Core.Types.IStackViewport|null;
  imageId:string;disabled:boolean;marks:LocalMark[];onSelect:()=>void;onRemove:(id:string)=>void;
  onClear:(imageId:string)=>void;onEditArrow:(id:string)=>void};
 
@@ -24,6 +24,14 @@ export function ViewportMouseControls(props:Props){
   if(!root||!element||!viewport||!props.imageId)return;
   setMenu(null);
   let gesture:{pointer:number;button:number;x:number;y:number;scale:number;anchor:Point3;moved:boolean;target:Target|null}|null=null;
+  let hold:ReturnType<typeof setTimeout>|null=null;
+  let heldPointer:number|null=null;
+  let holdStart:{id:number;x:number;y:number}|null=null;
+  const cancelHold=()=>{if(hold!==null)clearTimeout(hold);hold=null;holdStart=null;};
+  const showMenu=(x:number,y:number,target:Target)=>{
+   const r=root.getBoundingClientRect();
+   setMenu({x:Math.max(4,Math.min(x-r.left,r.width-254)),y:Math.max(4,Math.min(y-r.top,r.height-154)),target});
+  };
   const point=(event:PointerEvent):[number,number]=>{const r=element.getBoundingClientRect();return [event.clientX-r.left,event.clientY-r.top];};
   const hit=(event:PointerEvent):Target|null=>{
    const target=event.target instanceof Element?event.target:null;
@@ -31,7 +39,7 @@ export function ViewportMouseControls(props:Props){
    const id=local?.getAttribute('data-measurement')||local?.getAttribute('data-mark-id');
    if(id&&current.current.marks.some(m=>m.id===id&&m.imageId===current.current.imageId))return {kind:'local',id};
    const tools=viewer.current?.tools;
-   const annotation=tools?.utilities.getAnnotationNearPoint(element,point(event),8);
+   const annotation=tools?.utilities.getAnnotationNearPoint(element,point(event),event.pointerType==='touch'||event.pointerType==='pen'?24:8);
    if(annotation?.annotationUID&&annotationBelongsToPane(annotation,element)&&tools?.annotation.visibility.isAnnotationVisible(annotation.annotationUID))return {kind:'native',id:annotation.annotationUID};
    return null;
   };
@@ -39,17 +47,51 @@ export function ViewportMouseControls(props:Props){
   const down=(event:PointerEvent)=>{
    if(current.current.disabled||isControl(event))return;
    setMenu(null);
-   if(event.button!==1&&event.button!==2)return;
+   const hadHold=holdStart!==null;cancelHold();
+   if(!hadHold&&event.isPrimary&&event.button===0&&current.current.tool!=='erase'){
+    const target=hit(event);
+    if(target){
+     const pressedTool=current.current.tool;
+     holdStart={id:event.pointerId,x:event.clientX,y:event.clientY};
+     hold=setTimeout(()=>{
+      cancelHold();if(current.current.disabled||current.current.tool!==pressedTool)return;
+      const tools=viewer.current?.tools;
+      if(tools)cancelMeasurementInteraction(tools.ToolGroupManager.getToolGroupForViewport(viewport.id),element);
+      gesture=null;delete root.dataset.mouseGesture;
+      heldPointer=event.pointerId;
+      root.dataset.suppressMaximizeUntil=String(performance.now()+1000);
+      showMenu(event.clientX,event.clientY,target);
+     },600);
+    }
+   }
+   if(event.button===0&&current.current.tool==='erase'){
+    event.preventDefault();event.stopPropagation();
+    root.dataset.suppressMaximizeUntil=String(performance.now()+750);
+    const target=hit(event),tools=viewer.current?.tools;
+    if(target?.kind==='local')current.current.onRemove(target.id);
+    else if(target&&tools){
+     const annotation=tools.annotation.state.getAnnotation(target.id);
+     if(annotation&&annotationBelongsToPane(annotation,element)&&annotation.metadata?.referencedImageId===current.current.imageId){
+      tools.annotation.state.removeAnnotation(target.id);tools.utilities.triggerAnnotationRender(element);
+     }
+    }
+    return;
+   }
+   const touch=event.button===0;
+   const touchButton=touch&&current.current.tool==='pan'?1:touch&&current.current.tool==='zoom'?2:event.button;
+   if(touchButton!==1&&touchButton!==2)return;
    root.dataset.suppressMaximizeUntil=String(performance.now()+750);
    event.preventDefault();event.stopPropagation();
    current.current.onSelect();
    const tools=viewer.current?.tools;
    if(tools)cancelMeasurementInteraction(tools.ToolGroupManager.getToolGroupForViewport(viewport.id),element);
-   gesture={pointer:event.pointerId,button:event.button,x:event.clientX,y:event.clientY,scale:viewport.getCamera().parallelScale!,
+   gesture={pointer:event.pointerId,button:touchButton,x:event.clientX,y:event.clientY,scale:viewport.getCamera().parallelScale!,
     anchor:viewport.canvasToWorld(point(event)) as Point3,moved:false,target:hit(event)};
    root.setPointerCapture(event.pointerId);
   };
   const move=(event:PointerEvent)=>{
+   if(holdStart&&event.pointerId===holdStart.id&&Math.hypot(event.clientX-holdStart.x,event.clientY-holdStart.y)>8)cancelHold();
+   if(heldPointer===event.pointerId){event.preventDefault();event.stopPropagation();return;}
    if(current.current.disabled)return;
    if(!gesture){root.dataset.measurementHover=String(!event.buttons&&!isControl(event)&&!!hit(event));return;}
    if(event.pointerId!==gesture.pointer)return;
@@ -67,6 +109,8 @@ export function ViewportMouseControls(props:Props){
    viewport.render();
   };
   const end=(event:PointerEvent)=>{
+   cancelHold();
+   if(heldPointer===event.pointerId){heldPointer=null;return;}
    if(!gesture||gesture.pointer!==event.pointerId)return;
    event.preventDefault();event.stopPropagation();
    const saved=gesture;gesture=null;delete root.dataset.mouseGesture;
@@ -77,12 +121,17 @@ export function ViewportMouseControls(props:Props){
    }
   };
   const leave=()=>{root.dataset.measurementHover='false';};
-  const blur=()=>{if(gesture&&root.hasPointerCapture(gesture.pointer))root.releasePointerCapture(gesture.pointer);gesture=null;delete root.dataset.mouseGesture;leave();setMenu(null);};
-  const mouseDown=(e:MouseEvent)=>{if(!current.current.disabled&&!isControl(e)&&(e.button===1||e.button===2)){e.preventDefault();e.stopPropagation();}};
+  const blur=()=>{cancelHold();heldPointer=null;if(gesture&&root.hasPointerCapture(gesture.pointer))root.releasePointerCapture(gesture.pointer);gesture=null;delete root.dataset.mouseGesture;leave();setMenu(null);};
+  const mouseDown=(e:MouseEvent)=>{if(!current.current.disabled&&!isControl(e)&&(e.button===1||e.button===2||(e.button===0&&['pan','zoom','erase'].includes(current.current.tool)))){e.preventDefault();e.stopPropagation();}};
+  const suppressEraseTouch=(e:TouchEvent)=>{if(!current.current.disabled&&(current.current.tool==='erase'||heldPointer!==null)&&!isControl(e)){e.preventDefault();e.stopPropagation();}};
+  const preventContext=(e:Event)=>e.preventDefault();
+  root.addEventListener('contextmenu',preventContext);
+  root.addEventListener('touchmove',suppressEraseTouch,{capture:true,passive:false});
+  root.addEventListener('touchstart',suppressEraseTouch,{capture:true,passive:false});
   root.addEventListener('pointerdown',down,true);root.addEventListener('pointermove',move,true);
   root.addEventListener('pointerup',end,true);root.addEventListener('pointercancel',end,true);root.addEventListener('pointerleave',leave);
   root.addEventListener('mousedown',mouseDown,true);window.addEventListener('blur',blur);
-  return()=>{root.removeEventListener('pointerdown',down,true);root.removeEventListener('pointermove',move,true);root.removeEventListener('pointerup',end,true);
+  return()=>{root.removeEventListener('contextmenu',preventContext);root.removeEventListener('touchmove',suppressEraseTouch,true);root.removeEventListener('touchstart',suppressEraseTouch,true);root.removeEventListener('pointerdown',down,true);root.removeEventListener('pointermove',move,true);root.removeEventListener('pointerup',end,true);
    root.removeEventListener('pointercancel',end,true);root.removeEventListener('pointerleave',leave);root.removeEventListener('mousedown',mouseDown,true);window.removeEventListener('blur',blur);blur();};
  },[props.container,props.element,props.viewport,props.imageId]);
  useEffect(()=>{

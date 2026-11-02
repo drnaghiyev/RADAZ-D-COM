@@ -1,3 +1,4 @@
+import {reportLabels} from './report-language';
 export type SavedReport = {
   studyUID: string;
   patient: string;
@@ -11,6 +12,7 @@ export type SavedReport = {
   logoData?: string;
   notes: Record<string, string>;
   aiInstruction?: string;
+  language?: string;
   updatedAt: number;
 };
 
@@ -60,9 +62,10 @@ export async function saveReport(report: SavedReport): Promise<void> {
   } finally { db.close(); }
 }
 
-export function reportPlainText(report: Pick<SavedReport, 'patient' | 'birth' | 'date' | 'modality' | 'header' | 'body'>): string {
-  return [report.header.trim(), `Pasiyent: ${report.patient || '—'}`, `Təvəllüd: ${report.birth || '—'}`,
-    `Müayinə tarixi: ${report.date || '—'}`, `Müayinə: ${report.modality || '—'}`, '', report.body.trim()]
+export function reportPlainText(report: Pick<SavedReport, 'patient' | 'birth' | 'date' | 'modality' | 'header' | 'body' | 'language'>): string {
+  const labels=reportLabels(report.language);
+  return [report.header.trim(), `${labels.patient}: ${report.patient || '—'}`, `${labels.birth}: ${report.birth || '—'}`,
+    `${labels.date}: ${report.date || '—'}`, `${labels.study}: ${report.modality || '—'}`, '', report.body.trim()]
     .filter((line, index) => index !== 0 || !!line).join('\n');
 }
 

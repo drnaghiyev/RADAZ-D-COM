@@ -50,7 +50,7 @@ import { getArchiveFiles, saveArchiveFiles } from '@/lib/local-archive';
 import { watchRemovableMedia, type MediaImage, type MediaProgress } from '@/lib/removable-media';
 import { bindWindowing, connectWindowLevels, WindowLevels } from '@/lib/image-windowing';
 import { reportHandoff } from '@/lib/report-handoff';
-import { Sparkles } from 'lucide-react';
+import { Sparkles, Mic } from 'lucide-react';
 import type * as Core from '@cornerstonejs/core';
 
 type Tool = 'anatomy-volume' | 'anatomy-auto' | 'anatomy' | 'scroll' | 'arrow' | 'pencil' | 'cursor3d' | 'wl' | 'pan' | 'zoom' | 'length' | 'angle' | 'arch' | 'cobb' | 'ellipse' | 'hu' | 'deviation' | 'erase';
@@ -355,9 +355,11 @@ function ViewportPane({ onHover, projectionViews, anatomyControl, anatomyVolume,
       const group = groupRef.current;
       if (!group) return;
       if (elementRef.current) cancelMeasurementInteraction(group, elementRef.current);
-      Object.values(mapping).filter(Boolean).forEach(name => limited ? group.setToolDisabled(name) : group.setToolPassive(name));
+      Object.values(mapping).filter(Boolean).forEach(name => limited ? group.setToolDisabled(name) : group.setToolPassive(name, { removeAllBindings: true }));
       if (limited) return;
-      if (mapping[tool]) group.setToolActive(mapping[tool], { bindings: [{ mouseButton: tools.Enums.MouseBindings.Primary }, { numTouchPoints: 1 }] });
+      // Pan/zoom use the container pointer handler, including touch and pen.
+      // Do not also run Cornerstone touch gestures for the same contact.
+      if (mapping[tool] && tool !== 'pan' && tool !== 'zoom' && tool !== 'erase') group.setToolActive(mapping[tool], { bindings: [{ mouseButton: tools.Enums.MouseBindings.Primary }, { numTouchPoints: 1 }] });
       // Middle-button pan and secondary-button zoom are handled on the viewport
       // container so they work over both Cornerstone and SVG annotations.
     });
@@ -418,7 +420,7 @@ function ViewportPane({ onHover, projectionViews, anatomyControl, anatomyVolume,
     {!limited && <LocalizerOverlay element={elementRef.current} viewport={viewport} imageId={imageId} otherImages={otherImages} enabled={localizers} onMoveSource={onMoveSource} onMoveIntersection={onMoveIntersection} targetPanel={id} onRotateSource={onRotateSource} onRotateStart={onRotateStart} onPreviewRotateSource={onPreviewRotateSource}/>}
     <ViewerInteractionOverlay anatomyLabel={anatomyLabel} viewport={viewport} element={elementRef.current} imageId={imageId} tool={tool} slice={slice} count={series?.imageIds.length || 0}
       marks={paneMarks} selectedMarkId={selectedMarkId} onSelectMark={onSelectMark} cursor={cursor} onCursor={onCursor} onEditArrow={setEditingArrow} onUpdate={onUpdateMark} onAdd={mark=>{addPaneMark(mark);if(mark.kind==='arrow'&&!mark.anatomyId)setEditingArrow(mark.id);}} onRemove={onRemoveMark} onSelect={onSelect} navigate={navigate}/>
-    <ViewportMouseControls container={containerRef} element={elementRef.current} viewport={viewport} imageId={imageId} disabled={limited} marks={paneMarks}
+    <ViewportMouseControls tool={tool} container={containerRef} element={elementRef.current} viewport={viewport} imageId={imageId} disabled={limited} marks={paneMarks}
       onSelect={onSelect} onRemove={onRemoveMark} onClear={clearPaneImage} onEditArrow={setEditingArrow}/>
     {editingArrow&&paneMarks.filter(mark=>mark.id===editingArrow&&mark.imageId===imageId&&mark.kind==='arrow').map(mark=><ArrowCommentEditor key={mark.id} mark={mark} onSave={comment=>onUpdateMark(mark.id,{comment})} onClose={()=>setEditingArrow(null)}/>)}
     {loadingProgress && <WorkProgress className="viewport-work-progress" progress={loadingProgress}/>}
@@ -1182,10 +1184,10 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     void getViewer().then(({engine})=>{
       if(disposed)return;
       stop=bindPresentationSync(document.body,()=>engine.getViewports().filter(v=>
-        Object.keys(assigned).some(panel=>v.id===`panel-${panel}`&&paneIndex(panel)<layout.rows*layout.columns)),()=>syncSource.current);
+        Object.keys(assigned).some(panel=>v.id===`panel-${panel}`&&paneIndex(panel)<layout.rows*layout.columns)),()=>syncSource.current,id=>seriesList.find(s=>s.id===assigned[id.replace('panel-','')])?.modality || '');
     });
     return()=>{disposed=true;stop?.();};
-  },[syncScroll,syncEligible,assigned,layout]);
+  },[syncScroll,syncEligible,assigned,layout,seriesList]);
   useEffect(()=>{
     if(!syncScroll||!syncEligible){syncSignature.current='';syncRevision.current++;return;}
     const sourcePanel=syncSource.current;
@@ -1399,8 +1401,8 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       <div className="primary-command-row">
         {!detachedMode && <ToolbarGroup className="toolbar-group import-command" role="group" aria-label={tr('ui.dicom_import_48fa8')} groupId="import" order={10}><DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" className="header-control" title={tr('ui.dicom_import_e8ec8')} aria-label={tr('ui.dicom_import_e8ec8')} disabled={importBusy || limited}><FolderOpen size={17}/><span>{tr('ui.dicom_import_e8ec8')}</span><ChevronDown size={14}/></Button></DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="header-menu">
-            <DropdownMenuItem onSelect={() => { setImportOpen(true); folderRef.current?.click(); }}><FolderOpen size={16}/> {tr('ui.open_folder_55722')}</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => { setImportOpen(true); zipRef.current?.click(); }}><FileArchive size={16}/> {tr('ui.open_zip_rar_38098')}</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => { setImportOpen(false); folderRef.current?.click(); }}><FolderOpen size={16}/> {tr('ui.open_folder_55722')}</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => { setImportOpen(false); zipRef.current?.click(); }}><FileArchive size={16}/> {tr('ui.open_zip_rar_38098')}</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => fileRef.current?.click()}><ScanSearch size={16}/> {tr('ui.dicom_files_650bc')}</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setImportOpen(true)}><Grid2X2 size={16}/> {tr('ui.select_multiple_sources_e4aae')}</DropdownMenuItem>
           </DropdownMenuContent>
@@ -1419,6 +1421,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
  <DropdownMenuItem toolbarId="3d-main" onSelect={()=>{setRecordsPage(null);setInlinePlanes(null);setWorkspace('3d');}}>Əsas viewer-də aç</DropdownMenuItem>
  <DropdownMenuItem toolbarId="3d-window" onSelect={()=>openDetached('3d')}>Ayrı pəncərədə aç</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>
         <button type="button" disabled={limited} title={tr('ui.ai_assistant_eb79d')} aria-label={tr('ui.ai_assistant_eb79d')} onClick={openReport}><Sparkles size={18}/><span>{tr('ui.ai_assistant_eb79d')}</span></button>
+        <button type="button" title="RADAZ Voice" aria-label="RADAZ Voice" onClick={()=>{const win=window.open("https://radaz.space/voice/","radaz-cloud-voice","popup");if(win)win.focus();else setStatus("RADAZ Voice pəncərəsi açıla bilmədi");}}><Mic size={18}/><span>RADAZ Voice</span></button>
         <div className="workspace-split" key="archive"><button type="button" title={tr('ui.local_archive_c13fe')} aria-label={tr('ui.local_archive_c13fe')} onClick={async () => { if (!await openRecordsWindow('archive')) setStatus('Local arxiv vərəqəsi açıla bilmədi'); }}><Database size={18}/><span>{tr('ui.local_archive_c13fe')}</span></button><DropdownMenu><DropdownMenuTrigger asChild><button className="workspace-options" aria-label="archive açılış seçimləri"><ChevronDown/></button></DropdownMenuTrigger><DropdownMenuContent><DropdownMenuItem toolbarId="archive-main" onSelect={()=>setRecordsPage('archive')}>Əsas viewer-də aç</DropdownMenuItem><DropdownMenuItem toolbarId="archive-window" onSelect={()=>void openRecordsWindow('archive')}>Ayrı pəncərədə aç</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>
         <div className="workspace-split" key="pacs"><button type="button" title={tr('ui.pacs_studies_d77a3')} aria-label={tr('ui.pacs_studies_d77a3')} onClick={async () => { if (!await openRecordsWindow('pacs')) setStatus('PACS vərəqəsi açıla bilmədi'); }}><ServerCog size={18}/><span>PACS</span></button><DropdownMenu><DropdownMenuTrigger asChild><button className="workspace-options" aria-label="pacs açılış seçimləri"><ChevronDown/></button></DropdownMenuTrigger><DropdownMenuContent><DropdownMenuItem toolbarId="pacs-main" onSelect={()=>setRecordsPage('pacs')}>Əsas viewer-də aç</DropdownMenuItem><DropdownMenuItem toolbarId="pacs-window" onSelect={()=>void openRecordsWindow('pacs')}>Ayrı pəncərədə aç</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>
       </ToolbarGroup>}
@@ -1468,8 +1471,8 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         </ToolbarGroup>}
         {limited&&<div className="toolbar-group limited-viewer-tools" title={tr('ui.activate_licence_bd73f')}><span>{tr('ui.browse_only_a5ea2')}</span>{['Pəncərə','Yaxınlaşdır','Ölçmə','Çap','İxrac'].map(label=><Button key={label} disabled className="header-control">{label}</Button>)}</div>}
         <input hidden ref={fileRef} type="file" multiple onChange={e => { const files = Array.from(e.currentTarget.files || []); e.currentTarget.value = ''; void openSources(files); }}/>
-        <input hidden ref={folderRef} type="file" multiple onChange={e => { const files = Array.from(e.currentTarget.files || []); e.currentTarget.value = ''; queueFiles(files, 'Qovluq'); }}/>
-        <input hidden ref={zipRef} type="file" multiple accept=".zip,.rar,application/vnd.rar,application/x-rar-compressed,application/zip,application/x-zip-compressed" onChange={e => { const files = Array.from(e.currentTarget.files || []); e.currentTarget.value = ''; queueFiles(files, 'ZIP'); }}/>
+        <input hidden ref={folderRef} type="file" multiple onChange={e => { const files = Array.from(e.currentTarget.files || []); e.currentTarget.value = ''; if(importOpen)queueFiles(files, 'Qovluq');else void openSources(files); }}/>
+        <input hidden ref={zipRef} type="file" multiple accept=".zip,.rar,application/vnd.rar,application/x-rar-compressed,application/zip,application/x-zip-compressed" onChange={e => { const files = Array.from(e.currentTarget.files || []); e.currentTarget.value = ''; if(importOpen)queueFiles(files, 'ZIP');else void openSources(files); }}/>
       </div>
       <ToolbarGroup className="toolbar-group help-command" groupId="help" order={100}>{workspace!=='3d'&&<DicomInfoButton imageId={currentImages[workspace==='mpr'?mprActive:active]}/>}<AppHelpMenu/></ToolbarGroup>
     </header>

@@ -15,6 +15,26 @@ spec = importlib.util.spec_from_file_location('desktop', Path(__file__).resolve(
 desktop = importlib.util.module_from_spec(spec); spec.loader.exec_module(desktop)
 
 class DesktopUpdates(unittest.TestCase):
+    def test_loopback_health_never_uses_system_proxy(self):
+        with patch.object(desktop,'urlopen') as remote, patch.object(desktop,'build_opener') as direct:
+            direct.return_value.open.return_value='local'
+            self.assertEqual(desktop.local_or_remote_open('http://127.0.0.1:5173/radaz-health.json'),'local')
+            remote.assert_not_called()
+            direct.return_value.open.assert_called_once()
+
+    def test_update_transport_retries_direct_after_proxy_network_failure(self):
+        with patch.object(desktop,'urlopen',side_effect=URLError('proxy unavailable')), patch.object(desktop,'build_opener') as direct:
+            direct.return_value.open.return_value='verified TLS transport'
+            self.assertEqual(desktop.local_or_remote_open('https://radaz.space/radaz-update.json'),'verified TLS transport')
+            direct.return_value.open.assert_called_once()
+
+    def test_launch_lock_errors_are_recorded(self):
+        args=['radaz_desktop.py','launch','--install-root',str(self.root),'--no-browser']
+        with patch('sys.argv',args),patch.object(desktop,'launch',side_effect=desktop.OperationBusy('synthetic busy controller')):
+            with self.assertRaises(desktop.OperationBusy):desktop.main()
+        records=[json.loads(line) for line in (self.root/'logs/update-errors.jsonl').read_text().splitlines()]
+        self.assertEqual(records[-1]['phase'],'launch-controller')
+
     def test_failed_uninstall_is_logged_and_does_not_block_manual_recovery(self):
         desktop.atomic_json(self.root / 'uninstalling.json', {'stopping': True})
         args = ['radaz_desktop.py', 'uninstall', '--install-root', str(self.root)]
@@ -174,9 +194,29 @@ class DesktopUpdates(unittest.TestCase):
             self.assertEqual(desktop.get_latest_release(),release)
             self.assertEqual(request.call_count,1)
             self.assertIn('/releases/latest/download/radaz-update.json',request.call_args.args[0])
-        with patch.object(desktop,'get_json',side_effect=[HTTPError('static',404,'missing',{},None),release]) as request:
+        with patch.object(desktop,'get_json',side_effect=[HTTPError('static',404,'missing',{},None),HTTPError('mirror',404,'missing',{},None),release]) as request:
             self.assertEqual(desktop.get_latest_release(),release)
             self.assertIn('api.github.com',request.call_args.args[0])
+
+
+    def test_modern_api_fallback_fetches_and_verifies_exact_signed_manifest(self):
+        url='https://github.com/'+desktop.UPDATE_REPOSITORY+'/releases/download/v0.2.50/radaz-update.json'
+        api={'tag_name':'v0.2.50','assets':[{'name':'radaz-update.json','browser_download_url':url}]}
+        signed={'tag_name':'v0.2.50','signature':{'synthetic':True}}
+        with patch.object(desktop,'get_json',side_effect=[URLError('offline'),URLError('offline'),api,signed]) as fetch, patch.object(desktop,'authenticate_release') as verify:
+            self.assertEqual(desktop.get_latest_release(),signed)
+            self.assertEqual(fetch.call_args.args[0],url)
+            verify.assert_called_once_with(signed)
+        with patch.object(desktop,'get_json',side_effect=[URLError('offline'),URLError('offline'),{'tag_name':'v0.2.50','assets':[]}]):
+            with self.assertRaises(desktop.UpdateSourcesError):desktop.get_latest_release()
+
+    def test_signed_mirror_is_verified_and_dns_is_distinct(self):
+        signed={'tag_name':'v0.2.50','signature':{'synthetic':True}}
+        with patch.object(desktop,'get_json',side_effect=[URLError('offline'),signed]),patch.object(desktop,'authenticate_release') as verify:
+            self.assertEqual(desktop.get_latest_release(),signed)
+            verify.assert_called_once_with(signed)
+        self.assertIn('DNS',desktop.update_error_message(URLError('getaddrinfo failed')))
+        self.assertIn('imza',desktop.update_error_message(ValueError('Release signature is required')))
 
     def test_portable_update_error_does_not_stay_cached_for_six_hours(self):
         import sys
@@ -309,7 +349,7 @@ class DesktopUpdates(unittest.TestCase):
         native.write_bytes(b'synthetic-executable')
         with patch.object(desktop, 'app_browser', side_effect=AssertionError('Browser must not be needed')), patch.object(desktop, 'run_hidden') as started:
             desktop.open_app(self.root, 'verified-build')
-        started.assert_called_once_with([str(native)], self.root)
+        started.assert_called_once_with([str(native),'--radaz-ready-build=verified-build'], self.root)
 
     def test_update_feed_uses_the_main_product_repository(self):
         self.assertEqual(desktop.UPDATE_REPOSITORY, desktop.REPOSITORY)
@@ -323,7 +363,7 @@ class DesktopUpdates(unittest.TestCase):
     def test_feed_failures_are_not_reported_as_current(self):
         self.assertIn('404', desktop.update_error_message(HTTPError('https://api.github.com',404,'missing',{},None)))
         self.assertIn('GitHub', desktop.update_error_message(HTTPError('https://api.github.com',403,'limited',{},None)))
-        self.assertIn('İnternet', desktop.update_error_message(URLError('offline')))
+        self.assertIn('server', desktop.update_error_message(URLError('offline')))
 
     def test_failed_health_check_preserves_cause_and_rolls_back(self):
         self.stage()

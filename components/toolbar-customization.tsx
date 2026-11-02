@@ -98,11 +98,32 @@ export function PortableMenuItem({id,label,children,command}:{id?:string;label:s
   return <PortableItem id={`${home}/menu:${id||label}`} home={home} label={label} order={100} menu command={command}>{children}</PortableItem>;
 }
 export function useToolbarGroupConfig(id:string){
-  const c=useContext(Context);
+  const c=useContext(Context),host=c?.groups[id]?.host;
+  const [visible,setVisible]=useState(true);
+  // A closed overflow popup inherits visibility:hidden; its tools still exist.
+  // Empty/pooled controls, unlike that popup, have no layout rectangles.
+  const controlRoot=()=>host?.closest<HTMLElement>('[data-toolbar-group]')||host;
+  // Some 3D tools are portalled directly into the group, outside the item host.
+  const hasControls=()=>Array.from(controlRoot()?.querySelectorAll<HTMLElement>('button,input,select,textarea,a,[role="button"]')||[])
+    .some(el=>!el.matches('.toolbar-drag-handle,.toolbar-empty-delete')&&el.getClientRects().length>0);
+  useEffect(()=>{
+    if(!host)return;
+    const update=()=>setVisible(hasControls());
+    const observer=new MutationObserver(update);observer.observe(controlRoot()!,{childList:true,subtree:true,attributes:true});
+    const resize=new ResizeObserver(update);resize.observe(controlRoot()!);update();
+    return()=>{observer.disconnect();resize.disconnect();};
+  },[host]);
   const isEmpty=(saved:Saved)=>!Object.entries(c?.items||{}).some(([key,item])=>
     (saved.items[key]?.group||(saved.removed?.includes(item.home)?'pool':item.menu?'menu':item.home))===id);
-  return {hidden:!!c?.saved.removed?.includes(id),name:c?.saved.names?.[id],empty:!!c&&isEmpty(c.saved),
-    removeEmpty:()=>c?.save(current=>isEmpty(current)?{...current,removed:[...new Set([...(current.removed||[]),id])]}:current)};
+  return {hidden:!!c?.saved.removed?.includes(id),name:c?.saved.names?.[id],empty:!!c&&(host?!visible:isEmpty(c.saved)),
+    removeEmpty:()=>c?.save(current=>{
+      if(hasControls())return current;
+      // Empty React wrappers can still be registered. Preserve their commands
+      // in the editor pool so future conditional controls are not lost.
+      const items={...current.items};
+      for(const [key,item] of Object.entries(c.items))if((current.items[key]?.group||item.home)===id)items[key]={group:'pool',order:item.order};
+      return {...current,items,removed:[...new Set([...(current.removed||[]),id])]};
+    })};
 }
 export function useToolbarRows(){
   const context=useContext(Context);

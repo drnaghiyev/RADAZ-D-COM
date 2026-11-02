@@ -4,6 +4,7 @@ param(
   [string]$Version,
   [int]$Port = 5173
 )
+# Match bound endpoints rather than unreliable TCP State labels; keep process/build checks.
 $ErrorActionPreference = 'Stop'
 $installation = [IO.Path]::GetFullPath($InstallRoot).TrimEnd('\')
 $versions = Join-Path $installation 'versions'
@@ -62,7 +63,7 @@ function Stop-Snapshot($snapshot, [switch]$RetireAncestor) {
   }
 }
 if ($Action -eq 'Owner') {
-  $owners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique)
+  $owners = @(Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue | Where-Object { $_.RemotePort -eq 0 -and $_.RemoteAddress -in @('0.0.0.0','::') -and $_.OwningProcess -gt 0 } | Select-Object -ExpandProperty OwningProcess -Unique)
   if ($owners.Count -ne 1) { throw 'Expected exactly one runtime listener' }
   $owner = $processes | Where-Object ProcessId -eq $owners[0] | Select-Object -First 1
   if (-not $Version -or $owner.Name -ne 'node.exe' -or -not (Has-Script $owner 'scripts\start-release.mjs') -or $owner.ExecutablePath -ine (Join-Path $scope 'runtime\node\node.exe')) {
