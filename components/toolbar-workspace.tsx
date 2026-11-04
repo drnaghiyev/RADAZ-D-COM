@@ -203,7 +203,15 @@ export function ToolbarOverflow() {
   const ref=useRef<HTMLDivElement>(null);
   useEffect(()=>{
     if(!open)return;
-    const close=(event:Event)=>{if(event instanceof KeyboardEvent?event.key==='Escape':!ref.current?.contains(event.target as Node))setOpen(false);};
+    const close=(event:Event)=>{
+      if(event instanceof KeyboardEvent){if(event.key==='Escape')setOpen(false);return;}
+      const target=event.target as Element;
+      // Radix renders nested menus in document.body. They still belong to
+      // this overflow group; hiding it on pointerdown loses touch selection.
+      const owner=target.closest?.('[data-toolbar-menu]')?.getAttribute('data-toolbar-menu');
+      if(owner&&ref.current?.querySelector(`[data-toolbar-group="${CSS.escape(owner)}"]`))return;
+      if(!ref.current?.contains(target))setOpen(false);
+    };
     document.addEventListener('pointerdown',close);document.addEventListener('keydown',close);
     return()=>{document.removeEventListener('pointerdown',close);document.removeEventListener('keydown',close);};
   },[open]);

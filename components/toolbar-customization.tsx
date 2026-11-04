@@ -81,7 +81,11 @@ function PortableItem({id,home,label,order,menu=false,children,command}:{id:stri
   const context=useContext(Context),register=context?.register;
   useEffect(()=>register?.(id,{home,label,menu,order}),[register,id,home,label,menu,order]);
   if(!context)return children;
-  const destination=context.saved.items[id]?.group||(context.saved.removed?.includes(home)?'pool':menu?'menu':home),position=context.saved.items[id]?.order??order;
+  const savedDestination=context.saved.items[id]?.group||(context.saved.removed?.includes(home)?'pool':menu?'menu':home);
+  // A moved dropdown keeps its commands even after its original group is deleted.
+  // Older layouts pooled these nested commands together with the empty group.
+  const destination=menu&&(savedDestination==='pool'||context.saved.removed?.includes(savedDestination))?'menu':savedDestination;
+  const position=context.saved.items[id]?.order??order;
   const target=destination==='menu'?null:context.groups[destination]?.host;
   const isHome=destination===(menu?'menu':home)||!target;
   const dragProps={draggable:context.editing,onDragStart:(event:DragEvent)=>start(event,id),onDragOver:accept,onDrop:(event:DragEvent)=>{
