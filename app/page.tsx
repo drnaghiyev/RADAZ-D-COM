@@ -472,6 +472,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   const [localizers, setLocalizers] = useState(true);
   const [currentImages, setCurrentImages] = useState<Record<string, string>>({});
   const [preset, setPreset] = useState<Preset>(null);
+  const [presetMenuOpen, setPresetMenuOpen] = useState(false);
   const windowLevels = useRef(new WindowLevels()).current;
   useEffect(() => connectWindowLevels(windowLevels, new BroadcastChannel('radaz-series-windowing')), [windowLevels]);
   const [resetToken, setResetToken] = useState(0);
@@ -1457,7 +1458,8 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         </DropdownMenu>
         </ToolbarGroup>}
         {!limited && detachedMode !== '3d' && <ToolbarGroup className="toolbar-group" role="group" aria-label={tr('ui.window_and_localizer_1e413')} groupId="window" order={80}>
-        <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className="header-control" title={tr('ui.window_preset_b14ad')} aria-label={tr('ui.window_preset_menu_148b6')}><SlidersHorizontal size={17}/><span>{tr('ui.window_preset_b14ad')}</span><ChevronDown size={14}/></Button></DropdownMenuTrigger>
+        {/* Open on click as well as touch/keyboard activation (remote clients may send no pointerdown). */}
+        <DropdownMenu open={presetMenuOpen} onOpenChange={setPresetMenuOpen}><DropdownMenuTrigger asChild><Button onPointerDown={event=>event.preventDefault()} onClick={()=>setPresetMenuOpen(open=>!open)} variant="ghost" className="header-control" title={tr('ui.window_preset_b14ad')} aria-label={tr('ui.window_preset_menu_148b6')}><SlidersHorizontal size={17}/><span>{tr('ui.window_preset_b14ad')}</span><ChevronDown size={14}/></Button></DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="header-menu preset-menu">{presets.map(p => <DropdownMenuItem key={p.label} onSelect={() => { if (workspace === 'mpr' && mprData) { const plane = mprData.planes[{ MS:0, MC:1, MA:2 }[mprActive as 'MS'|'MC'|'MA'] || 0]; setPreset({ ...p, token: Date.now(), panel: mprActive, seriesId: plane.id, imageId: currentImages[mprActive] || '' }); } else if (assigned[active]) setPreset({ ...p, token: Date.now(), panel: active, seriesId: assigned[active], imageId: currentImages[active] || '' }); }}><span>{p.label}</span><small>WL {p.wl} · WW {p.ww}</small></DropdownMenuItem>)}</DropdownMenuContent>
         </DropdownMenu>
         <Button variant="ghost" className={`header-control sync-scroll ${syncScroll?'is-on':''}`} disabled={!syncEligible} aria-label="Sync Scroll" aria-pressed={syncScroll} title="Sync · kəsiklər, zoom, pan və WW/WL" onClick={()=>setSyncScroll(value=>!value)}><MoveVertical size={17}/><b className="sync-symbol">↔</b></Button><Button variant="ghost" className={`header-control localizer-toggle ${localizers ? 'is-on' : ''}`} aria-label={tr('ui.localizer_lines_1e289')} aria-pressed={localizers} title={tr('ui.show_localizer_lines_between_compatible_serie_67285')} onClick={() => setLocalizers(value => !value)}><Crosshair size={17}/><span>{tr('ui.localizer_8c497')}</span></Button></ToolbarGroup>}
