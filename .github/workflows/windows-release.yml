@@ -66,11 +66,10 @@ jobs:
       - name: Build Windows installer and delta
         if: steps.plan.outputs.publish == 'true'
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
         # Optional: certificate must already be provisioned in CurrentUser/My
         # on the Windows signing runner. Empty configuration produces unsigned Setup.
         env:
+          GH_TOKEN: ${{ github.token }}
           RADAZ_SIGN_CERT_SHA1: ${{ vars.RADAZ_SIGN_CERT_SHA1 }}
           RADAZ_SIGN_TIMESTAMP_URL: ${{ vars.RADAZ_SIGN_TIMESTAMP_URL }}
           RADAZ_SIGNTOOL: ${{ vars.RADAZ_SIGNTOOL }}
