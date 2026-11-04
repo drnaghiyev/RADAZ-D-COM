@@ -54,6 +54,20 @@ try{
   }
   }
   console.log(`PASS: ${modality} window presets: click-only, mouse, touch, keyboard; 1280/1920/2560; slice persistence`);
+  for(const activation of ['click-only','mouse','touch','keyboard']){
+   const help=viewer.locator('button.help-trigger');
+   if(!await help.isVisible())await viewer.getByRole('button',{name:'Əlavə alətlər',exact:true}).click();
+   if(activation==='click-only')await help.evaluate(button=>button.click());
+   else if(activation==='mouse')await help.click();
+   else if(activation==='touch')await help.tap();
+   else{await help.focus();await help.press('Enter');}
+   await viewer.getByRole('menuitem').filter({hasText:'Qısa yollar'}).click();
+   await viewer.locator('dialog[open]').waitFor();
+   await viewer.keyboard.press('Escape');
+   await viewer.locator('dialog[open]').waitFor({state:'detached'});
+  }
+  console.log('PASS: Help menu opens via click-only, mouse, touch and keyboard; shortcut dialog opens and closes');
+
  }
  assert.deepEqual(errors,[]);
 
@@ -69,4 +83,3 @@ try{
  for(const child of [server,fixture])if(child?.pid)spawnSync('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});
  assert.ok(path.resolve(root).startsWith(path.resolve(tmpdir())+path.sep+'radaz-windowing-'));rmSync(root,{recursive:true,force:true});
 }
-

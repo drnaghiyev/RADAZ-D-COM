@@ -368,14 +368,20 @@ function ViewportPane({ onHover, projectionViews, anatomyControl, anatomyVolume,
   useEffect(() => {
     if (!enabled || !selected || !series || !preset || preset.panel !== id || preset.seriesId !== series.id) return;
     if (lastPreset.current === preset.token) return;
-    lastPreset.current = preset.token;
+    let cancelled = false;
     void getViewer().then(({ engine }) => {
+      if (cancelled) return;
       const vp = engine.getViewport(viewportId) as Core.Types.IStackViewport;
-      if (vp?.getCurrentImageId() !== preset.imageId) return;
+      const displayed = vp?.getCurrentImageId();
+      // Slice navigation may complete while the menu is opening. Apply to the
+      // displayed slice of the requested series, never another panel/series.
+      if (!displayed || !series.imageIds.includes(displayed)) return;
       vp.setProperties({ voiRange: { lower: preset.wl - preset.ww / 2, upper: preset.wl + preset.ww / 2 } });
+      lastPreset.current = preset.token;
       vp.render(); setWW(preset.ww); setWL(preset.wl);
     });
-  }, [enabled, selected, series, preset, viewportId, id]);
+    return () => { cancelled = true; };
+  }, [enabled, selected, series, preset, viewportId, id, imageId]);
 
   useEffect(() => {
     if (!enabled || !resetToken || resetToken === lastReset.current) return;

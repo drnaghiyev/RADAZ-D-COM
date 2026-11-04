@@ -58,6 +58,7 @@ export function AppHelpMenu({initial=''}:{initial?:Panel}) {
   const {t}=useTranslation();
   const [panel,setPanel]=useState<Panel>(initial),[product,setProduct]=useState<Product|null>(null),[license,setLicense]=useState<License|null>(null),[update,setUpdate]=useState<Update|null>(null);
   const [key,setKey]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),[issue,setIssue]=useState('');
+  const [menuOpen,setMenuOpen]=useState(false);
   const dialog=useRef<HTMLDialogElement>(null);
   const open=(next:Panel)=>{setMessage('');setPanel(next);};
   useEffect(()=>{const show=()=>open('ai');window.addEventListener('radaz-ai-settings',show);return()=>window.removeEventListener('radaz-ai-settings',show);},[]);
@@ -66,7 +67,7 @@ export function AppHelpMenu({initial=''}:{initial?:Panel}) {
   const check=async()=>{open('updates');setBusy(true);try{setUpdate(await releaseUpdate(true));}catch(e){setMessage(e instanceof Error?e.message:'Yeniləmə yoxlanmadı');}finally{setBusy(false);}};
   const activate=async()=>{setBusy(true);setMessage('');try{const result=await api<License>('license/activate',{key:key.trim()});setLicense(result);setKey('');setMessage(result.message);window.dispatchEvent(new Event('radaz-license-change'));}catch(e){setMessage(e instanceof Error?e.message:'Aktivləşdirmə alınmadı');}finally{setBusy(false);}};
   const title={settings:t('settings.title'),help:'Yardım mərkəzi',keys:'Klaviatura qısa yolları',license:'Lisenziyanı aktivləşdir',about:'RADAZ haqqında',support:'Dəstək ilə əlaqə',updates:'Proqram yeniləmələri',agreement:'Lisenziya şərtləri',ai:'AI ayarları','':''}[panel];
-  return <><DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className="header-control help-trigger" title={tr('ui.help_f1_8115e')} aria-label={tr('ui.help_and_licence_be57c')}><CircleHelp size={18}/><span>{tr('ui.help_a5212')}</span></Button></DropdownMenuTrigger><DropdownMenuContent className="header-menu product-menu" align="end">
+  return <><DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}><DropdownMenuTrigger asChild><Button onPointerDown={event=>event.preventDefault()} onClick={()=>setMenuOpen(open=>!open)} variant="ghost" className="header-control help-trigger" title={tr('ui.help_f1_8115e')} aria-label={tr('ui.help_and_licence_be57c')}><CircleHelp size={18}/><span>{tr('ui.help_a5212')}</span></Button></DropdownMenuTrigger><DropdownMenuContent className="header-menu product-menu" align="end">
     <DropdownMenuItem onClick={()=>open('settings')}><Info size={16}/>{t('settings.title')}</DropdownMenuItem>
     <DropdownMenuItem onClick={()=>open('help')}><BookOpen size={16}/>{tr('ui.help_a5212')}<span className="product-shortcut">F1</span></DropdownMenuItem>
     <DropdownMenuItem onClick={()=>open('keys')}><Keyboard size={16}/>{tr('ui.keyboard_shortcuts_8b928')}</DropdownMenuItem>
