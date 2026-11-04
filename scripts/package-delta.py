@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import os
 import re
 from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED
@@ -19,8 +20,11 @@ def compatibility_release(repo, version):
             raise
         # Version numbers may have been reserved for private builds. Skip only
         # a confirmed absent release, never an existing release with a lost feed.
+        api_headers = {**headers}
+        if os.environ.get('GH_TOKEN'):
+            api_headers['Authorization'] = 'Bearer ' + os.environ['GH_TOKEN']
         try:
-            with urlopen(Request(f'https://api.github.com/repos/{repo}/releases/tags/v{version}', headers=headers), timeout=60):
+            with urlopen(Request(f'https://api.github.com/repos/{repo}/releases/tags/v{version}', headers=api_headers), timeout=60):
                 pass
         except HTTPError as release_error:
             if release_error.code == 404:
