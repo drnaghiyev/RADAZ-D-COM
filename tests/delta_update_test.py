@@ -277,3 +277,29 @@ class DeltaUpdates(unittest.TestCase):
         self.assertEqual(desktop.read_json(self.root/'active.json')['version'],self.base)
 
 if __name__=='__main__':unittest.main()
+
+
+class CompatibilityReleaseDiscovery(unittest.TestCase):
+    def error(self, code):
+        from urllib.error import HTTPError
+        return HTTPError('https://github.com/test', code, 'test', {}, None)
+
+    def test_only_confirmed_unpublished_versions_are_skipped(self):
+        with patch.object(builder, 'urlopen', side_effect=[self.error(404), self.error(404)]):
+            self.assertIsNone(builder.compatibility_release('owner/repo', '0.2.51'))
+
+    def test_existing_release_without_manifest_fails_closed(self):
+        missing = self.error(404)
+        with patch.object(builder, 'urlopen', side_effect=[missing, io.BytesIO(b'{}')]):
+            with self.assertRaises(type(missing)):
+                builder.compatibility_release('owner/repo', '0.2.51')
+
+    def test_network_errors_are_not_treated_as_absent_releases(self):
+        for errors in [[self.error(503)], [self.error(404), self.error(403)]]:
+            with patch.object(builder, 'urlopen', side_effect=errors):
+                with self.assertRaises(builder.HTTPError):
+                    builder.compatibility_release('owner/repo', '0.2.51')
+
+    def test_existing_manifest_is_preserved(self):
+        with patch.object(builder, 'urlopen', return_value=io.BytesIO(b'{"tag_name":"v0.2.50"}')):
+            self.assertEqual(builder.compatibility_release('owner/repo','0.2.50'), {'tag_name':'v0.2.50'})

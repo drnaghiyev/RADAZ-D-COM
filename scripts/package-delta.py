@@ -6,6 +6,28 @@ import re
 from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
+
+
+def compatibility_release(repo, version):
+    headers = {'User-Agent': 'RADAZ-delta-builder'}
+    try:
+        with urlopen(Request(f'https://github.com/{repo}/releases/download/v{version}/radaz-update.json', headers=headers), timeout=60) as response:
+            return json.load(response)
+    except HTTPError as missing:
+        if missing.code != 404:
+            raise
+        # Version numbers may have been reserved for private builds. Skip only
+        # a confirmed absent release, never an existing release with a lost feed.
+        try:
+            with urlopen(Request(f'https://api.github.com/repos/{repo}/releases/tags/v{version}', headers=headers), timeout=60):
+                pass
+        except HTTPError as release_error:
+            if release_error.code == 404:
+                print(f'Skip unpublished compatibility version {version}')
+                return None
+            raise
+        raise missing
 
 
 def build_delta(previous, current, output):
@@ -87,8 +109,8 @@ if __name__ == '__main__':
     if args.previous_release:
         for patch_number in range(40,int(base.split('.')[-1])):
             compatibility=f'0.2.{patch_number}'
-            with urlopen(Request(f'https://github.com/{repo}/releases/download/v{compatibility}/radaz-update.json',headers={'User-Agent':'RADAZ-delta-builder'}),timeout=60) as response:
-                prior=json.load(response)
+            prior=compatibility_release(repo,compatibility)
+            if prior is None:continue
             if prior['tag_name']!='v'+compatibility:raise ValueError('Wrong compatibility release')
             entries=prior.get('distribution',{}).get('files')
             if entries:
