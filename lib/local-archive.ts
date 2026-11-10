@@ -203,6 +203,10 @@ export async function getArchiveFiles(study: string, onProgress?: (done: number,
     catch (error) { if (!browser.length) throw error; }
   }
   if(onBatch&&browser.length)await onBatch(browser,new Set());
+  // A disk-only study is already unique by SOP UID in SQLite. Re-reading every
+  // pixel blob just to deduplicate it doubles I/O without changing the result.
+  if (!browser.length) return disk;
+  if (!disk.length) { onProgress?.(browser.length, browser.length); return browser; }
   const unique = new Map<string, File>();
   if (!disk.length) onProgress?.(browser.length, browser.length);
   for (const file of [...browser, ...disk]) {

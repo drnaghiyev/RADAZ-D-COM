@@ -9,7 +9,9 @@ try {
   if ($NoBrowser) { $arguments += '--no-browser' }
   $logRoot = Join-Path $PSScriptRoot 'logs'
   New-Item -ItemType Directory -Force -Path $logRoot | Out-Null
-  $launchLog = Join-Path $logRoot 'launcher.log'
+  # PowerShell holds redirected files open while Python runs. A second shortcut
+  # launch must not compete with a still-running launcher for the same file.
+  $launchLog = Join-Path $logRoot ("launcher-{0}-{1}-{2}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'), $PID, [guid]::NewGuid().ToString('N'))
   # Let a verified pending controller perform the transaction. Older releases
   # can misidentify the Windows listener even when the new runtime is healthy.
   $pendingPath = Join-Path $PSScriptRoot 'pending.json'

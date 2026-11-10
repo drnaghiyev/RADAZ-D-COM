@@ -1200,3 +1200,7 @@ body .toolbar-workspace :is(.records-header,.dockable-tool-group) button svg.luc
 body .toolbar-workspace :is(.topbar,.records-header),body .toolbar-workspace main.workstation.grouped-workstation .topbar{position:relative;padding-right:calc(var(--command-size,34px) + 28px)!important;min-height:calc(var(--command-size,34px) + 28px)!important}
 body .toolbar-workspace .toolbar-customize-trigger{position:static!important;display:inline-flex!important;width:var(--command-size,34px)!important;min-width:var(--command-size,34px)!important;height:var(--command-size,34px)!important;margin:0!important}
 body .toolbar-workspace .toolbar-overflow-trigger{position:absolute!important;right:8px!important;top:8px!important;z-index:45;background:#142a38}
+/* Canvas and custom drawing layers share the selected tool cursor. Annotation
+   handles/localizers and active secondary gestures retain their own cursors. */
+.viewport { cursor:var(--viewer-tool-cursor,crosshair) }
+.viewport > .drawing-overlay,.viewport > .drawing-overlay.drawing-active,.viewport > .drawing-overlay.scroll-active,.viewport > .measurement-overlay { cursor:var(--viewer-tool-cursor,crosshair) }

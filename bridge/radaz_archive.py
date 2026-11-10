@@ -62,7 +62,8 @@ def metadata(ds):
 
 
 class Archive:
-    def __init__(self, root: Path, bind='0.0.0.0'):
+    def __init__(self, root: Path, bind='0.0.0.0', http_only=False):
+        self.http_only = http_only
         self.root = root.resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         (self.root / 'instances').mkdir(exist_ok=True)
@@ -83,7 +84,8 @@ class Archive:
             db.execute('CREATE INDEX IF NOT EXISTS study_index ON instances(study)')
             db.execute('CREATE TABLE IF NOT EXISTS opened (study TEXT PRIMARY KEY, stamp INTEGER NOT NULL)')
             db.execute('CREATE TABLE IF NOT EXISTS pending_delete (path TEXT PRIMARY KEY, size INTEGER NOT NULL)')
-        self.cleanup_deleted()
+        if not self.http_only:
+            self.cleanup_deleted()
 
     @contextmanager
     def connect(self):
@@ -109,7 +111,7 @@ class Archive:
         return {'aeTitle': title, 'port': port, 'enabled': config.get('enabled', True)}
 
     def start(self):
-        if not self.config['enabled']:
+        if self.http_only or not self.config['enabled']:
             return
         ae = AE(ae_title=self.config['aeTitle'])
         ae.require_called_aet = True
@@ -131,6 +133,8 @@ class Archive:
             self.server = None
 
     def configure(self, payload):
+        if self.http_only:
+            raise ValueError('PACS qəbuledicisinin ayarlarını əsas RADAZ proqramında dəyişin')
         config = self.validate(payload)
         with self.lock:
             old = self.config.copy()
@@ -221,9 +225,9 @@ class Archive:
 
     def instances(self, study):
         with self.connect() as db:
-            rows = db.execute('SELECT sop,metadata FROM instances WHERE study=?', (uid(study),)).fetchall()
+            rows = db.execute('SELECT sop,size,metadata FROM instances WHERE study=?', (uid(study),)).fetchall()
         return sorted([{'uid': row['sop'], 'series': json.loads(row['metadata'])['seriesUID'],
-                        'number': json.loads(row['metadata'])['instanceNumber']} for row in rows],
+                        'number': json.loads(row['metadata'])['instanceNumber'], 'size': row['size']} for row in rows],
                       key=lambda item: (item['series'], item['number']))
 
     def deletion_path(self, relative):
@@ -563,14 +567,16 @@ def main():
     # AppData can be silently redirected into the launcher's package cache.
     parser.add_argument('--data-dir', type=Path, default=Path.home() / 'Documents' / 'RADAZ-Archive')
     parser.add_argument('--http-port', type=int, default=8766)
+    parser.add_argument('--http-only', action='store_true', help='Serve the local archive without starting or reconfiguring the PACS receiver')
     args = parser.parse_args()
-    archive = Archive(args.data_dir)
+    archive = Archive(args.data_dir, http_only=args.http_only)
     from radaz_removable import RemovableMedia
     removable = RemovableMedia()
     http = ThreadingHTTPServer(('127.0.0.1',args.http_port),handler_for(archive, removable))
     try:
         try:
-            archive.start()
+            if not args.http_only:
+                archive.start()
         except OSError:
             archive.error = 'DICOM portu məşğuldur; arxiv ayarlarında başqa port seçin'
         http.serve_forever()

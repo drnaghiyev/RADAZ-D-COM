@@ -1,4 +1,5 @@
 import type { ArchiveStudy } from './local-archive';
+import { prefetchOrdered } from './import-pipeline.ts';
 
 export type ArchiveReceiverStatus = {
   capabilities?: string[];
@@ -28,7 +29,7 @@ export const configureReceiver = async (settings: Pick<ArchiveReceiverStatus, 'a
   (await request('/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings) })).json();
 export type ArchiveBatch = (files: File[], pendingSeries?: ReadonlySet<string>) => Promise<void>;
 export async function diskFiles(study: string, onProgress?: (done: number, total: number) => void, onBatch?: ArchiveBatch): Promise<File[]> {
-  const items: { uid: string; series?: string }[] = await (await request(`/instances?study=${encodeURIComponent(study)}`)).json();
+  const items: { uid: string; series?: string; size?: number }[] = await (await request(`/instances?study=${encodeURIComponent(study)}`)).json();
   const files: File[] = [];
   let batch: File[] = [];
   const remaining = new Map<string,number>();
@@ -38,9 +39,11 @@ export async function diskFiles(study: string, onProgress?: (done: number, total
     if(onBatch&&batch.length){await onBatch(batch,completeCatalog?new Set([...remaining].filter(([,count])=>count>0).map(([uid])=>uid)):undefined);batch=[];}
   };
   onProgress?.(0, items.length);
-  for (const item of items) {
+  for await (const {item, file} of prefetchOrdered(items, async item => {
     const response = await request(`/file/${encodeURIComponent(item.uid)}`, {}, 60000);
-    files.push(new File([await response.blob()], `${item.uid}.dcm`, { type: 'application/dicom' }));
+    return {item, file:new File([await response.blob()], `${item.uid}.dcm`, { type: 'application/dicom' })};
+  }, 4, item => item.size || 32*1024*1024, 32*1024*1024)) {
+    files.push(file);
     batch.push(files[files.length-1]);
     if(item.series)remaining.set(item.series,remaining.get(item.series)!-1);
     // Publish the last slice of a series before requesting the next series.

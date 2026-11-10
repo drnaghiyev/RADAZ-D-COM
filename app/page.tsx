@@ -45,6 +45,8 @@ import { ArrowUpRight, Pencil, MoveVertical, Eye, EyeOff, Download, PanelLeftClo
 import { addLocalDicom, registerDiskDicom, getOriginalDicom, getDiskDicomSource, registerLocalDicom, shareLocalDicoms, borrowLocalDicoms, getSeriesVolume, createMprStacks, createObliqueMprStacks, getDefaultWindow, getLocalizerGeometry, getMprOrientations, getViewer, releaseLocalDicoms, rotateMprOrientation, thumbnailLocalDicom, loadDicomThumbnail, type MprOrientations, type MprMode, type MprSettings } from '@/lib/cornerstone';
 import { closestSlice, sameCoordinateSpace, normalOf, planeLabel, intersectPlanes, type Point3 } from '@/lib/localizer';
 import { iterateSources, filesFromDrop } from '@/lib/import-sources';
+import { prefetchOrdered } from '@/lib/import-pipeline';
+import { NativeVolumeButton } from '@/components/native-volume-button';
 import { parseDicomFile } from '@/lib/dicom-file';
 import { getArchiveFiles, saveArchiveFiles } from '@/lib/local-archive';
 import { watchRemovableMedia, type MediaImage, type MediaProgress } from '@/lib/removable-media';
@@ -345,7 +347,9 @@ function ViewportPane({ onHover, projectionViews, anatomyControl, anatomyVolume,
 
   useEffect(() => {
     if (!enabled || !groupRef.current) return;
+    let cancelled = false;
     void getViewer().then(({ tools }) => {
+      if (cancelled) return;
       const mapping: Record<Tool, string> = {
         'anatomy-volume':'', 'anatomy-auto':'', anatomy: '', scroll: '', arrow: '', pencil: '', cursor3d: '', wl: tools.WindowLevelTool.toolName, pan: tools.PanTool.toolName, zoom: tools.ZoomTool.toolName,
         length: tools.LengthTool.toolName, angle: tools.AngleTool.toolName, arch: '',
@@ -356,13 +360,26 @@ function ViewportPane({ onHover, projectionViews, anatomyControl, anatomyVolume,
       if (!group) return;
       if (elementRef.current) cancelMeasurementInteraction(group, elementRef.current);
       Object.values(mapping).filter(Boolean).forEach(name => limited ? group.setToolDisabled(name) : group.setToolPassive(name, { removeAllBindings: true }));
-      if (limited) return;
       // Pan/zoom use the container pointer handler, including touch and pen.
       // Do not also run Cornerstone touch gestures for the same contact.
-      if (mapping[tool] && tool !== 'pan' && tool !== 'zoom' && tool !== 'erase') group.setToolActive(mapping[tool], { bindings: [{ mouseButton: tools.Enums.MouseBindings.Primary }, { numTouchPoints: 1 }] });
+      if (!limited && mapping[tool] && tool !== 'pan' && tool !== 'zoom' && tool !== 'erase') group.setToolActive(mapping[tool], { bindings: [{ mouseButton: tools.Enums.MouseBindings.Primary }, { numTouchPoints: 1 }] });
+      // Custom pointer/SVG tools do not activate a Cornerstone primary tool, so
+      // its old cursor otherwise survives switching from a measurement or WW/WL.
+      // Keep the canvas and all overlay layers on the same selected-tool cursor.
+      const standardCursor = limited ? 'default' : tool === 'pan' ? 'grab' : tool === 'zoom' ? 'zoom-in' : tool === 'scroll' ? 'ns-resize' : 'crosshair';
+      const cursorName = mapping[tool] || ({arrow:'ArrowAnnotate',pencil:'FreehandROI',arch:'Angle',hu:'Probe',deviation:'Height'} as Partial<Record<Tool,string>>)[tool];
+      const toolCursor = !limited && cursorName && tool !== 'pan' && tool !== 'zoom'
+        ? tools.cursors.SVGMouseCursor.getDefinedCursor(cursorName, true) : undefined;
+      const nextCursor = toolCursor || tools.cursors.MouseCursor.getDefinedCursor(standardCursor)!;
+      if (elementRef.current) tools.cursors.elementCursor.initElementCursor(elementRef.current, nextCursor);
+      if (containerRef.current) {
+        containerRef.current.style.setProperty('--viewer-tool-cursor', nextCursor.getStyleProperty());
+        containerRef.current.dataset.measurementHover = 'false';
+      }
       // Middle-button pan and secondary-button zoom are handled on the viewport
       // container so they work over both Cornerstone and SVG annotations.
     });
+    return () => { cancelled = true; };
   }, [enabled, tool, limited]);
 
   useEffect(() => {
@@ -808,11 +825,15 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       for(const [key,record] of found){record.ordered=record.ordered.filter(item=>item.id!==imageId);if(!record.ordered.length)found.delete(key);}
       releaseLocalDicoms([imageId]);
     };
-    for (const file of files) {
+    for await (const {file, bytes, readError} of prefetchOrdered(files, async file => {
+      try { return {file, bytes: file.name.split('/').pop()?.toUpperCase() === 'DICOMDIR' ? null : new Uint8Array(await file.arrayBuffer()), readError: undefined}; }
+      catch (readError) { return {file, bytes: null, readError}; }
+    }, 4, file => file.size, 16*1024*1024)) {
       if (!current()) { discardUnpublished(); return false; }
       if (file.name.split('/').pop()?.toUpperCase() === 'DICOMDIR') { ignored++; continue; }
       try {
-        const bytes = new Uint8Array(await file.arrayBuffer());
+        if (readError) throw readError;
+        if (!bytes) continue;
         if (!current()) { discardUnpublished(); return false; }
         const ds = parseDicomFile(bytes);
         const get = (tag: string) => ds.string(tag)?.trim() || '';
@@ -1151,7 +1172,9 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       try {
         for await(const item of iterateSources(sources,message=>setImportProgress(current=>({...current!,phase:message})))){
           last=item;batch.push(item.file);bytes+=item.file.size;
-          if(batch.length>=32||bytes>=32*1024*1024)await flush();
+          // Show the first source immediately; do not wait for another 31 CD
+          // reads or ZIP inflations before the first patient/series appears.
+          if(processed===0||batch.length>=32||bytes>=32*1024*1024)await flush();
           else progress('Fayllar hazırlanır');
         }
         await flush();setImportQueue([]);setImportOpen(false);setStatus(successful?`${processed} fayl emal edildi. İdxal tamamlandı.`:'Uyğun DICOM görüntüsü tapılmadı. Əvvəlki müayinə saxlanıldı.');
@@ -1426,7 +1449,8 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
  {(['COR','SAG','AX'] as const).map(plane=><DropdownMenuItem toolbarId={`mpr-${plane}`} key={plane} onSelect={()=>void reformatPane(plane)}>{{AX:'Axial',COR:'Coronal',SAG:'Sagittal'}[plane]}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu></div>
         <div className="workspace-split" key="3d"><button type="button" disabled={limited} title={tr('ui.3d_volume_rendering_8b54e')} aria-label={tr('ui.3d_volume_rendering_8b54e')} onClick={()=>openDetached('3d')}><b className="mode-letter-icon">3D</b></button><DropdownMenu><DropdownMenuTrigger asChild><button className="workspace-options" aria-label="3D açılış seçimləri" disabled={limited}><ChevronDown/></button></DropdownMenuTrigger><DropdownMenuContent>
  <DropdownMenuItem toolbarId="3d-main" onSelect={()=>{setRecordsPage(null);setInlinePlanes(null);setWorkspace('3d');}}>Əsas viewer-də aç</DropdownMenuItem>
- <DropdownMenuItem toolbarId="3d-window" onSelect={()=>openDetached('3d')}>Ayrı pəncərədə aç</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>
+ <DropdownMenuItem toolbarId="3d-window" onSelect={()=>openDetached('3d')}>Ayrı pəncərədə aç</DropdownMenuItem>
+ <NativeVolumeButton menuItem seriesUID={currentSeries?.sourceId || currentSeries?.id}/></DropdownMenuContent></DropdownMenu></div>
         <button type="button" disabled={limited} title={tr('ui.ai_assistant_eb79d')} aria-label={tr('ui.ai_assistant_eb79d')} onClick={openReport}><Sparkles size={18}/><span>{tr('ui.ai_assistant_eb79d')}</span></button>
         <button type="button" title="RADAZ Voice" aria-label="RADAZ Voice" onClick={()=>{const win=window.open("https://radaz.space/voice/","radaz-cloud-voice","popup");if(win)win.focus();else setStatus("RADAZ Voice pəncərəsi açıla bilmədi");}}><Mic size={18}/><span>RADAZ Voice</span></button>
         <div className="workspace-split" key="archive"><button type="button" title={tr('ui.local_archive_c13fe')} aria-label={tr('ui.local_archive_c13fe')} onClick={async () => { if (!await openRecordsWindow('archive')) setStatus('Local arxiv vərəqəsi açıla bilmədi'); }}><Database size={18}/><span>{tr('ui.local_archive_c13fe')}</span></button><DropdownMenu><DropdownMenuTrigger asChild><button className="workspace-options" aria-label="archive açılış seçimləri"><ChevronDown/></button></DropdownMenuTrigger><DropdownMenuContent><DropdownMenuItem toolbarId="archive-main" onSelect={()=>setRecordsPage('archive')}>Əsas viewer-də aç</DropdownMenuItem><DropdownMenuItem toolbarId="archive-window" onSelect={()=>void openRecordsWindow('archive')}>Ayrı pəncərədə aç</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>

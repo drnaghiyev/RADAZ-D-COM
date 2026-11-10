@@ -1,3 +1,5 @@
+import { prefetchOrdered } from './import-pipeline.ts';
+
 export type SourceFile = {file:File;source:string;sourceIndex:number;sourceCount:number;entryIndex:number;entryCount:number};
 /** Decompress one member at a time; the consumer applies backpressure. */
 export async function* iterateSources(files:File[],onProgress:(message:string)=>void):AsyncGenerator<SourceFile> {
@@ -61,7 +63,14 @@ async function readEntry(entry: FileSystemEntry): Promise<File[]> {
     children.push(...chunk);
   }
   const files:File[]=[];
-  for(const child of children)for(const file of await readEntry(child))files.push(file);
+  for(let index=0;index<children.length;){
+    // Open a bounded run of file handles together. Descend directories in
+    // order so nested folders cannot multiply the concurrent read limit.
+    if(!children[index].isFile){files.push(...await readEntry(children[index++]));continue;}
+    let end=index+1;while(end<children.length&&children[end].isFile)end++;
+    for await(const group of prefetchOrdered(children.slice(index,end),readEntry,8))files.push(...group);
+    index=end;
+  }
   return files;
 }
 

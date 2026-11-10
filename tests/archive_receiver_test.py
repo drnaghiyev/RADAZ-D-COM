@@ -64,6 +64,19 @@ class ReceiverTests(unittest.TestCase):
         ae.add_requested_context(Verification)
         return ae.associate('127.0.0.1', self.port, ae_title=called)
 
+    def test_http_only_companion_preserves_receiver_settings_and_does_not_listen(self):
+        before = (self.root / 'config.json').read_bytes()
+        with patch('radaz_archive.AE') as ae, patch.object(Archive, 'cleanup_deleted') as cleanup:
+            companion = Archive(self.root, bind='127.0.0.1', http_only=True)
+            companion.start()
+            with self.assertRaisesRegex(ValueError, 'əsas RADAZ'):
+                companion.configure({'aeTitle':'CHANGE','port':free_port(),'enabled':False})
+            companion.stop()
+            ae.assert_not_called()
+            cleanup.assert_not_called()
+        self.assertEqual((self.root / 'config.json').read_bytes(), before)
+        self.assertTrue(self.archive.status()['running'])
+
     def test_desktop_shutdown_rejects_browser_and_defers_active_association(self):
         with patch.dict('os.environ', {'RADAZ_DESKTOP_TOKEN':'synthetic-secret'}):
             for headers in ({},{'X-RADAZ-Desktop':'wrong'},{'X-RADAZ-Desktop':'synthetic-secret','Origin':'http://localhost:5173'}):
@@ -94,9 +107,14 @@ class ReceiverTests(unittest.TestCase):
         studies = self.archive.studies(); self.assertEqual(len(studies), 1)
         self.assertEqual(studies[0]['imageCount'], 1)
         with urlopen(self.url + '/file/' + str(self.ds.SOPInstanceUID)) as response:
-            saved = dcmread(io.BytesIO(response.read()))
+            payload = response.read()
+            saved = dcmread(io.BytesIO(payload))
         self.assertEqual(saved.PixelData, self.ds.PixelData)
         self.assertEqual(saved.file_meta.TransferSyntaxUID, ExplicitVRLittleEndian)
+        with urlopen(self.url + '/instances?study=' + str(self.ds.StudyInstanceUID)) as response:
+            instance = json.load(response)[0]
+            self.assertEqual(instance['size'], len(payload))
+            self.assertEqual(instance['series'], str(self.ds.SeriesInstanceUID))
         with urlopen(self.url + '/studies') as response:
             self.assertEqual(json.load(response)[0]['storage'], 'disk')
 

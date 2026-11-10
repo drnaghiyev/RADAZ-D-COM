@@ -4,6 +4,7 @@ import {useTranslation as useUiTranslation,translate as tr} from '@/lib/i18n';
 import {useEffect,useRef,useState} from 'react';
 import {createPortal} from 'react-dom';
 import {VolumeOrientation} from './volume-orientation';
+import {NativeVolumeButton} from './native-volume-button';
 import {createVolumeScalpel} from '@/lib/volume-scalpel';
 import {Box,Scissors,RotateCcw,Undo2,Rotate3D} from 'lucide-react';
 import {getViewer,getSeriesVolume} from '@/lib/cornerstone';
@@ -225,7 +226,7 @@ export function VolumePreview(props:Props){
  useEffect(()=>{if(ready){viewportRef.current?.resetCamera({resetPan:true,resetZoom:true});viewportRef.current?.render();}},[resetToken]);
  const startInteraction=()=>{settling.current=false;clearTimeout(finishTimer.current);if(!interacting.current){interacting.current=true;lastFrame.current=performance.now();applyQuality();}};
  const finishInteraction=()=>{adjust.current=null;clearTimeout(finishTimer.current);finishTimer.current=setTimeout(()=>{interacting.current=false;lastFrame.current=0;settling.current=true;applyQuality();viewportRef.current?.render();finishTimer.current=setTimeout(()=>{settling.current=false;applyQuality();viewportRef.current?.render();},400);},120);};
- return <section className="volume-workspace" aria-label={tr('ui.3d_volume_view_a64d6')}><div className="volume-stage cornerstone-volume-stage" data-ready={ready} onContextMenu={e=>e.preventDefault()}
+ return <section className="volume-workspace" aria-label={tr('ui.3d_volume_view_a64d6')}>{toolbarTarget&&createPortal(<NativeVolumeButton seriesUID={inputSeries?.id} preset={preset}/>,toolbarTarget)}<div className="volume-stage cornerstone-volume-stage" data-ready={ready} onContextMenu={e=>e.preventDefault()}
    onDoubleClick={()=>{viewportRef.current?.resetCamera({resetPan:true,resetZoom:true});viewportRef.current?.render();}}
    onPointerDownCapture={e=>{
     if((e.target as HTMLElement).closest('button,input,select,summary,.volume-orientation,.volume-scalpel-overlay'))return;

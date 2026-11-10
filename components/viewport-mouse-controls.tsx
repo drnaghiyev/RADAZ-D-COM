@@ -98,7 +98,7 @@ export function ViewportMouseControls(props:Props){
    event.preventDefault();event.stopPropagation();
    if(Math.hypot(event.clientX-gesture.x,event.clientY-gesture.y)>4)gesture.moved=true;
    if(!gesture.moved)return;
-   root.dataset.measurementHover='false';root.dataset.mouseGesture=gesture.button===1?'pan':tr('ui.zoom_d21bb');
+   root.dataset.measurementHover='false';root.dataset.mouseGesture=gesture.button===1?'pan':'zoom';
    if(gesture.button===2){
     viewport.setCamera({parallelScale:Math.max(.00001,Math.min(1e8,gesture.scale*Math.exp((event.clientY-gesture.y)*.008)))});
    }else{
@@ -133,7 +133,7 @@ export function ViewportMouseControls(props:Props){
   root.addEventListener('mousedown',mouseDown,true);window.addEventListener('blur',blur);
   return()=>{root.removeEventListener('contextmenu',preventContext);root.removeEventListener('touchmove',suppressEraseTouch,true);root.removeEventListener('touchstart',suppressEraseTouch,true);root.removeEventListener('pointerdown',down,true);root.removeEventListener('pointermove',move,true);root.removeEventListener('pointerup',end,true);
    root.removeEventListener('pointercancel',end,true);root.removeEventListener('pointerleave',leave);root.removeEventListener('mousedown',mouseDown,true);window.removeEventListener('blur',blur);blur();};
- },[props.container,props.element,props.viewport,props.imageId]);
+ },[props.container,props.element,props.viewport,props.imageId,props.tool,props.disabled]);
  useEffect(()=>{
   if(!menu)return;
   const outside=(e:Event)=>{if(!(e.target instanceof Element)||!e.target.closest('.measurement-menu'))setMenu(null);};

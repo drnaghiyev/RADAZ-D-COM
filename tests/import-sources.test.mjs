@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import JSZip from 'jszip';
 import { expandSources, filesFromDrop, iterateSources } from '../lib/import-sources.ts';
 import { storedRar } from './rar-fixture.mjs';
+import { setTimeout as delay } from 'node:timers/promises';
 
 test('ZIP and RAR preserve nested, extensionless DICOM bytes alongside ordinary files', async () => {
   const bytes = Buffer.from('Synthetic fixture bytes'), direct = new File([bytes], 'DIRECT');
@@ -49,4 +50,14 @@ test('ZIP member processing applies consumer backpressure', async () => {
   assert.equal(first.value.entryCount,2);assert.equal(first.value.entryIndex,0);
   assert.equal((await iterator.next()).value.file.name,'b/two');
   assert.equal((await iterator.next()).done,true);
+});
+
+test('directory file handles are read concurrently in bounded source order',async()=>{
+  let active=0,peak=0;
+  const entry=name=>({isFile:true,file(resolve){active++;peak=Math.max(peak,active);void delay(3).then(()=>{active--;resolve(new File([name],name));});}});
+  const directory=children=>({isFile:false,createReader(){let done=false;return {readEntries(resolve){resolve(done?[]:children);done=true;}};}});
+  const folder=directory([...Array.from({length:20},(_,i)=>entry(`A${i}`)),directory([entry('NESTED')]),entry('LAST')]);
+  const files=await filesFromDrop([{kind:'file',webkitGetAsEntry:()=>folder,getAsFile:()=>null}],[]);
+  assert.deepEqual(files.map(f=>f.name),[...Array.from({length:20},(_,i)=>`A${i}`),'NESTED','LAST']);
+  assert.ok(peak>1&&peak<=8);assert.equal(active,0);
 });

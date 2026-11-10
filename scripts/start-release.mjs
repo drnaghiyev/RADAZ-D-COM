@@ -8,6 +8,7 @@ import {verifyClientFiles,verifyClientHttp} from './release-health.mjs';
 import {anatomyVolumeService} from './local-anatomy-volume.mjs';
 import {smartVolumeService} from './smart-volume-service.mjs';
 import {localAiRequest} from './local-ai-request.mjs';
+import {nativeVolumeService} from './native-volume-service.mjs';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 if(!existsSync(path.join(root,'dist/server/index.js')))throw new Error('Built application missing. Run START-RADAZ.cmd from a source checkout or extract the release ZIP.');
 const build=JSON.parse(readFileSync(path.join(root,'dist/server/radaz-build.json'),'utf8'));
@@ -17,6 +18,7 @@ const runtime={name:'RADAZ',version:build.product.version,buildId:build.buildId,
 const installRoot=process.env.RADAZ_INSTALL_ROOT;
 const anatomyVolume=anatomyVolumeService(root,installRoot,product);
 const smartVolume=smartVolumeService(root,installRoot);
+const nativeVolume=nativeVolumeService(root);
 function activeVersion(){try{return JSON.parse(readFileSync(path.join(installRoot,'active.json'),'utf8')).version;}catch{return null;}}
 function recordStartup(error,phase){
  const diagnostic={phase,type:error.name||'Error',message:error.message,version:runtime.version,buildId:runtime.buildId,at:Date.now()};
@@ -48,6 +50,7 @@ void (async()=>{
 })();
 const server=http.createServer((req,res)=>{
  const pathname=new URL(req.url,'http://localhost').pathname;
+ if(pathname.startsWith('/native-volume-api/')){void nativeVolume.handle(req,res);return;}
  if(pathname.startsWith('/smart-volume-api/')){void smartVolume.handle(req,res);return;}
  if(pathname.startsWith('/anatomy-volume/')){void anatomyVolume.handle(req,res);return;}
  if(pathname.startsWith('/local-archive-api/bridge/')&&!localAiRequest(req,['application/json','application/dicom'])){res.writeHead(403,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'RADAZBRIDGE göndərişini bu kompüterdəki RADAZ-da açın.'}));return;}
@@ -118,6 +121,10 @@ const server=http.createServer((req,res)=>{
  if((pathname.startsWith('/_next/static/')||pathname.startsWith('/dicom-codecs/'))&&!build.assets[pathname]){res.writeHead(404);res.end('Resource does not belong to this RADAZ build');return;}
  const archive=req.url==='/local-archive-api'||req.url.startsWith('/local-archive-api/');
  const headers={...req.headers,host:`127.0.0.1:${archive?archivePort:workerPort}`};
+ // Private preview shares the already running local archive, whose origin is
+ // fixed at 5173. Translate only same-origin loopback requests in opt-in mode.
+ if(archive&&process.env.RADAZ_LOCAL_PREVIEW==='1'&&['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress)&&
+    [`http://localhost:${port}`,`http://127.0.0.1:${port}`].includes(req.headers.origin))headers.origin='http://localhost:5173';
  if(!archive)delete headers['accept-encoding'];
  const upstream=http.request({hostname:'127.0.0.1',port:archive?archivePort:workerPort,path:archive?req.url.slice('/local-archive-api'.length)||'/':req.url,method:req.method,headers},reply=>{
   const responseHeaders={...reply.headers,'cache-control':'no-store','x-radaz-version':runtime.version,'x-radaz-build':runtime.buildId};
@@ -133,8 +140,8 @@ const server=http.createServer((req,res)=>{
  upstream.on('error',()=>{if(!res.headersSent)res.writeHead(503,{'Content-Type':'text/plain; charset=utf-8','Retry-After':'3'});res.end('RADAZ xidməti hazırlanır. Bir neçə saniyə sonra səhifəni yeniləyin.');});
  req.on('aborted',()=>upstream.destroy());req.pipe(upstream);
 });
-const stop=()=>{if(closing)return;closing=true;smartVolume.stop();anatomyVolume.stop();server.close();if(process.platform==='win32'&&worker.pid)spawnSync('taskkill.exe',['/PID',String(worker.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});else worker.kill();setTimeout(()=>process.exit(),1500).unref();};
+const stop=()=>{if(closing)return;closing=true;nativeVolume.stop();smartVolume.stop();anatomyVolume.stop();server.close();if(process.platform==='win32'&&worker.pid)spawnSync('taskkill.exe',['/PID',String(worker.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});else worker.kill();setTimeout(()=>process.exit(),1500).unref();};
 worker.on('exit',code=>{if(!closing){recordStartup(Error(`RADAZ web runtime exited (${code})${startupStderr?'\n'+startupStderr:''}`),'worker-exit');stop();process.exitCode=code||1;}});worker.on('error',error=>{recordStartup(error,'worker-start');stop();});
 server.on('error',error=>{recordStartup(error,'gateway-start');stop();process.exitCode=1;});
 process.on('SIGINT',stop);process.on('SIGTERM',stop);
-server.listen(port,'0.0.0.0',()=>console.log(`RADAZ: http://localhost:${port}`));
+server.listen(port,process.env.RADAZ_LOCAL_PREVIEW==='1'?'127.0.0.1':'0.0.0.0',()=>console.log(`RADAZ: http://localhost:${port}`));
