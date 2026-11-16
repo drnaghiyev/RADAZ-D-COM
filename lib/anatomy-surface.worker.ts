@@ -6,6 +6,7 @@ self.onmessage=(event:MessageEvent)=>{
  const {mask,geometry,labels}=event.data as {mask:Uint8Array;geometry:{dimensions:number[];spacing:number[];origin:number[];direction:number[]};labels:number[]};
  try{
   const [nx,ny,nz]=geometry.dimensions;
+  if(labels.length===0){self.postMessage({done:true});return;}
   if(mask.length!==nx*ny*nz||labels.length>12)throw Error('invalid_surface');
   for(const label of labels){
    const low=[nx,ny,nz],high=[-1,-1,-1];

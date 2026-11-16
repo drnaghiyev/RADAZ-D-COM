@@ -13,7 +13,7 @@ import {anatomyAutoError, type AnatomyPixels} from './anatomy-auto';
 import type {AnatomyVolumeGeometry} from './anatomy-volume';
 
 type DataSet = ReturnType<typeof dicomParser.parseDicom>;
-type RecordItem = { dataSet: DataSet; pixels: Int16Array | Float32Array; rows: number; columns: number; bits: number; min: number; max: number };
+type RecordItem = { dataSet: DataSet; pixels: Int16Array | Float32Array | Uint8Array; color?:boolean; frameIndex?:number; rows: number; columns: number; bits: number; min: number; max: number };
 const records = new Map<string, RecordItem>();
 /** Decoded, rescaled pixels, independent of viewer WW/WL, flips and annotations.
  * Only allow original monochrome projection images; send no identifying tags.
@@ -92,7 +92,7 @@ export function shareLocalDicoms(imageIds:string[]):SharedDicom[] {
   }}));
 }
 export function borrowLocalDicoms(images:SharedDicom[]):string[] {
-  const localRecord=(record:RecordItem):RecordItem=>({...record,pixels:record.bits===16
+  const localRecord=(record:RecordItem):RecordItem=>({...record,pixels:record.color?new Uint8Array(record.pixels.buffer,record.pixels.byteOffset,record.pixels.length):record.bits===16
     ?new Int16Array(record.pixels.buffer,record.pixels.byteOffset,record.pixels.length)
     :new Float32Array(record.pixels.buffer,record.pixels.byteOffset,record.pixels.length)});
   return images.map(image=>{
@@ -140,6 +140,7 @@ function values(ds: DataSet, tag: string, fallback: number[]) {
 }
 
 function defaultWindow(item: RecordItem): { wl: number; ww: number } {
+  if(item.color)return {wl:127.5,ww:255};
   const ds = item.dataSet;
   const centers = values(ds, 'x00281050', []);
   const widths = values(ds, 'x00281051', []);
@@ -226,6 +227,7 @@ export function thumbnailLocalDicom(imageId: string): string | undefined {
     const value = invert ? 255 - level : level;
     const offset = (y * width + x) * 4;
     image.data[offset] = image.data[offset + 1] = image.data[offset + 2] = value;
+    if(item.color){const i=(Math.min(rows-1,Math.floor((y+.5)*rows/height))*columns+Math.min(columns-1,Math.floor((x+.5)*columns/width)))*3;for(let c=0;c<3;c++)image.data[offset+c]=pixels[i+c];}
     image.data[offset + 3] = 255;
   }
   context.putImageData(image, 0, 0);
@@ -256,11 +258,12 @@ function metadata(type: string, imageId: string) {
       sliceThickness: asNumber(ds, 'x00180050', 1), usingDefaultValues: !ds.string('x00280030') };
   }
   if (type === m.IMAGE_PIXEL) return { rows, columns, bitsAllocated: bits, bitsStored: bits,
-    highBit: bits - 1, pixelRepresentation: 1,
-    samplesPerPixel: 1, photometricInterpretation: ds.string('x00280004') || 'MONOCHROME2' };
+    highBit: bits - 1, pixelRepresentation: item.color ? 0 : 1,
+    samplesPerPixel: item.color?3:1, photometricInterpretation: item.color?'RGB':ds.string('x00280004') || 'MONOCHROME2' };
   if (type === m.VOI_LUT) { const { wl, ww } = defaultWindow(item); return { windowCenter: [wl], windowWidth: [ww] }; }
   if (type === m.MODALITY_LUT) return { rescaleIntercept: 0, rescaleSlope: 1 };
   if (type === 'generalImageModule') return { instanceNumber: asNumber(ds, 'x00200013', 0) };
+  if (type === 'generalStudyModule') return { studyInstanceUID: ds.string('x0020000d') };
   if (type === m.GENERAL_SERIES) return { modality: ds.string('x00080060') || 'OT', seriesInstanceUID: ds.string('x0020000e') };
   if (type === m.SOP_COMMON) return { sopClassUID: ds.string('x00080016'), sopInstanceUID: ds.string('x00080018') };
 }
@@ -280,9 +283,9 @@ function loadImage(imageId: string): core.Types.IImageLoadObject {
   const { wl: wc, ww } = defaultWindow(item);
   const geometry = derived.get(imageId)?.geometry || geometryOverrides.get(imageId);
   const spacing = geometry ? [geometry.rowSpacing, geometry.columnSpacing] : values(ds, 'x00280030', [1, 1]);
-  const voxelManager = core.utilities.VoxelManager.createImageVoxelManager({ scalarData: pixels, width: columns, height: rows, numberOfComponents: 1 });
+  const voxelManager = core.utilities.VoxelManager.createImageVoxelManager({ scalarData: pixels, width: columns, height: rows, numberOfComponents: item.color?3:1 });
   const image = {
-    imageId, rows, columns, width: columns, height: rows, color: false,
+    imageId, rows, columns, width: columns, height: rows, color: !!item.color, rgba:false, numberOfComponents:item.color?3:1,
     dataType: pixels.constructor.name, sizeInBytes: pixels.byteLength,
     rowPixelSpacing: spacing[0], columnPixelSpacing: spacing[1],
     minPixelValue: item.min, maxPixelValue: item.max,
@@ -299,11 +302,15 @@ function loadCachedVolumeSlice(imageId: string): core.Types.IImageLoadObject {
   return image ? { promise: Promise.resolve(image) } : { promise: Promise.reject(new Error(`3D həcm kəsiti cache-də tapılmadı: ${imageId}`)) };
 }
 
-export function registerLocalDicom(bytes: Uint8Array, ds: DataSet): string {
+export function registerLocalDicomFrames(bytes:Uint8Array,ds:DataSet):string[]{
+ const frames=Number(ds.string('x00280008')||1);if(!Number.isSafeInteger(frames)||frames<1)throw Error('DICOM kadr sayı düzgün deyil');
+ return Array.from({length:frames},(_,frame)=>registerLocalDicom(bytes,ds,frame));
+}
+export function registerLocalDicom(bytes: Uint8Array, ds: DataSet, frameIndex=0): string {
   const rows=ds.uint16('x00280010')||0,columns=ds.uint16('x00280011')||0;
   if(!rows||!columns||!ds.elements.x7fe00010)throw Error('DICOM piksel məlumatı tapılmadı');
   const id=`localdicom:${serial++}`;
-  records.set(id,{dataSet:ds,pixels:new Float32Array(0),rows,columns,bits:32,min:-1024,max:3071});
+  records.set(id,{dataSet:ds,pixels:new Float32Array(0),frameIndex,rows,columns,bits:32,min:-1024,max:3071});
   pendingDicoms.set(id,{bytes,ds});return id;
 }
 function decodeRegisteredDicom(id:string):Promise<string> {
@@ -329,6 +336,7 @@ export async function addLocalDicom(bytes: Uint8Array, ds: DataSet): Promise<str
 }
 async function decodeLocalDicom(bytes: Uint8Array, ds: DataSet, imageId: string): Promise<string> {
   const decodeStart = performance.now();
+  const frameIndex=records.get(imageId)?.frameIndex||0;
   const syntax = ds.string('x00020010') || '1.2.840.10008.1.2.1';
   const rows = ds.uint16('x00280010') || 0;
   const columns = ds.uint16('x00280011') || 0;
@@ -338,18 +346,32 @@ async function decodeLocalDicom(bytes: Uint8Array, ds: DataSet, imageId: string)
   const signed = ds.uint16('x00280103') === 1;
   const pixelElement = ds.elements.x7fe00010;
   const photometric = ds.string('x00280004') || 'MONOCHROME2';
+  const samples=ds.uint16('x00280002')||1,color=samples===3&&bits===8&&['RGB','YBR_FULL','YBR_FULL_422','YBR_RCT','YBR_ICT'].includes(photometric);
+  if(color){
+    dicomDecoder ??= import('@cornerstonejs/dicom-image-loader');const decoder=await dicomDecoder;
+    const frame=decoder.wadouri.getPixelData(ds,frameIndex);if(!frame)throw Error('Ultrasəs kadrı tapılmadı');
+    const data=await decoder.decodeImageFrame({rows,columns,bitsAllocated:bits,bitsStored:storedBits,pixelRepresentation:0,samplesPerPixel:samples,photometricInterpretation:photometric,planarConfiguration:ds.uint16('x00280006')||0,pixelData:undefined,imageId},syntax,frame,{wasmBasePath:'/dicom-codecs'},{preScale:{enabled:false}},undefined);
+    const pixels=new Uint8Array(rows*columns*3);
+    // JPEG decoders may already return interleaved RGB/RGBA while retaining YBR metadata.
+    const size=rows*columns, decoded=data.pixelData;
+    if(decoded.length===size*4){for(let i=0;i<size;i++)pixels.set(decoded.subarray(i*4,i*4+3),i*3);}
+    else if(photometric==='YBR_FULL_422'&&decoded.length===size*3)pixels.set(decoded);
+    else decoder.convertColorSpace(data,pixels,false);
+    if(!records.has(imageId))throw new DOMException('DICOM import cancelled','AbortError');
+    records.set(imageId,{dataSet:ds,pixels,color:true,frameIndex,rows,columns,bits:8,min:0,max:255});viewerPerformance.decodeCount++;viewerPerformance.decodeMs+=performance.now()-decodeStart;return imageId;
+  }
   if (!rows || !columns || ![8, 16].includes(bits) || storedBits < 1 || storedBits > bits || highBit >= bits || highBit < storedBits - 1 ||
       ds.uint16('x00280002') !== 1 || !['MONOCHROME1', 'MONOCHROME2'].includes(photometric) || !pixelElement)
     throw new Error('Bu görüntünün piksel formatı dəstəklənmir (monoxrom 8/16-bit tələb olunur)');
   const uncompressed = ['1.2.840.10008.1.2', '1.2.840.10008.1.2.1', '1.2.840.10008.1.2.2'].includes(syntax);
-  const byteLength = rows * columns * (bits / 8);
+  const byteLength = rows * columns * (bits / 8),offset=pixelElement.dataOffset+frameIndex*byteLength;
   let stored: Uint8Array | Uint16Array | Int16Array | Float32Array;
   if (uncompressed && !pixelElement.encapsulatedPixelData) {
-    if (pixelElement.length < byteLength || pixelElement.dataOffset + byteLength > bytes.length) throw new Error('Piksel məlumatı natamamdır');
-    const view = new DataView(bytes.buffer, bytes.byteOffset + pixelElement.dataOffset, byteLength);
-    if(bits===8) stored=bytes.subarray(pixelElement.dataOffset,pixelElement.dataOffset+byteLength);
-    else if(syntax!=='1.2.840.10008.1.2.2' && (bytes.byteOffset+pixelElement.dataOffset)%2===0)
-      stored=new Uint16Array(bytes.buffer,bytes.byteOffset+pixelElement.dataOffset,rows*columns);
+    if (pixelElement.length < (frameIndex+1)*byteLength || offset + byteLength > bytes.length) throw new Error('Piksel məlumatı natamamdır');
+    const view = new DataView(bytes.buffer, bytes.byteOffset + offset, byteLength);
+    if(bits===8) stored=bytes.subarray(offset,offset+byteLength);
+    else if(syntax!=='1.2.840.10008.1.2.2' && (bytes.byteOffset+offset)%2===0)
+      stored=new Uint16Array(bytes.buffer,bytes.byteOffset+offset,rows*columns);
     else { stored=new Uint16Array(rows*columns); for(let i=0;i<stored.length;i++)stored[i]=view.getUint16(i*2,syntax!=='1.2.840.10008.1.2.2'); }
   } else {
     // The DICOM loader supplies JPEG, JPEG-LS, JPEG 2000 and RLE codecs.
@@ -358,7 +380,7 @@ async function decodeLocalDicom(bytes: Uint8Array, ds: DataSet, imageId: string)
     dicomDecoder ??= import('@cornerstonejs/dicom-image-loader');
     const decoder = await dicomDecoder;
     try {
-      const frame = decoder.wadouri.getPixelData(ds, 0);
+      const frame = decoder.wadouri.getPixelData(ds, frameIndex);
       if (!frame) throw new Error('Piksel kadrı tapılmadı');
       const image = await decoder.decodeImageFrame({ rows, columns, bitsAllocated: bits, bitsStored: storedBits,
         pixelRepresentation: signed ? 1 : 0, samplesPerPixel: 1, photometricInterpretation: photometric,
@@ -391,7 +413,7 @@ async function decodeLocalDicom(bytes: Uint8Array, ds: DataSet, imageId: string)
     if (value > max) max = value;
   }
   if(!records.has(imageId))throw new DOMException('DICOM import cancelled','AbortError');
-  records.set(imageId, { dataSet: ds, pixels, rows, columns, bits: useInt16 ? 16 : 32, min, max });
+  records.set(imageId, { dataSet: ds, pixels, frameIndex, rows, columns, bits: useInt16 ? 16 : 32, min, max });
   viewerPerformance.decodeCount++; viewerPerformance.decodeMs += performance.now() - decodeStart;
   return imageId;
 }

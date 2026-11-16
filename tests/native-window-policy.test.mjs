@@ -4,8 +4,8 @@ import vm from 'node:vm';
 import fs from 'node:fs';
 const source=fs.readFileSync('desktop/main.cjs','utf8');
 test('auxiliary and hosted Voice windows maximize without revealing a background main window',()=>{
- const make=()=>({maximized:0,webContents:{id:1,setWindowOpenHandler(){},on(){}},setMenuBarVisibility(){},maximize(){this.maximized++;},on(){}});
- const main=make(),context=vm.createContext({mainWindow:main,windows:new Set(),cloudWindows:new Set(),local:()=>true,cloudVoice:()=>true,external(){},path:{join:()=>''},runtime:'',URL});
+ const make=()=>({maximized:0,webContents:{id:1,setWindowOpenHandler(){},on(){}},setIcon(){},setMenuBarVisibility(){},maximize(){this.maximized++;},on(){}});
+ const main=make(),context=vm.createContext({mainWindow:main,windows:new Set(),cloudWindows:new Set(),local:()=>true,cloudVoice:()=>true,external(){},themeIcon:()=>'',path:{join:()=>''},runtime:'',URL});
  vm.runInContext(source.slice(source.indexOf('function configureCloud('),source.indexOf('const external='))+source.slice(source.indexOf('function configure(win)'),source.indexOf('async function waitForReady')),context);
  const child=make(),cloud=make();context.configure(main);context.configure(child);context.configureCloud(cloud);
  assert.equal(main.maximized,0);assert.equal(child.maximized,1);assert.equal(cloud.maximized,1);

@@ -1,6 +1,6 @@
 {
   "name": "RADAZ",
-  "version": "0.2.64",
+  "version": "0.2.72",
   "deltaOnlyUpdates": true,
   "channel": "preview",
   "owner": "Radioloq Rövşən Nağıyev",
@@ -19,4 +19,3 @@
   ],
   "localModules": []
 }
-

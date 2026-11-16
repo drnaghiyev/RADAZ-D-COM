@@ -79,13 +79,12 @@ try{
  await viewer.mouse.up({button:'right'});
  assert.equal(await pane.getAttribute('data-mouse-gesture'),null);
  console.log('PASS: native measurements, scroll, WW/WL, pan and zoom share selected cursor across canvas/overlays; stale hover clears; rapid changes and secondary zoom restore correctly');
- await viewer.getByRole('button',{name:'3D açılış seçimləri',exact:true}).click();
- await viewer.getByRole('menuitem',{name:'Native 3D · lokal desktop sınağı',exact:true}).click();
- await viewer.waitForTimeout(200);
- assert.ok(nativeRequest?.seriesUID?.startsWith('2.25.40'));assert.equal(nativeRequest.preset,'bone');
- assert.equal(await viewer.locator('.volume-stage').count(),0);
- assert.equal(context.pages().length,2);
- console.log('PASS: main 3D menu directly launches local native service without loading web volume/window');
+ const opened=context.waitForEvent('page');
+ await viewer.getByRole('button',{name:'3D həcm görüntüləmə',exact:true}).click();
+ const volume=await opened;await volume.locator('.sv-surface-canvas[data-ready=true][data-context-dimensions]').waitFor();
+ assert.equal(nativeRequest,null,'Restored web viewer must never request Qt');
+ assert.match(volume.url(),/\/3d\?handoff=/);assert.equal(context.pages().length,3);
+ console.log('PASS: primary 3D button opens the original web volume window; Qt is not called');
  assert.deepEqual(errors,[]);
 
 }catch(error){

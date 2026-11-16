@@ -4,7 +4,6 @@ import {useTranslation as useUiTranslation,translate as tr} from '@/lib/i18n';
 import {useEffect,useRef,useState} from 'react';
 import {createPortal} from 'react-dom';
 import {VolumeOrientation} from './volume-orientation';
-import {NativeVolumeButton} from './native-volume-button';
 import {createVolumeScalpel} from '@/lib/volume-scalpel';
 import {Box,Scissors,RotateCcw,Undo2,Rotate3D} from 'lucide-react';
 import {getViewer,getSeriesVolume} from '@/lib/cornerstone';
@@ -70,7 +69,7 @@ export function VolumePreview(props:Props){
   if(caps.tier==='low'&&interacting.current)selected='performance';
   if(caps.tier==='medium'&&selected==='ultra')selected='high';
   const config=qualityProfiles[selected],actor=viewport.getDefaultActor()?.actor,mapper=actor?.getMapper();
-  const spacing=volumeRef.current?.volume.spacing||[1,1,1];
+  const spacing=mapper?.getInputData()?.getSpacing()||volumeRef.current?.volume.spacing||[1,1,1];
   const preview=interacting.current;
   mapper?.setSampleDistance(Math.min(...spacing)*(preview?config.interaction:config.sample*Math.max(caps.tier==='low'?1:.5,currentSettings.sampling)));
   mapper?.setImageSampleDistance(preview?Math.max(3,config.imageSample):config.imageSample);
@@ -165,9 +164,11 @@ export function VolumePreview(props:Props){
     sourceWorker=new Worker(new URL(contextWorkerUrl,window.location.origin),{type:'module'});
     sourceWorker.onmessage=({data})=>{sourceWorker?.terminate();data.error?reject(Error(data.error)):resolve(data);};sourceWorker.onerror=()=>reject(Error('3D mənbə hazırlana bilmədi.'));
     controller.signal.addEventListener('abort',()=>{sourceWorker?.terminate();reject(Error('3D bağlandı.'));},{once:true});
-    sourceWorker.postMessage({geometry:{dimensions:[...current.volume.dimensions],spacing:[...current.volume.spacing],origin:[...current.volume.origin],direction:[...current.volume.direction]},values,quality:propsRef.current.settings.sourceQuality||'full'},[values.buffer]);
+    sourceWorker.postMessage({geometry:{dimensions:[...current.volume.dimensions],spacing:[...current.volume.spacing],origin:[...current.volume.origin],direction:[...current.volume.direction]},values,quality:propsRef.current.settings.sourceQuality||'auto'},[values.buffer]);
    });
    if(disposed)return;renderSource=createVolumeRenderSource(display);viewport.getDefaultActor().actor.setMapper(renderSource.mapper);
+   viewerPerformance.estimatedGpuBytes=display.values.byteLength;
+   if(display.dimensions[0]!==current.volume.dimensions[0]||display.dimensions[1]!==current.volume.dimensions[1])setNote(notices.concat(`${current.sourceSliceCount} kəsitin hamısı saxlanılır · X/Y ön baxışı: ${display.dimensions.join(' × ')}. Tam mənbə seçimi mövcuddur.`).join(' '));
    element.setAttribute('data-scalar-bytes',String(display.values.byteLength));element.setAttribute('data-render-mapper','shared-vtk');element.setAttribute('data-render-dimensions',display.dimensions.join(','));
    const renderer=viewport.getRenderer();renderer.removeAllLights();renderer.setAutomaticLightCreation(false);
    for(const config of volumeLights('studio')){const light=renderer.makeLight();if(currentSettingsHeadlight(propsRef.current.settings.lighting))light.setLightTypeToHeadLight();else light.setLightTypeToCameraLight();light.setPosition(...config.position);light.setFocalPoint(0,0,0);light.setIntensity(config.intensity);light.setColor(...config.color);renderer.addLight(light);lights.push(light);}
@@ -196,7 +197,7 @@ export function VolumePreview(props:Props){
    gl?.canvas.addEventListener('webglcontextlost',()=>{setError('GPU yaddaşı əlçatan deyil. Daha kiçik seriya açın və ya Performance seçin.');setReady(false);},{signal:controller.signal});
    // Anatomical anterior view (DICOM LPS), superior up, instead of the axial default.
    viewport.setCamera({viewPlaneNormal:[0,-1,0],viewUp:[0,0,1]});
-   applyRef.current();viewport.resetCamera({resetPan:true,resetZoom:true});viewport.render();
+   applyRef.current();renderer.resetCamera();renderer.resetCameraClippingRange();viewport.render();
    const group=tools.ToolGroupManager.createToolGroup(toolGroupId);group?.addTool(tools.TrackballRotateTool.toolName);group?.addTool(tools.PanTool.toolName);
    group?.setToolActive(tools.TrackballRotateTool.toolName,{bindings:[{mouseButton:tools.Enums.MouseBindings.Primary}]});
    group?.setToolActive(tools.PanTool.toolName,{bindings:[{mouseButton:tools.Enums.MouseBindings.Auxiliary}]});group?.addViewport(viewportId,engine.id);
@@ -223,11 +224,12 @@ export function VolumePreview(props:Props){
   return()=>{disposed=true;resources?.dispose();surfaceRef.current=null;};
  },[ready,surfaces,props.anatomy,props.anatomyAppearance,series?.id]);
  useEffect(()=>{const viewport=viewportRef.current,point=props.focusPoint;if(!ready||!viewport||!point)return;const camera=viewport.getCamera();viewport.setCamera({focalPoint:point,position:camera.position.map((n:number,i:number)=>n+point[i]-camera.focalPoint[i]) as [number,number,number]});viewport.render();},[props.focusPoint,ready]);
- useEffect(()=>{if(ready){viewportRef.current?.resetCamera({resetPan:true,resetZoom:true});viewportRef.current?.render();}},[resetToken]);
+ useEffect(()=>{if(ready)fitVolume();},[resetToken]);
+ const fitVolume=()=>{const viewport=viewportRef.current;if(!viewport)return;viewport.getRenderer().resetCamera();viewport.getRenderer().resetCameraClippingRange();viewport.render();};
  const startInteraction=()=>{settling.current=false;clearTimeout(finishTimer.current);if(!interacting.current){interacting.current=true;lastFrame.current=performance.now();applyQuality();}};
  const finishInteraction=()=>{adjust.current=null;clearTimeout(finishTimer.current);finishTimer.current=setTimeout(()=>{interacting.current=false;lastFrame.current=0;settling.current=true;applyQuality();viewportRef.current?.render();finishTimer.current=setTimeout(()=>{settling.current=false;applyQuality();viewportRef.current?.render();},400);},120);};
- return <section className="volume-workspace" aria-label={tr('ui.3d_volume_view_a64d6')}>{toolbarTarget&&createPortal(<NativeVolumeButton seriesUID={inputSeries?.id} preset={preset}/>,toolbarTarget)}<div className="volume-stage cornerstone-volume-stage" data-ready={ready} onContextMenu={e=>e.preventDefault()}
-   onDoubleClick={()=>{viewportRef.current?.resetCamera({resetPan:true,resetZoom:true});viewportRef.current?.render();}}
+ return <section className="volume-workspace" aria-label={tr('ui.3d_volume_view_a64d6')}><div className="volume-stage cornerstone-volume-stage" data-ready={ready} onContextMenu={e=>e.preventDefault()}
+   onDoubleClick={fitVolume}
    onPointerDownCapture={e=>{
     if((e.target as HTMLElement).closest('button,input,select,summary,.volume-orientation,.volume-scalpel-overlay'))return;
     startInteraction();const options=resolvedVolumeSettings(preset,settings);

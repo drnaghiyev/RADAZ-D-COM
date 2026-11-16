@@ -1,6 +1,7 @@
 import {contextVolume} from './context-volume';
+import {resolveVolumeSourceQuality} from '../volume-source-quality';
 self.onmessage=({data})=>{try{
- let result;if(data.quality==='full'){
+ let result;if(resolveVolumeSourceQuality(data.geometry.dimensions,data.quality)==='full'){
   let integral=true;for(let i=0;!(data.values instanceof Int16Array)&&i<data.values.length;i++){const v=data.values[i];if(!Number.isInteger(v)||v< -32768||v>32767){integral=false;break;}}
   const values=integral&&!(data.values instanceof Int16Array)?Int16Array.from(data.values):data.values;
   result={...data.geometry,values};

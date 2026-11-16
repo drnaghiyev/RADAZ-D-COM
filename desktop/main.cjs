@@ -1,4 +1,4 @@
-const {app,BrowserWindow,Menu,Tray,dialog,shell,session,webContents}=require('electron');
+const {app,BrowserWindow,Menu,Tray,dialog,shell,session,webContents,nativeTheme}=require('electron');
 const {spawn}=require('node:child_process');
 const {existsSync,mkdirSync,openSync,closeSync,readFileSync,appendFileSync}=require('node:fs');
 const path=require('node:path');
@@ -16,8 +16,15 @@ const windows=new Set();
 const local=url=>{try{return new URL(url).origin===origin;}catch{return false;}};
 const cloudVoice=url=>{try{return new URL(url).origin==='https://radaz.space';}catch{return false;}};
 const cloudWindows=new Set();
+function themeIcon(){const file=path.join(runtime,'public',(nativeTheme.shouldUseDarkColorsForSystemIntegratedUI??nativeTheme.shouldUseDarkColors)?'radaz-light.png':'radaz-dark.png');return existsSync(file)?file:path.join(runtime,'public/radaz.ico');}
+function refreshThemeIcons(){
+ const icon=themeIcon();for(const win of windows)if(!win.isDestroyed())win.setIcon(icon);tray?.setImage(icon);
+ if(process.platform==='win32')for(const link of [path.join(app.getPath('desktop'),'RADAZ.lnk'),path.join(app.getPath('appData'),'Microsoft/Windows/Start Menu/Programs/RADAZ.lnk')]){
+  if(existsSync(link))try{shell.writeShortcutLink(link,'update',{icon:icon.replace(/\.png$/,'.ico'),iconIndex:0});}catch{}
+ }
+}
 function configureCloud(win){
- windows.add(win);cloudWindows.add(win.webContents.id);win.setMenuBarVisibility(false);win.maximize();
+ windows.add(win);win.setIcon(themeIcon());cloudWindows.add(win.webContents.id);win.setMenuBarVisibility(false);win.maximize();
  const id=win.webContents.id;win.on('closed',()=>{windows.delete(win);cloudWindows.delete(id);});
  win.webContents.setWindowOpenHandler(({url})=>{if(cloudVoice(url)){void win.loadURL(url);return {action:'deny'};}external(url);return {action:'deny'};});
  for(const event of ['will-navigate','will-redirect'])win.webContents.on(event,(e,url)=>{if(!cloudVoice(url)){e.preventDefault();external(url);}});
@@ -25,12 +32,12 @@ function configureCloud(win){
 const external=url=>{try{if(['https:','http:','mailto:'].includes(new URL(url).protocol))void shell.openExternal(url);}catch{}};
 const show=()=>{if(mainWindow&&!mainWindow.isDestroyed()){if(mainWindow.isMinimized())mainWindow.restore();mainWindow.show();mainWindow.focus();}};
 function configure(win){
- windows.add(win);win.setMenuBarVisibility(false);if(win!==mainWindow)win.maximize();win.on('closed',()=>windows.delete(win));
+ windows.add(win);win.setIcon(themeIcon());win.setMenuBarVisibility(false);if(win!==mainWindow)win.maximize();win.on('closed',()=>windows.delete(win));
  win.webContents.setWindowOpenHandler(({url,frameName})=>{
   if(frameName==='radaz-cloud-voice'&&url==='https://radaz.space/voice/')return {action:'allow',overrideBrowserWindowOptions:{width:1280,height:900,minWidth:600,minHeight:600,autoHideMenuBar:true,title:'RADAZ Voice · sayt hesabı',webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,webSecurity:true}}};
   if(frameName==='radaz-system-report'&&local(url)&&new URL(url).pathname==='/report'){external(url);return {action:'deny'};}
   // Native window.open retains opener and BroadcastChannel for MPR/report handoffs.
-  if(local(url)||url==='about:blank'||url==='')return {action:'allow',overrideBrowserWindowOptions:{width:1500,height:980,minWidth:480,minHeight:400,autoHideMenuBar:true,icon:path.join(runtime,'public/radaz.ico'),webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,webSecurity:true}}};
+  if(local(url)||url==='about:blank'||url==='')return {action:'allow',overrideBrowserWindowOptions:{width:1500,height:980,minWidth:480,minHeight:400,autoHideMenuBar:true,icon:themeIcon(),webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,webSecurity:true}}};
   external(url);return {action:'deny'};
  });
  win.webContents.on('did-create-window',(child,details)=>{if(cloudVoice(details.url))configureCloud(child);else configure(child);});
@@ -107,11 +114,12 @@ async function boot(){
   return trusted&&['fullscreen','clipboard-sanitized-write','fileSystem'].includes(permission);
  });
  Menu.setApplicationMenu(null);
- mainWindow=new BrowserWindow({width:1500,height:980,minWidth:480,minHeight:400,title:'RADAZ',backgroundColor:'#071017',show:false,autoHideMenuBar:true,icon:path.join(runtime,'public/radaz.ico'),webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,webSecurity:true}});
+ mainWindow=new BrowserWindow({width:1500,height:980,minWidth:480,minHeight:400,title:'RADAZ',backgroundColor:'#071017',show:false,autoHideMenuBar:true,icon:themeIcon(),webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,webSecurity:true}});
  configure(mainWindow);mainWindow.on('close',event=>{if(!quitting){event.preventDefault();mainWindow.hide();}});
  void mainWindow.loadURL(origin).catch(error=>{if(!quitting&&error.code!=='ERR_ABORTED'&&error.errno!==-3)dialog.showErrorBox('RADAZ',error.message);});
- tray=new Tray(path.join(runtime,'public/radaz.ico'));tray.setToolTip('RADAZ Desktop');tray.on('double-click',show);
+ tray=new Tray(themeIcon());tray.setToolTip('RADAZ Desktop');tray.on('double-click',show);
  tray.setContextMenu(Menu.buildFromTemplate([{label:'RADAZ-ı aç',click:show},{type:'separator'},{label:'Çıxış',click:()=>{quitting=true;app.quit();}}]));
+ nativeTheme.on('updated',refreshThemeIcons);refreshThemeIcons();
  if(!process.argv.includes('--background')){mainWindow.maximize();mainWindow.show();}
 }
 if(!app.requestSingleInstanceLock())app.quit();else{

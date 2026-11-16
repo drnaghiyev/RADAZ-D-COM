@@ -1,3 +1,4 @@
+import {prefetchOrdered} from './import-pipeline';
 import {dicomSeriesName} from './dicom-description';
 import { deleteDiskStudies, diskFiles, diskStudies, diskStudyOpened, receiverStatus, saveDiskFiles, hasLocalArchiveEndpoint, type ArchiveBatch } from './disk-archive';
 import { parseDicomFile } from './dicom-file';
@@ -115,11 +116,13 @@ export async function deleteLocalStudies(studies: ArchiveStudy[]) {
 export async function saveArchiveFiles(files: File[], onProgress?: (done: number, total: number) => void): Promise<number> {
   const groups = new Map<string, { study: ArchiveStudy; instances: StoredInstance[]; series: Map<string, ArchiveSeries> }>();
   const now = Date.now();
-  for (let index = 0; index < files.length; index++) {
-    const file = files[index];
+  let index=0;
+  for await (const {file,bytes} of prefetchOrdered(files,async file=>{
+    try{return {file,bytes:new Uint8Array(await file.arrayBuffer())};}catch{return {file,bytes:null};}
+  },4,file=>file.size,16*1024*1024)) {
     if (file.name.split('/').pop()?.toUpperCase() === 'DICOMDIR') continue;
     try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
+      if(!bytes)continue;
       const data = parseDicomFile(bytes);
       const tag = (id: string) => data.string(id)?.trim() || '';
       const studyUID = tag('x0020000d');
@@ -144,7 +147,7 @@ export async function saveArchiveFiles(files: File[], onProgress?: (done: number
         modality: tag('x00080060') || 'DICOM', description: dicomSeriesName(tag),
         protocol: tag('x00181030'), imageCount: 0, addedAt: now });
     } catch { /* Other files in an imported folder are ignored. */ }
-    if (index % 20 === 0) onProgress?.(index + 1, files.length);
+    if (++index % 20 === 0) onProgress?.(index, files.length);
   }
   if (!groups.size) return 0;
   const db = await database();

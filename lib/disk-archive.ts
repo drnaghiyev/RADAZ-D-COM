@@ -54,10 +54,10 @@ export async function diskFiles(study: string, onProgress?: (done: number, total
   return files;
 }
 export async function saveDiskFiles(files: File[], onProgress?: (done: number, total: number) => void) {
-  for (const [index, file] of files.entries()) {
+  let completed=0;
+  for await (const _ of prefetchOrdered(files, async file => {
     await request('/import', { method: 'POST', headers: { 'Content-Type': 'application/dicom' }, body: file }, 60000);
-    onProgress?.(index + 1, files.length);
-  }
+  },4,file=>file.size,32*1024*1024)) onProgress?.(++completed,files.length);
 }
 export const diskStudyOpened = async (study: string) => request('/opened', {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ study }),

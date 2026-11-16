@@ -1,4 +1,7 @@
 'use client';
+import {SharedVolumeView} from '@/components/shared-volume-view';
+import {MeasurementCopies} from '@/components/measurement-copies';
+import {CineControls} from '@/components/cine-controls';
 import {workstationSettings} from '@/lib/volume-workstation';
 import {VolumeDisplayControls} from '@/components/volume-display-controls';
 import {ToolbarWorkspace, ToolbarGroup, ToolbarOverflow} from '@/components/toolbar-workspace';
@@ -42,11 +45,10 @@ import { LocalizerOverlay } from '@/components/localizer-overlay';
 import { VolumePreview, type VolumeRenderSettings } from '@/components/volume-preview';
 import { volumeStyles, type VolumePreset, type VolumeQuality } from '@/lib/volume-presets';
 import { ArrowUpRight, Pencil, MoveVertical, Eye, EyeOff, Download, PanelLeftClose, Activity, Box, ChevronDown, CircleDot, Crosshair, Database, Disc3, Eraser, FileArchive, FileText, Focus, Grid2X2, Hand, Layers3, MoveDiagonal2, RotateCcw, Ruler, ScanLine, ScanSearch, ServerCog, Settings2, SlidersHorizontal, SunMoon, Trash2, FolderOpen, Triangle, Waypoints } from 'lucide-react';
-import { addLocalDicom, registerDiskDicom, getOriginalDicom, getDiskDicomSource, registerLocalDicom, shareLocalDicoms, borrowLocalDicoms, getSeriesVolume, createMprStacks, createObliqueMprStacks, getDefaultWindow, getLocalizerGeometry, getMprOrientations, getViewer, releaseLocalDicoms, rotateMprOrientation, thumbnailLocalDicom, loadDicomThumbnail, type MprOrientations, type MprMode, type MprSettings } from '@/lib/cornerstone';
+import { addLocalDicom, registerDiskDicom, getOriginalDicom, getDiskDicomSource, registerLocalDicom, registerLocalDicomFrames, shareLocalDicoms, borrowLocalDicoms, getSeriesVolume, createMprStacks, createObliqueMprStacks, getDefaultWindow, getLocalizerGeometry, getMprOrientations, getViewer, releaseLocalDicoms, rotateMprOrientation, thumbnailLocalDicom, loadDicomThumbnail, type MprOrientations, type MprMode, type MprSettings } from '@/lib/cornerstone';
 import { closestSlice, sameCoordinateSpace, normalOf, planeLabel, intersectPlanes, type Point3 } from '@/lib/localizer';
 import { iterateSources, filesFromDrop } from '@/lib/import-sources';
 import { prefetchOrdered } from '@/lib/import-pipeline';
-import { NativeVolumeButton } from '@/components/native-volume-button';
 import { parseDicomFile } from '@/lib/dicom-file';
 import { getArchiveFiles, saveArchiveFiles } from '@/lib/local-archive';
 import { watchRemovableMedia, type MediaImage, type MediaProgress } from '@/lib/removable-media';
@@ -443,6 +445,7 @@ function ViewportPane({ onHover, projectionViews, anatomyControl, anatomyVolume,
     {!limited && <LocalizerOverlay element={elementRef.current} viewport={viewport} imageId={imageId} otherImages={otherImages} enabled={localizers} onMoveSource={onMoveSource} onMoveIntersection={onMoveIntersection} targetPanel={id} onRotateSource={onRotateSource} onRotateStart={onRotateStart} onPreviewRotateSource={onPreviewRotateSource}/>}
     <ViewerInteractionOverlay anatomyLabel={anatomyLabel} viewport={viewport} element={elementRef.current} imageId={imageId} tool={tool} slice={slice} count={series?.imageIds.length || 0}
       marks={paneMarks} selectedMarkId={selectedMarkId} onSelectMark={onSelectMark} cursor={cursor} onCursor={onCursor} onEditArrow={setEditingArrow} onUpdate={onUpdateMark} onAdd={mark=>{addPaneMark(mark);if(mark.kind==='arrow'&&!mark.anatomyId)setEditingArrow(mark.id);}} onRemove={onRemoveMark} onSelect={onSelect} navigate={navigate}/>
+    <MeasurementCopies pane={containerRef.current} imageId={imageId} modality={series?.modality} studyId={series?.studyId}/>
     <ViewportMouseControls tool={tool} container={containerRef} element={elementRef.current} viewport={viewport} imageId={imageId} disabled={limited} marks={paneMarks}
       onSelect={onSelect} onRemove={onRemoveMark} onClear={clearPaneImage} onEditArrow={setEditingArrow}/>
     {editingArrow&&paneMarks.filter(mark=>mark.id===editingArrow&&mark.imageId===imageId&&mark.kind==='arrow').map(mark=><ArrowCommentEditor key={mark.id} mark={mark} onSave={comment=>onUpdateMark(mark.id,{comment})} onClose={()=>setEditingArrow(null)}/>)}
@@ -815,7 +818,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       for(const s of imported)if(mediaSeries.current.has(s.id))mediaSeries.current.set(s.id,s);
       const combined = mergeMedia([...listRef.current.filter(s=>!incoming.has(s.id)),...imported]);
       listRef.current = combined; setSeriesList(combined);
-      reportProgress({label: 'DICOM yüklənir', done: decoded, total: acceptedFiles.length || files.length});
+      reportProgress({label: 'DICOM yüklənir', done: decoded, total: createdIds.length || files.length});
       if (!detachedMode) document.title = viewerTitle;
       setStatus(`${imported.length} seriya · ${acceptedFiles.length} / ${files.length} görüntü oxunur…`);
     };
@@ -846,9 +849,9 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
             sopUIDs:new Set(existing.imageIds.map(id=>viewer.core.metaData.get('sopCommonModule',id)?.sopInstanceUID).filter(Boolean))});
         }
         if (sopUID && found.get(uid)?.sopUIDs.has(sopUID)) { ignored++; continue; }
-        const imageId = registerLocalDicom(bytes, ds);
-        createdIds.push(imageId);
-        filesById.set(imageId,file);
+        const frameIds = registerLocalDicomFrames(bytes, ds),imageId=frameIds[0];
+        createdIds.push(...frameIds);
+        for(const id of frameIds)filesById.set(id,file);
         if (!current()) { discardUnpublished(); return false; }
         acceptedFiles.push(file);
         const record = found.get(uid) || {
@@ -858,7 +861,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
           number: get('x00200011') || '—', imageIds: [], ordered: [], sopUIDs: new Set<string>(),
           thumb: undefined,
         };
-        record.ordered.push({ id: imageId, n: Number(get('x00200013')) || 0 });
+        frameIds.forEach((id,frame)=>record.ordered.push({id,n:(Number(get('x00200013'))||0)+frame/frameIds.length}));
         if (sopUID) record.sopUIDs.add(sopUID);
         found.set(uid, record);
         if(!firstDecoded){
@@ -882,14 +885,12 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     registered=true;
     if(!createdIds.length)finished=true;
     publish();
-    for (const imageId of createdIds) {
-      if(invalidIds.has(imageId))continue;
+    for await (const {imageId,error} of prefetchOrdered(createdIds.filter(id=>!invalidIds.has(id)), async imageId=>{
+      try{await viewer.core.imageLoader.loadAndCacheImage(imageId);return {imageId,error:undefined};}catch(error){return {imageId,error};}
+    },4,id=>filesById.get(id)?.size||1,32*1024*1024)) {
       if (!current()) { discardUnpublished(); return false; }
-      try { await viewer.core.imageLoader.loadAndCacheImage(imageId); decodedIds.add(imageId); decoded++; }
-      catch (err) {
-        rejectImage(imageId,err);
-      }
-      if (decoded % 8 === 0 || decoded === 1) { publish(); await yieldToBrowser(); }
+      if(error)rejectImage(imageId,error);else{decodedIds.add(imageId);decoded++;}
+      if (decoded % 16 === 0 || decoded === 1) { publish(); await yieldToBrowser(); }
     }
     if (!current()) { discardUnpublished(); return false; }
     finished = true; publish(); discardUnpublished(); reportProgress(null);
@@ -1174,7 +1175,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
           last=item;batch.push(item.file);bytes+=item.file.size;
           // Show the first source immediately; do not wait for another 31 CD
           // reads or ZIP inflations before the first patient/series appears.
-          if(processed===0||batch.length>=32||bytes>=32*1024*1024)await flush();
+          if(processed===0||batch.length>=64||bytes>=32*1024*1024)await flush();
           else progress('Fayllar hazırlanır');
         }
         await flush();setImportQueue([]);setImportOpen(false);setStatus(successful?`${processed} fayl emal edildi. İdxal tamamlandı.`:'Uyğun DICOM görüntüsü tapılmadı. Əvvəlki müayinə saxlanıldı.');
@@ -1418,6 +1419,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   const jobProgress = importProgress || transferProgress || loadProgress || mediaLoading;
   const floatingProgress = !detachedMode && (railHidden || importOpen);
   const sourceLoading: LoadingProgress | null = volumeSeries?.loading ? {label:'Seriya yüklənir',done:volumeSeries.imageIds.length,total:volumeSeries.discovered||0,indeterminate:!volumeSeries.discovered} : null;
+  if(['3d'].includes(workspace))return <SharedVolumeView series={volumeSeries} anatomy={volumeResultFor(volumeSeries)} onClose={()=>{if(detachedMode)window.close();else setWorkspace('viewer');}}/>;
   return <ToolbarWorkspace scope={workspace}><main className={`workstation grouped-workstation ${railHidden ? 'rail-hidden' : ''} ${detachedMode ? 'detached' : ''}`} data-mode={detachedMode || 'viewer'} style={measurementVariables as React.CSSProperties}
     onDragOverCapture={event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; } }}
     onDropCapture={event => {
@@ -1450,7 +1452,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         <div className="workspace-split" key="3d"><button type="button" disabled={limited} title={tr('ui.3d_volume_rendering_8b54e')} aria-label={tr('ui.3d_volume_rendering_8b54e')} onClick={()=>openDetached('3d')}><b className="mode-letter-icon">3D</b></button><DropdownMenu><DropdownMenuTrigger asChild><button className="workspace-options" aria-label="3D açılış seçimləri" disabled={limited}><ChevronDown/></button></DropdownMenuTrigger><DropdownMenuContent>
  <DropdownMenuItem toolbarId="3d-main" onSelect={()=>{setRecordsPage(null);setInlinePlanes(null);setWorkspace('3d');}}>Əsas viewer-də aç</DropdownMenuItem>
  <DropdownMenuItem toolbarId="3d-window" onSelect={()=>openDetached('3d')}>Ayrı pəncərədə aç</DropdownMenuItem>
- <NativeVolumeButton menuItem seriesUID={currentSeries?.sourceId || currentSeries?.id}/></DropdownMenuContent></DropdownMenu></div>
+</DropdownMenuContent></DropdownMenu></div>
         <button type="button" disabled={limited} title={tr('ui.ai_assistant_eb79d')} aria-label={tr('ui.ai_assistant_eb79d')} onClick={openReport}><Sparkles size={18}/><span>{tr('ui.ai_assistant_eb79d')}</span></button>
         <button type="button" title="RADAZ Voice" aria-label="RADAZ Voice" onClick={()=>{const win=window.open("https://radaz.space/voice/","radaz-cloud-voice","popup");if(win)win.focus();else setStatus("RADAZ Voice pəncərəsi açıla bilmədi");}}><Mic size={18}/><span>RADAZ Voice</span></button>
         <div className="workspace-split" key="archive"><button type="button" title={tr('ui.local_archive_c13fe')} aria-label={tr('ui.local_archive_c13fe')} onClick={async () => { if (!await openRecordsWindow('archive')) setStatus('Local arxiv vərəqəsi açıla bilmədi'); }}><Database size={18}/><span>{tr('ui.local_archive_c13fe')}</span></button><DropdownMenu><DropdownMenuTrigger asChild><button className="workspace-options" aria-label="archive açılış seçimləri"><ChevronDown/></button></DropdownMenuTrigger><DropdownMenuContent><DropdownMenuItem toolbarId="archive-main" onSelect={()=>setRecordsPage('archive')}>Əsas viewer-də aç</DropdownMenuItem><DropdownMenuItem toolbarId="archive-window" onSelect={()=>void openRecordsWindow('archive')}>Ayrı pəncərədə aç</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>
@@ -1469,7 +1471,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       {workspace === '3d' && <>
         <div className="mode-identity"><strong><Box size={17}/> 3D VR</strong><span title={volumeSeries?.name || ''}>{volumeSeries ? `${volumeSeries.name} · ${volumeSeries.imageIds.length} kəsit` : 'Seriya seçin'}</span></div>
         <ToolbarGroup className="mode-controls volume-header-controls" groupId="volume-display" order={30}>
-          <div className="volume-simple-controls"><VolumeDisplayControls modality={ctVolume?'CT':'MR'} preset={volumePreset} onPreset={key=>{const style=volumeStyles.find(s=>s.key===key)!;setVolumePreset(key);setVolumeThreshold(style.threshold);setVolumeSettings(current=>({...workstationSettings(style.key),sourceQuality:current.sourceQuality||'full'}));}} quality={volumeSettings.sourceQuality||'full'} onQuality={sourceQuality=>setVolumeSettings(current=>({...current,sourceQuality}))} brightness={volumeSettings.ambient} onBrightness={ambient=>setVolumeSettings(current=>({...current,ambient}))} opacity={volumeOpacity} onOpacity={setVolumeOpacity}/></div>
+          <div className="volume-simple-controls"><VolumeDisplayControls modality={ctVolume?'CT':'MR'} preset={volumePreset} onPreset={key=>{const style=volumeStyles.find(s=>s.key===key)!;setVolumePreset(key);setVolumeThreshold(style.threshold);setVolumeSettings(current=>({...workstationSettings(style.key),sourceQuality:current.sourceQuality||'auto'}));}} quality={volumeSettings.sourceQuality||'auto'} onQuality={sourceQuality=>setVolumeSettings(current=>({...current,sourceQuality}))} brightness={volumeSettings.ambient} onBrightness={ambient=>setVolumeSettings(current=>({...current,ambient}))} opacity={volumeOpacity} onOpacity={setVolumeOpacity}/></div>
                     <details className="volume-workstation-settings"><summary aria-label="3D render ayarları" title="3D render ayarları">⚙</summary><div className="volume-workstation-settings-panel"><label>HU threshold <output>{volumeThreshold}</output><input aria-label="HU threshold" type="range" min={-1000} max={1400} step={1} value={volumeThreshold} onChange={e=>setVolumeThreshold(+e.target.value)}/></label><VolumeRenderControls preset={volumePreset} settings={volumeSettings} onChange={setVolumeSettings} ct={ctVolume}/></div></details><button className="mpr-reset volume-reset" type="button" onClick={() => { const style = volumeStyles.find(item => item.key === (ctVolume ? 'bone' : 'mr'))!; setVolumePreset(style.key); setVolumeThreshold(style.threshold); setVolumeOpacity(1); setVolumeSettings(workstationSettings(style.key)); setVolumeResetToken(value => value+1); }} title={tr('ui.reset_3d_view_lighting_opacity_rotation_zoom_628ef')} aria-label={tr('ui.reset_3d_view_24960')}><RotateCcw size={15}/><span>{tr('ui.reset_82c50')}</span></button>
         </ToolbarGroup>
         <ToolbarGroup id="volume-edit-toolbar" className="toolbar-group volume-edit-toolbar" role="group" aria-label="3D redaktə alətləri" groupId="volume-edit" order={40}/>
@@ -1478,7 +1480,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
 
         {!limited && detachedMode !== '3d' && <div className="display-command-row">
           <ToolbarGroup className="toolbar-group" groupId="annotations" order={45}><Button variant="ghost" className="header-control" aria-label={tr('ui.hide_annotations_0166e')} aria-pressed={hideText} title={hideText ? 'Yazıları göstər' : tr('ui.hide_annotations_0166e')} onClick={() => setHideText(value => !value)}>{hideText ? <EyeOff size={18}/> : <Eye size={18}/>}<span>{tr('ui.annotations_ce66d')}</span></Button></ToolbarGroup>
-          <ViewerDisplayControls panel={workspace === 'mpr' ? mprActive : active} imageId={currentImages[workspace === 'mpr' ? mprActive : active]} defaultImageId={workspace === 'mpr' ? seriesList.find(item => item.id === mprData?.sourceId)?.imageIds[0] : undefined} onStatus={setStatus}/>
+          {workspace==='viewer'&&<CineControls panel={active} seriesId={currentSeries?.id} count={currentSeries?.imageIds.length||0}/>}<ViewerDisplayControls panel={workspace === 'mpr' ? mprActive : active} imageId={currentImages[workspace === 'mpr' ? mprActive : active]} defaultImageId={workspace === 'mpr' ? seriesList.find(item => item.id === mprData?.sourceId)?.imageIds[0] : undefined} onStatus={setStatus}/>
 
         </div>}
         {!limited&&workspace==='viewer'&&<ToolbarGroup className="toolbar-group" groupId="smart-volume" order={61}><Button aria-label="Smart Volume" title="Smart Volume" disabled={!anatomyVolumeSeries||anatomyVolumeSeries.loading||!['CT','MR'].includes(anatomyVolumeSeries.modality)} onClick={()=>{if(anatomyVolumeSeries)setSmartVolumeSource({id:anatomyVolumeSeries.id,imageIds:[...anatomyVolumeSeries.imageIds],modality:anatomyVolumeSeries.modality});}}><Box size={19}/></Button></ToolbarGroup>}
@@ -1538,7 +1540,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
                 {modality.series.map(({ item: s, index }) => <button key={s.id} draggable onDragStart={e => { e.dataTransfer.clearData(); e.dataTransfer.setData('application/x-series-id', s.id); e.dataTransfer.effectAllowed = 'copy'; }}
                   className={`series-card ${assigned[active] === s.id ? 'chosen' : ''}`} onClick={() => place(s.id, active)} title={`${s.name} — panel ${active}`}>
                   <div className="series-thumb">{s.thumb ? <img src={s.thumb} alt="" draggable={false}/> : <ScanSearch size={30} strokeWidth={1}/>}<span>{String(index + 1).padStart(2, '0')}</span></div>
-                  <div className="series-info"><strong>{s.name}</strong><span>{s.imageIds.length}{s.discovered && s.discovered > s.imageIds.length ? ` / ${s.discovered}` : ''} {tr('ui.images_992d4')}</span><span>{s.archived ? 'Local arxiv · CD/DVD' : s.mediaSession ? 'CD/DVD · müvəqqəti' : `Seriya ${s.number}`}</span></div><span className="drag-handle" aria-hidden="true">⋮⋮</span>
+                  <div className="series-info"><strong>{s.name}</strong><span>Seriya {s.number}</span></div><span className="drag-handle" aria-hidden="true">⋮⋮</span>
                 </button>)}
               </div>)}
             </div>)}

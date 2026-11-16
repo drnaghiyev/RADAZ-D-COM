@@ -34,14 +34,14 @@ try{
  });
  const input=page.locator('input[type=file]:not([accept]):not([webkitdirectory])');
  const file=(name,index)=>({name,mimeType:'application/dicom',buffer:readFileSync(path.join(root,`disc/CT/I${String(index).padStart(4,'0')}`))});
- await input.setInputFiles([file('first.dcm',1),file('blocked.dcm',2),file('unreadable.dcm',3),file('last.dcm',4)]);
+ await input.setInputFiles([file('first.dcm',1),file('blocked.dcm',2),file('unreadable.dcm',3),file('last.dcm',4),...Array.from({length:5},(_,i)=>file('extra'+i+'.dcm',i+5))]);
  await page.waitForFunction(()=>document.querySelector('[data-panel="A"][data-has-image="true"]')&&typeof window.__releaseRead==='function');
  assert.ok(await page.locator('.import-job-progress progress').count(),'progress remains while a source is waiting');
  console.log('PASS first image usable before later file read completes');
  await page.evaluate(()=>window.__releaseRead());
  await page.waitForFunction(()=>!document.querySelector('.import-job-progress progress'),null,{timeout:45000});
  const status=await (await fetch(`http://127.0.0.1:${archivePort}/status`)).json();
- assert.equal(status.instanceCount,3,'unreadable file skipped; other DICOM files persisted');
+ assert.equal(status.instanceCount,8,'unreadable file skipped; other DICOM files persisted');
  assert.ok(await page.locator('[data-panel="A"][data-has-image="true"]').count());
  assert.deepEqual(errors,[]);
  console.log('PASS bounded file reads preserve valid images and persistence when one source read fails');

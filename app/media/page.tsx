@@ -44,7 +44,6 @@ export default function MediaPage() {
     return()=>clearInterval(timer);
   },[running,job?.id]);
   const prepare=async()=>{
-    if(job)return job;
     if(!study||!files.length)throw new Error('Görüntü seçilməyib');
     const {blob}=await buildDicomCdPackage(study,files,setStatus);
     setStatus('DICOMDIR və disk fayl sistemi hazırlanır…');

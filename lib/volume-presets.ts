@@ -1,7 +1,7 @@
 import type {TransferFunction,VolumeCrop} from './transfer-function';
 export type VolumePreset = 'bone'|'organ'|'abdomen-color'|'brain'|'vessel'|'angio'|'soft'|'lung'|'airway'|'skin'|'transparent'|'mip'|'minip'|'mr';
 export type VolumeQuality = 'performance'|'balanced'|'high'|'ultra'|'auto';
-export type VolumeRenderSettings = {ambient:number;diffuse:number;specular:number;specularPower:number;quality:VolumeQuality;sourceQuality?:'full'|'light';
+export type VolumeRenderSettings = {ambient:number;diffuse:number;specular:number;specularPower:number;quality:VolumeQuality;sourceQuality?:'auto'|'full'|'light';
   lighting?:'even'|'studio'|'flat'; shading?:'surface'|'occlusion'|'scattering'; opacityDistance?:number; transferWidth?:number; sampling?:number;
   gradient?:boolean; gradientMin?:number; gradientMax?:number; normalFromOpacity?:boolean;
   occlusionRadius?:number; occlusionSamples?:number; scattering?:number; shadowReach?:number;

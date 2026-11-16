@@ -1204,3 +1204,32 @@ body .toolbar-workspace .toolbar-overflow-trigger{position:absolute!important;ri
    handles/localizers and active secondary gestures retain their own cursors. */
 .viewport { cursor:var(--viewer-tool-cursor,crosshair) }
 .viewport > .drawing-overlay,.viewport > .drawing-overlay.drawing-active,.viewport > .drawing-overlay.scroll-active,.viewport > .measurement-overlay { cursor:var(--viewer-tool-cursor,crosshair) }
+
+.cine-controls {gap:5px!important;padding:4px 8px!important}.cine-controls button{display:inline-flex;align-items:center;justify-content:center;min-width:28px;min-height:30px}.cine-controls label{display:flex;align-items:center;gap:5px}.cine-controls input{width:60px}.cine-controls output{font-size:11px;white-space:nowrap}.shared-volume-loading{height:100vh;display:grid;place-content:center;background:#000;color:#c5e0eb}
+/* Compact rails; the header spans the full window above the right dock. */
+.toolbar-workspace{--command-size:31px;--dock-width:47px}
+@media(min-width:1280px){.toolbar-workspace{--dock-width:52px}}
+@media(min-width:1600px){.toolbar-workspace{--command-size:33px;--dock-width:56px}}
+@media(min-width:1920px){.toolbar-workspace{--dock-width:64px}}
+@media(min-width:2560px){.toolbar-workspace{--command-size:43px;--dock-width:74px}}
+@media(min-width:3200px){.toolbar-workspace{--command-size:49px;--dock-width:82px}}
+.grouped-workstation .body-grid{--series-width:124px}
+@media(max-width:900px){.grouped-workstation .body-grid{--series-width:105px}}
+body .toolbar-workspace.has-right-dock main.workstation.grouped-workstation .topbar{width:calc(100% + var(--dock-width));max-width:none;box-sizing:border-box}
+body .toolbar-workspace .right-tool-dock{padding:8px 3px}
+body .toolbar-workspace .right-tool-dock .dockable-tool-group{padding:3px 9px 3px 2px!important;box-sizing:border-box;gap:5px!important}
+body .toolbar-workspace .right-tool-dock .toolbar-drag-handle{width:8px!important;min-width:8px!important;right:0!important}
+.grouped-workstation .series-rail .rail-heading{padding:14px 8px}
+.grouped-workstation .series-rail .series-list{padding:0 4px 12px}
+.grouped-workstation .series-rail .series-card{padding:6px 4px;gap:5px;min-width:0}
+.grouped-workstation .series-rail .series-thumb{width:38px;min-width:38px;flex-basis:38px}
+.grouped-workstation .series-rail .series-card>div{min-width:0}
+/* Larger series previews, with only the series name and number. */
+.grouped-workstation .body-grid{--series-width:168px}
+@media(max-width:900px){.grouped-workstation .body-grid{--series-width:148px}}
+.grouped-workstation .series-rail .series-card{flex-direction:column;align-items:stretch;padding:7px;position:relative}
+.grouped-workstation .series-rail .series-thumb{width:100%;min-width:0;height:116px;flex-basis:auto}
+.grouped-workstation .series-rail .series-thumb img{width:100%;height:100%;object-fit:contain}
+.grouped-workstation .series-rail .series-info strong{white-space:normal;overflow-wrap:anywhere}
+.grouped-workstation .series-rail .series-thumb>span{display:none}
+.grouped-workstation .series-rail .drag-handle{position:absolute;right:3px;bottom:5px}

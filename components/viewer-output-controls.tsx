@@ -108,7 +108,7 @@ export function ViewerOutputControls({ panel, imageId, series, allSeries, datase
     const tab = window.open('about:blank', '_blank');
     if (!tab) { setMessage('Çap vərəqəsi üçün brauzerdə yeni pəncərəyə icazə verin'); return; }
     setBusy(true);
-    try { const id = await saveOutputJob({ title: 'Viewer-də seçilmiş görüntülər', frames: selection.map(({ preview, ...frame }) => frame) }); tab.opener = null; tab.location.replace(`/print?job=${id}`); }
+    try { const frames=await Promise.all(selection.map(async({preview,...frame})=>{const visible=panes.find(p=>p.imageId===frame.id);const pane=visible&&document.querySelector<HTMLElement>(`[data-panel="${visible.panel}"]`);if(!pane)return frame;const {canvas,overlay}=await capturePrintFrame(pane);return {...frame,blob:await canvasBlob(canvas,'png'),overlay:await canvasBlob(overlay,'png'),width:canvas.width,height:canvas.height};}));const id = await saveOutputJob({ title: 'Viewer-də seçilmiş görüntülər', frames }); tab.opener = null; tab.location.replace(`/print?job=${id}`); }
     catch (error) { tab.close(); setMessage(String(error)); } finally { setBusy(false); }
   };
   const entries = (scope === 'all' ? allSeries : series ? [series] : []).flatMap((item, seriesIndex) =>
