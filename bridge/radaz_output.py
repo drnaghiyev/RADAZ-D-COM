@@ -236,6 +236,12 @@ class OutputService:
                 fileset.write(media)
                 for name in ('START.html','README.txt','MANIFEST.json'):
                     if name in source.namelist(): (media / name).write_bytes(source.read(name))
+                for entry in source.infolist():
+                    if re.fullmatch(r'PREVIEWS/IMG[0-9]{6}\.jpg', entry.filename) and entry.file_size <= 5 * 1024 * 1024:
+                        preview = media / entry.filename
+                        preview.parent.mkdir(exist_ok=True)
+                        preview.write_bytes(source.read(entry))
+                (media / 'AUTORUN.INF').write_text('[AutoRun]\r\nshellexecute=START.html\r\naction=Open RADAZ DICOM Lite\r\nlabel=RADAZ DICOM Media\r\n', encoding='ascii')
                 (media / 'README.txt').write_text('RADAZ DICOM media\nDICOMDIR faylını DICOM viewer-də açın. START.html offline önbaxışı açır.\nDICOM görüntüləri PT qovluqlarındadır. Piksel məlumatları dəyişdirilməyib.\n'+('Ölçülər ayrıca DICOM Secondary Capture seriyasındadır.\n' if measured else '')+'Mənbədə ID boş olduqda yalnız kataloq qeydlərində RADAZ/MEDIA prefiksli texniki ID yaradılır; DICOM görüntüsündəki ID dəyişmir.\n',encoding='utf-8')
                 (media / 'MANIFEST.json').write_text(json.dumps({'profile':'RADAZ-DICOM-MEDIA','files':[str(Path(item.path).relative_to(media)).replace('\\','/') for item in fileset]},ensure_ascii=False),encoding='utf-8')
             size = sum(file.stat().st_size for file in media.rglob('*') if file.is_file())

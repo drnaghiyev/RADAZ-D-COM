@@ -74,6 +74,7 @@ class MediaTests(unittest.TestCase):
         blob=io.BytesIO()
         with ZipFile(blob,'w') as zip:
             zip.writestr('DICOM/IMG000001.dcm',original.getvalue());zip.writestr('START.html','<!doctype html><title>Offline viewer</title>')
+            zip.writestr('PREVIEWS/IMG000001.jpg',b'\xff\xd8\xff\xd9')
         return blob.getvalue(),ds
     def test_dicomdir_round_trip_and_source_pixels(self):
         data,original=self.package();job=self.output.prepare(data)
@@ -82,6 +83,8 @@ class MediaTests(unittest.TestCase):
         self.assertEqual(len(fileset),1);loaded=next(iter(fileset)).load()
         self.assertEqual(loaded.PixelData,original.PixelData);self.assertEqual(loaded.SOPInstanceUID,original.SOPInstanceUID)
         self.assertTrue((root/'START.html').exists())
+        self.assertEqual((root/'PREVIEWS'/'IMG000001.jpg').read_bytes(),b'\xff\xd8\xff\xd9')
+        self.assertIn('shellexecute=START.html',(root/'AUTORUN.INF').read_text(encoding='ascii'))
         with ZipFile(io.BytesIO(self.output.zip_package(job['id']))) as zip:self.assertIn('DICOMDIR',zip.namelist())
     def test_measurement_secondary_capture_is_separate_from_original_dicom(self):
         data,original=self.package()
@@ -151,7 +154,7 @@ class MediaTests(unittest.TestCase):
     def test_iso_contains_dicomdir(self):
         data,_=self.package();job=self.output.prepare(data);path=self.output.job_path(job['id']);destination=path/'test.iso'
         powershell('-Mode','Iso','-Source',path/'disc','-Destination',destination)
-        content=destination.read_bytes();self.assertEqual(content[32769:32774],b'CD001');self.assertIn(b'DICOMDIR',content)
+        content=destination.read_bytes();self.assertEqual(content[32769:32774],b'CD001');self.assertIn(b'DICOMDIR',content);self.assertIn(b'AUTORUN.INF',content)
     def test_mp4_and_wmv_contain_all_frames(self):
         from PIL import Image
         for fmt in ('mp4','wmv'):
