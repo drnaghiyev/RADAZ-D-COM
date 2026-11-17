@@ -57,7 +57,7 @@ import { reportHandoff } from '@/lib/report-handoff';
 import { Sparkles, Mic } from 'lucide-react';
 import type * as Core from '@cornerstonejs/core';
 
-type Tool = 'anatomy-volume' | 'anatomy-auto' | 'anatomy' | 'scroll' | 'arrow' | 'pencil' | 'cursor3d' | 'wl' | 'pan' | 'zoom' | 'length' | 'angle' | 'arch' | 'cobb' | 'ellipse' | 'hu' | 'deviation' | 'erase';
+export type Tool = 'anatomy-volume' | 'anatomy-auto' | 'anatomy' | 'scroll' | 'arrow' | 'pencil' | 'cursor3d' | 'wl' | 'pan' | 'zoom' | 'length' | 'angle' | 'arch' | 'cobb' | 'ellipse' | 'hu' | 'deviation' | 'erase';
 type Series = { sourceId?: string; institution?: string; id: string; studyId: string; name: string; modality: string; patient: string; patientId: string; birth: string; date: string; number: string; imageIds: string[]; initialImageId?:string; thumb?: string; thumbImageId?:string; mediaSession?: string; archived?: boolean; discovered?: number; loading?: boolean };
 type Preset = { ww: number; wl: number; token: number; panel: string; seriesId: string; imageId: string } | null;
 type ImportSource = { id: number; label: string; files: File[] };
@@ -83,7 +83,7 @@ const toolItems: { id: Tool; label: string; icon: typeof Ruler; hint: string }[]
   { id: 'deviation', get label(){return tr('tool.deviation');}, icon: Crosshair, hint: 'D' },
   { id: 'erase', get label(){return tr('tool.erase');}, icon: Eraser, hint: 'X' },
 ];
-const measureTools = toolItems.filter(t => ['arrow', 'pencil', 'cursor3d', 'length', 'angle', 'arch', 'cobb', 'ellipse', 'hu', 'deviation', 'erase'].includes(t.id));
+export const measureTools = toolItems.filter(t => ['arrow', 'pencil', 'cursor3d', 'length', 'angle', 'arch', 'cobb', 'ellipse', 'hu', 'deviation', 'erase'].includes(t.id));
 const viewTools = toolItems.filter(t => ['scroll', 'wl', 'pan', 'zoom'].includes(t.id));
 function StitchPersonIcon({size=19}:{size?:number}){return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="4" r="2"/><path d="M8 9.5 12 8l4 1.5M8 9.5l-2 4M16 9.5l2 4M12 8v8M12 16l-4 5M12 16l4 5"/><path d="M12 1v22" stroke="#72d7e8" strokeWidth="1.2" strokeDasharray="2 2"/></svg>}
 const presets = [
@@ -123,7 +123,7 @@ function age(birth: string, study: string) {
 // Reusing a panel ID must wait for its previous viewport's in-flight setStack.
 const paneStackLoads = new Map<string, Promise<void>>();
 
-function ViewportPane({ onHover, projectionViews, anatomyControl, anatomyVolume, anatomyVolumeVisible, anatomyVolumeOpacity, anatomyLabel, windowLevels, windowingSourceId, cursor, onCursor, hideText, id, series, initialImageId, selected, tool, preset, resetToken, clearToken, ready, marks, selectedMarkId, localizers, otherImages, reconstruction, viewAnchor, expanded, concealed, onImageChange, onMoveSource, onMoveIntersection, loadingProgress, onRotateSource, onRotateStart, onPreviewRotateSource, onAddMark, onUpdateMark, onRemoveMark, onSelectMark, onClearImage, onSelect, onToggleMaximize, onDropSeries }: {
+export function ViewportPane({ onHover, projectionViews, anatomyControl, anatomyVolume, anatomyVolumeVisible, anatomyVolumeOpacity, anatomyLabel, windowLevels, windowingSourceId, cursor, onCursor, hideText, id, series, initialImageId, selected, tool, preset, resetToken, clearToken, ready, marks, selectedMarkId, localizers, otherImages, reconstruction, viewAnchor, expanded, concealed, onImageChange, onMoveSource, onMoveIntersection, loadingProgress, onRotateSource, onRotateStart, onPreviewRotateSource, onAddMark, onUpdateMark, onRemoveMark, onSelectMark, onClearImage, onSelect, onToggleMaximize, onDropSeries }: {
   onHover?: () => void;
   projectionViews?: Map<string,ImagePresentation>;
   anatomyControl?:ReturnType<typeof useAnatomyVolume>; anatomyVolume?: AnatomyVolumeResult|null; anatomyVolumeVisible?:boolean; anatomyVolumeOpacity?:number;

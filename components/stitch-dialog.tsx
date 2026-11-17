@@ -9,6 +9,8 @@ import {readDicomPixels} from '@/lib/dicom-pixels';
 import {createStitchedDicom,type MeasurementDicomSource} from '@/lib/measurement-dicom';
 import {drawStitch,emptyCrop,makeStitchCanvas,renderStitch,sanitizeCrop,stitchLayout,type Crop,type StitchOptions,type StitchRaster,type StitchRect} from '@/lib/xray-stitch';
 import {drawStitchMeasures,measurePointCount,nearestStitchMark,type StitchMeasure,type StitchMeasureKind,type StitchPoint} from '@/lib/stitch-measurements';
+import {measureTools,type Tool} from '@/app/page';
+import {StitchMeasurementViewport,type StitchMeasurementHandle} from './stitch-measurement-viewport';
 
 type Item={id:string;name:string;modality:string;studyId:string;imageIds:string[]};
 type Raster=StitchRaster&{source:MeasurementDicomSource;spacing?:[number,number];burnedIn:boolean};
@@ -47,6 +49,10 @@ export function StitchDialog({open,onOpenChange,series,initialImage,onCreated,on
  const [brightness,setBrightness]=useState<[number,number]>([0,0]),[contrast,setContrast]=useState<[number,number]>([1,1]),[feather,setFeather]=useState(true);
  const [mode,setMode]=useState<Mode>('align'),[selected,setSelected]=useState<0|1>(1),[viewPan,setViewPan]=useState({x:0,y:0});
  const [viewFit,setViewFit]=useState(1);
+ const [measurementFile,setMeasurementFile]=useState<File|null>(null),[measurementTool,setMeasurementTool]=useState<Tool|null>(null);
+ const measurementViewport=useRef<StitchMeasurementHandle>(null);
+ const measurementGeometry=JSON.stringify([first,second,crops,offsetX,offsetY,lowerScale,topOffset,topScale,brightness,contrast,feather]);
+ useEffect(()=>{setMeasurementFile(null);setMeasurementTool(null);},[measurementGeometry]);
  const [marks,setMarks]=useState<StitchMeasure[]>([]),[draft,setDraft]=useState<StitchMeasure|null>(null),[selectedMark,setSelectedMark]=useState<string|null>(null);
  const markDrag=useRef<{id:string;point:number;start:StitchPoint;original:StitchPoint[]}|null>(null);
  const [error,setError]=useState(''),[busy,setBusy]=useState(false),[maximized,setMaximized]=useState(true),[minimized,setMinimized]=useState(false);
@@ -114,35 +120,31 @@ export function StitchDialog({open,onOpenChange,series,initialImage,onCreated,on
  const reset=()=>{if(!rasters)return;setCrops([emptyCrop(),emptyCrop()]);setOffsetX(0);setOffsetY(Math.round(rasters[0].height-Math.min(rasters[0].height,rasters[1].height)*.12));setLowerScale(1);setTopOffset({x:0,y:0});setTopScale(1);setBrightness([0,0]);setContrast([1,1]);setViewPan({x:0,y:0});setMarks([]);setDraft(null);setSelectedMark(null);};
  const centerFrames=()=>{const v=view();if(!v||!layout||!rasters)return;const baseWidth=Math.max(rasters[0].width,rasters[1].width),baseHeight=rasters[0].height+rasters[1].height*.88,scale=Math.min(v.width/layout.width,v.height/layout.height)*.96;setViewFit(scale/Math.min(v.width/baseWidth,v.height/baseHeight));setViewPan({x:(baseWidth/2-layout.left-layout.width/2)*scale,y:(baseHeight/2-layout.topEdge-layout.height/2)*scale});};
  const save=async(measure=false)=>{if(!rasters||!layers||busy)return;setBusy(true);setError('');try{
-  const merged=renderStitch(rasters,layers,stitch),ctx=merged.getContext('2d');if(!ctx)throw Error('Birləşmiş görüntü hazırlanmadı');
-  const spacing=calibrated&&rasters[0].spacing?[rasters[0].spacing[0]/topScale,rasters[0].spacing[1]/topScale] as [number,number]:undefined;
-  drawStitchMeasures(ctx,marks,spacing);
+  const measured=!measure&&measurementFile&&measurementViewport.current?await measurementViewport.current.capture():null;
+  const merged=measured?measured.canvas:renderStitch(rasters,layers,stitch),ctx=merged.getContext('2d');if(!ctx)throw Error('Birləşmiş görüntü hazırlanmadı');
+  const spacing=calibrated?(measured?measured.spacing:rasters[0].spacing?[rasters[0].spacing[0]/topScale,rasters[0].spacing[1]/topScale] as [number,number]:undefined):undefined;
+  if(!measured)drawStitchMeasures(ctx,marks,spacing);
   ctx.save();ctx.resetTransform();ctx.font=`${Math.max(14,Math.min(24,Math.round(merged.width*.015)))}px Arial`;ctx.textBaseline='top';ctx.fillStyle='#f4f7f7';ctx.shadowColor='#000';ctx.shadowBlur=4;
-  const label=[rasters[0].source.patientName,rasters[0].source.patientId,rasters[0].source.studyDate,'RADAZ STITCH'].filter(Boolean).join('  ·  ');
+  const label=[rasters[0].source.patientName,rasters[0].source.patientId,rasters[0].source.birthDate,rasters[0].source.patientSex,rasters[0].source.studyDate].filter(Boolean).join('  ·  ');
   if(!measure)ctx.fillText(label,12,12,merged.width-24);ctx.restore();
   const rgba=ctx.getImageData(0,0,merged.width,merged.height).data;
   const blob=await createStitchedDicom([rasters[0].source,rasters[1].source],merged.width,merged.height,rgba,spacing,true);
   const file=new File([blob],`RADAZ-Stitch-${Date.now()}.dcm`,{type:'application/dicom'});
-  if(measure&&onMeasure){onMeasure(file);return;}
+  if(measure){setMeasurementFile(file);return;}
   await onCreated(file);onOpenChange(false);
  }catch(reason){setError(reason instanceof Error?reason.message:String(reason));}finally{setBusy(false);}};
 
  const onShortcut=(event:ReactKeyboardEvent)=>{if(event.altKey||event.ctrlKey||event.metaKey||event.target instanceof HTMLElement&&event.target.closest('input,select,textarea'))return;const key=event.key.toLowerCase();const modes:Record<string,Mode>={'1':'align','2':'crop','3':'pan','4':'window','l':'length','a':'angle','b':'cobb','r':'ellipse','e':'erase'};
-  if(modes[key]){setMode(modes[key]);setDraft(null);}else if(key==='delete'&&selectedMark){setMarks(current=>current.filter(mark=>mark.id!==selectedMark));setSelectedMark(null);}else if(key==='escape'){setDraft(null);setSelectedMark(null);}else if(key==='q')setSelected(0);else if(key==='w')setSelected(1);else if(key==='+'||key==='=')scaleSelected(1.1);else if(key==='-')scaleSelected(.9);else if(key==='0')reset();else if(key==='c')centerFrames();else if(key==='f11'&&!standalone)setMaximized(value=>!value);else return;event.preventDefault();};
+  const measurement=measureTools.find(item=>item.hint.toLowerCase()===key);if(measurement){event.preventDefault();setMeasurementTool(measurement.id);if(!measurementFile)void save(true);return;}
+  if(modes[key]){setMeasurementTool(null);setMode(modes[key]);setDraft(null);}else if(key==='delete'&&selectedMark){setMarks(current=>current.filter(mark=>mark.id!==selectedMark));setSelectedMark(null);}else if(key==='escape'){setDraft(null);setSelectedMark(null);}else if(key==='w')setSelected(1);else if(key==='+'||key==='=')scaleSelected(1.1);else if(key==='-')scaleSelected(.9);else if(key==='0')reset();else if(key==='f'){setMeasurementTool(null);centerFrames();}else if(key==='f11'&&!standalone)setMaximized(value=>!value);else return;event.preventDefault();};
  const content=<>
   <div className="stitch-body"><div className="stitch-stage-wrap"><div className="stitch-stage-toolbar" role="toolbar" aria-label="Stitch ön baxış alətləri">
-    <button className={mode==='align'?'active':''} title="Kadrı sürüşdür · 1" onClick={()=>setMode('align')}><Move size={16}/>Kadrı sürüşdür</button><button className={mode==='crop'?'active':''} title="Kənardan kəs · 2" onClick={()=>setMode('crop')}><CropIcon size={16}/>Kənardan kəs</button><button className={mode==='pan'?'active':''} title="Seçilmiş kadrı hərəkət etdir · 3" onClick={()=>setMode('pan')}><Hand size={16}/>Pan</button>
-    <button className={mode==='window'?'active':''} title="Seçilmiş kadrın parlaqlığı və kontrastı · 4" onClick={()=>setMode('window')}><SunMoon size={16}/>Parlaqlıq / kontrast</button>
+    <button className={mode==='align'?'active':''} title="Kadrı sürüşdür · 1" onClick={()=>{setMeasurementTool(null);setMode('align');}}><Move size={16}/>Kadrı sürüşdür</button><button className={mode==='crop'?'active':''} title="Kənardan kəs · 2" onClick={()=>{setMeasurementTool(null);setMode('crop');}}><CropIcon size={16}/>Kənardan kəs</button><button className={mode==='pan'?'active':''} title="Seçilmiş kadrı hərəkət etdir · 3" onClick={()=>{setMeasurementTool(null);setMode('pan');}}><Hand size={16}/>Pan</button>
+    <button className={mode==='window'?'active':''} title="Seçilmiş kadrın parlaqlığı və kontrastı · 4" onClick={()=>{setMeasurementTool(null);setMode('window');}}><SunMoon size={16}/>Parlaqlıq / kontrast</button>
     <button aria-label="Yaxınlaşdır" title="Seçilmiş kadrı yaxınlaşdır · +" onClick={()=>scaleSelected(1.1)}><ZoomIn size={16}/></button><button aria-label="Uzaqlaşdır" title="Seçilmiş kadrı uzaqlaşdır · −" onClick={()=>scaleSelected(.9)}><ZoomOut size={16}/></button><button title="Seçilmiş kadrın miqyasını sıfırla" onClick={()=>{if(selected===0)setTopScale(1);else setLowerScale(1);}}><Maximize2 size={16}/>Miqyası sıfırla</button>
-    <button title="Görüntüləri mərkəzləşdir · C" onClick={centerFrames}><Focus size={16}/>Görüntüləri mərkəzləşdir</button>
+    <button title="Görüntüləri mərkəzləşdir · F" onClick={()=>{setMeasurementTool(null);centerFrames();}}><Focus size={16}/>Görüntüləri mərkəzləşdir</button>
     <span className="stitch-tool-separator"/>
-    {onMeasure&&<button aria-label="Əsas Viewer ölçü alətləri" title="Əsas Viewer-in bütün ölçü alətləri" disabled={!rasters||busy} onClick={()=>void save(true)}><Ruler size={16}/></button>}
-    {!onMeasure&&<><button className={mode==='length'?'active':''} aria-label="Uzunluq ölç" title="Uzunluq · L" onClick={()=>{setMode('length');setDraft(null);}}><Ruler size={16}/></button>
-    <button className={mode==='angle'?'active':''} aria-label="Bucaq ölç" title="Bucaq · A" onClick={()=>{setMode('angle');setDraft(null);}}><Triangle size={16}/></button>
-    <button className={mode==='cobb'?'active':''} aria-label="Cobb bucağı ölç" title="Cobb · B" onClick={()=>{setMode('cobb');setDraft(null);}}><Waypoints size={16}/></button>
-    <button className={mode==='ellipse'?'active':''} aria-label="Sahə ölç" title="Ellips sahəsi · R" onClick={()=>{setMode('ellipse');setDraft(null);}}><Circle size={16}/></button>
-    <button className={mode==='erase'?'active':''} aria-label="Ölçünü sil" title="Ölçünü sil · E / Delete" onClick={()=>{setMode('erase');setDraft(null);}}><Eraser size={16}/></button></>}
-  </div><div ref={bindStage} className={`stitch-preview stitch-mode-${mode}`} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={()=>{gesture.current=null;markDrag.current=null;}} onPointerCancel={()=>{gesture.current=null;markDrag.current=null;}} onWheel={onWheel}><canvas ref={bindCanvas} aria-label="Birləşmiş rentgen ön baxışı"/></div>
+    {measureTools.map(item=><button key={item.id} aria-label={item.label} title={`${item.label} · ${item.hint}`} className={measurementTool===item.id?'active':''} disabled={!rasters||busy} onClick={()=>{setMeasurementTool(item.id);if(!measurementFile)void save(true);}}><item.icon size={16}/></button>)}  </div><div ref={bindStage} className={`stitch-preview stitch-mode-${mode}`} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={()=>{gesture.current=null;markDrag.current=null;}} onPointerCancel={()=>{gesture.current=null;markDrag.current=null;}} onWheel={onWheel}><canvas ref={bindCanvas} aria-label="Birləşmiş rentgen ön baxışı"/>{measurementFile&&<div className="stitch-measure-layer" style={{visibility:measurementTool?"visible":"hidden"}} onPointerDown={event=>event.stopPropagation()} onPointerMove={event=>event.stopPropagation()} onPointerUp={event=>event.stopPropagation()} onWheel={event=>event.stopPropagation()}><StitchMeasurementViewport ref={measurementViewport} file={measurementFile} tool={measurementTool||"length"}/></div>}</div>
   <p id="stitch-guidance" className="stitch-guidance">{mode==='align'?'Seçilmiş kadrı digər kadra uyğunlaşdırın.':mode==='crop'?'Kadrın yuxarı, aşağı və yan kənarından tutub kəsim sahəsini dəyişin.':mode==='window'?'Seçilmiş kadrda sağa-sola sürükləyin: parlaqlıq; yuxarı-aşağı: kontrast.':mode==='pan'?'Seçilmiş kadrı sürüşdürün. Siçan çarxı ilə yalnız həmin kadrı yaxınlaşdırın.':mode==='erase'?'Ölçünü silmək üçün xəttin üzərinə basın.':'Ölçü nöqtələrini ardıcıl qoyun; xətti və ya ucunu sürüşdürərək düzəldin.'} Q/W: kadr seçimi · C: ümumi mərkəz · L/A/B/R: ölçülər · Delete: sil.</p></div>
   <aside className="stitch-controls"><label>Yuxarı kadr<select value={first} onChange={event=>setFirst(event.target.value)}>{options.map(item=><option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
    <label>Aşağı kadr<select value={second} onChange={event=>setSecond(event.target.value)}>{options.map(item=><option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
