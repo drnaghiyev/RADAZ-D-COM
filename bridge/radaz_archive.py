@@ -61,6 +61,29 @@ def metadata(ds):
     }
 
 
+def same_clinical_instance(previous, incoming):
+    """Accept a retransmission whose pixels and clinical identity are unchanged.
+
+    Some modalities rewrite creation timestamps, private tags or transfer
+    wrappers on resend. A truly different image under the same SOP UID must
+    still be rejected so the original study cannot be silently overwritten.
+    """
+    identity = ('SOPClassUID', 'SOPInstanceUID', 'StudyInstanceUID',
+                'SeriesInstanceUID', 'PatientID', 'Rows', 'Columns',
+                'SamplesPerPixel', 'PhotometricInterpretation', 'BitsAllocated',
+                'BitsStored', 'PixelRepresentation', 'NumberOfFrames',
+                'ImagePositionPatient', 'ImageOrientationPatient',
+                'PixelSpacing', 'InstanceNumber')
+    for name in identity:
+        if str(getattr(previous, name, '')) != str(getattr(incoming, name, '')):
+            return False
+    if not getattr(previous, 'PatientID', '') and str(getattr(previous, 'PatientName', '')) != str(getattr(incoming, 'PatientName', '')):
+        return False
+    pixels = ('PixelData', 'FloatPixelData', 'DoubleFloatPixelData')
+    return any(hasattr(previous, name) and getattr(previous, name) == getattr(incoming, name, None)
+               for name in pixels)
+
+
 class Archive:
     def __init__(self, root: Path, bind='0.0.0.0', http_only=False):
         self.http_only = http_only
@@ -166,7 +189,7 @@ class Archive:
                     # A CD's raw dataset and the same C-STORE dataset have different
                     # Part 10 headers. Compare DICOM elements, not wrapper bytes.
                     previous = pydicom.dcmread(self.root / old['path'], force=True)
-                    if previous != ds:
+                    if not same_clinical_instance(previous, ds):
                         raise ValueError('Eyni SOP Instance UID ilə fərqli fayl artıq mövcuddur')
                 return False
             relative = f'instances/{digest[:2]}/{digest}.dcm'

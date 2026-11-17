@@ -151,6 +151,30 @@ class ReceiverTests(unittest.TestCase):
         assoc.release()
         self.assertEqual(self.archive.status()['instanceCount'],1)
 
+    def test_retransmission_with_changed_nonclinical_metadata_is_accepted(self):
+        stream=io.BytesIO(); self.ds.save_as(stream,enforce_file_format=True)
+        original=stream.getvalue()
+        self.archive.store(original,self.ds)
+        retransmitted=self.ds.copy()
+        retransmitted.InstanceCreationTime='235959'
+        retransmitted.add_new((0x0011,0x1010),'LO','UPDATED PRIVATE TAG')
+        assoc=self.association()
+        self.assertEqual(assoc.send_c_store(retransmitted).Status,0)
+        assoc.release()
+        self.assertEqual(self.archive.status()['instanceCount'],1)
+        with urlopen(self.url+'/file/'+str(self.ds.SOPInstanceUID)) as response:
+            self.assertEqual(response.read(),original)
+
+    def test_retransmission_with_changed_geometry_is_rejected(self):
+        stream=io.BytesIO(); self.ds.save_as(stream,enforce_file_format=True)
+        self.archive.store(stream.getvalue(),self.ds)
+        retransmitted=self.ds.copy()
+        retransmitted.ImagePositionPatient=[1,2,3]
+        assoc=self.association()
+        self.assertEqual(assoc.send_c_store(retransmitted).Status,0xA900)
+        assoc.release()
+        self.assertEqual(self.archive.status()['instanceCount'],1)
+
     def test_storage_failure_never_acknowledges_success(self):
         def fail(*_): raise OSError('simulated full disk')
         self.archive.store = fail
