@@ -38,7 +38,11 @@ test('RF measurement becomes a visible separate DICOM on offline CD; stitch open
   const pixel=ds.elements.x7fe00010,rgb=bytes.subarray(pixel.dataOffset,pixel.dataOffset+pixel.length);assert.ok(rgb.some((v,i)=>i%3===0&&v!==rgb[i+1]),'annotation color is burned into the DICOM pixels');
   await page.getByRole('button',{name:'Ölçmə alətləri',exact:true}).click();await page.getByRole('menuitem',{name:/İki rentgeni birləşdir/}).click();
   const dialog=page.getByRole('dialog',{name:'İki rentgen görüntüsünü birləşdir'});await dialog.waitFor();
-  const bounds=await dialog.boundingBox();assert.ok(bounds.width>1000&&bounds.height>650,'stitch window uses most of desktop screen');
+  const bounds=await dialog.boundingBox();assert.ok(bounds.width>=1490&&bounds.height>=890,'stitch window opens fullscreen');
+  await dialog.getByRole('button',{name:'Pəncərəni kiçilt'}).click();await dialog.waitFor({state:'hidden'});
+  await page.getByRole('button',{name:'Stitch pəncərəsini aç'}).click();await dialog.waitFor({state:'visible'});
+  await dialog.getByRole('button',{name:'Pəncərəni bərpa et'}).click();assert.ok((await dialog.boundingBox()).height<bounds.height,'restore returns to the smaller window');
+  await dialog.getByRole('button',{name:'Pəncərəni böyüt'}).click();await page.waitForFunction(()=>document.querySelector('.stitch-dialog')?.getBoundingClientRect().height>=890,null,{timeout:5000});const maxBounds=await dialog.boundingBox();assert.ok(maxBounds.height>=890,`maximize returns to fullscreen: ${JSON.stringify(maxBounds)}`);
   const stitchButton=page.getByRole('button',{name:'Ayrıca DICOM kimi saxla'});
   try{await stitchButton.waitFor({state:'visible',timeout:10000});await page.waitForFunction(()=>[...document.querySelectorAll('.stitch-dialog button')].find(e=>e.textContent.includes('Ayrıca DICOM'))?.disabled===false,null,{timeout:10000});}
   catch{throw Error('Stitch unavailable: '+await page.getByRole('dialog',{name:'İki rentgen görüntüsünü birləşdir'}).innerText());}
@@ -57,7 +61,8 @@ test('RF measurement becomes a visible separate DICOM on offline CD; stitch open
   await dialog.getByRole('button',{name:'Kadrı sürüşdür'}).click();
   const alignment=await page.getByTestId('stitch-offset').innerText();
   await page.mouse.move(stitchStage.x+stitchStage.width/2,stitchStage.y+stitchStage.height*.75);await page.mouse.down();await page.mouse.move(stitchStage.x+stitchStage.width/2+30,stitchStage.y+stitchStage.height*.75+12,{steps:8});await page.mouse.up();
-  assert.notEqual(await page.getByTestId('stitch-offset').innerText(),alignment,'mouse drag aligns lower frame');
+  const moved=await page.getByTestId('stitch-offset').innerText();assert.notEqual(moved,alignment,'mouse drag aligns lower frame');
+  await dialog.getByRole('button',{name:'Görüntüləri mərkəzləşdir'}).click();assert.notEqual(await page.getByTestId('stitch-offset').innerText(),moved,'center command recalculates frame placement');
   await page.locator('.stitch-preview').hover();await page.mouse.wheel(0,-120);await page.waitForFunction(()=>!(document.querySelector('[data-testid="stitch-offset"]')?.textContent||'').includes('miqyas 100%'));
   await dialog.getByRole('button',{name:'Parlaqlıq / kontrast'}).click();const windowBefore=await dialog.locator('.stitch-controls').innerText();
   await page.mouse.move(stitchStage.x+stitchStage.width/2,stitchStage.y+stitchStage.height*.75);await page.mouse.down();await page.mouse.move(stitchStage.x+stitchStage.width/2+35,stitchStage.y+stitchStage.height*.75-20,{steps:8});await page.mouse.up();
