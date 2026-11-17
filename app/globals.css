@@ -1216,6 +1216,8 @@ body .toolbar-workspace.has-right-dock main.workstation.grouped-workstation .top
 .stitch-stage-toolbar button{font-size:0!important;width:34px;height:34px;padding:0!important;flex:none}.stitch-stage-toolbar button svg{width:17px;height:17px;flex:none}.stitch-tool-separator{height:24px;width:1px;margin:0 5px;background:#416277}
 .stitch-footer button,.stitch-controls>button{font-size:0!important;width:36px;height:34px;padding:0!important}.stitch-footer .stitch-save{width:44px}.stitch-mode-length,.stitch-mode-angle,.stitch-mode-cobb,.stitch-mode-ellipse,.stitch-mode-erase{cursor:crosshair}
 .stitch-side-actions{display:flex;gap:8px;margin-top:auto;padding-top:12px;position:sticky;bottom:0;background:#102633}.stitch-side-actions button{font-size:0!important;flex:1;min-height:38px;padding:0!important}.stitch-side-error{color:#ffb3a8;font-size:12px;overflow-wrap:anywhere}
+.stitch-measure-editor .viewport .overlay,.stitch-measure-editor [data-panel]>.overlay{display:none!important}.stitch-measure-actions{display:flex;gap:8px;padding:6px;background:#102633}.stitch-measure-actions button{padding:6px 14px;border:1px solid #416477;border-radius:5px;color:#d9f2fa}.stitch-measure-editor .workstation{height:calc(100dvh - 48px)!important}
+body .toolbar-workspace .toolbar-overflow-trigger{position:fixed!important;right:8px!important;top:8px!important;z-index:150!important}body .toolbar-workspace .toolbar-overflow-popup{z-index:151!important}
 /* Canvas and custom drawing layers share the selected tool cursor. Annotation
    handles/localizers and active secondary gestures retain their own cursors. */
 .viewport { cursor:var(--viewer-tool-cursor,crosshair) }

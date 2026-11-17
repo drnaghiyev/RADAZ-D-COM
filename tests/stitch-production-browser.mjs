@@ -18,7 +18,9 @@ test('production stitch fills the installed-size window and toolbar reaches the 
   await context.route('**/local-archive-api/status',route=>route.fulfill({status:503,json:{error:'Synthetic browser archive only'}}));
   const page=await context.newPage();await page.goto(process.env.RADAZ_TEST_URL||'http://127.0.0.1:5445/');await page.locator('.topbar').waitFor();
   const header=await page.locator('.topbar').boundingBox();assert.ok(Math.abs(header.width-1920)<2,'header spans the full width');
-  const settings=page.locator('.topbar [data-toolbar-group="toolbar-settings"]');await settings.waitFor();const settingsBox=await settings.boundingBox();assert.ok(settingsBox.x+settingsBox.width>=1900,'rightmost toolbar command reaches the screen edge');
+  await page.setViewportSize({width:1000,height:800});
+  const more=page.getByRole('button',{name:'Əlavə alətlər',exact:true});await more.waitFor();const moreBox=await more.boundingBox();assert.ok(moreBox.x>=0&&moreBox.x+moreBox.width<=1000,'overflow trigger stays on screen');
+  await more.click();await page.locator('.toolbar-overflow-popup.is-open').waitFor();assert.ok(await page.locator('.toolbar-overflow-popup.is-open [data-toolbar-group]').count()>0,'hidden groups are reachable');await more.click();await page.setViewportSize({width:1920,height:1000});
   await page.locator('input[type="file"]').first().setInputFiles([join(root,'rf-0.dcm'),join(root,'rf-1.dcm')]);
   await page.locator('[data-panel="A"][data-has-image="true"]').waitFor();
   const button=page.getByRole('button',{name:'İki rentgeni birləşdir',exact:true});await button.waitFor();assert.equal(await button.getAttribute('title'),'İki rentgeni birləşdir (stitch)');

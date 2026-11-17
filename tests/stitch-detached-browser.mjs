@@ -33,18 +33,22 @@ test('stitch uses a separate web window, preserves registration on center, and b
   const offset=await popup.getByTestId('stitch-offset').innerText();
   await popup.getByRole('button',{name:'Görüntüləri mərkəzləşdir'}).click();
   assert.equal(await popup.getByTestId('stitch-offset').innerText(),offset,'centering must preserve manual frame alignment');
-  await popup.getByRole('button',{name:'Uzunluq ölç'}).click();
-  await popup.mouse.click(stage.x+stage.width*.40,stage.y+stage.height*.45);
-  await popup.mouse.click(stage.x+stage.width*.55,stage.y+stage.height*.55);
+  await popup.getByRole('button',{name:'Əsas Viewer ölçü alətləri'}).click();
+  await popup.locator('[data-panel="A"][data-has-image="true"]').waitFor();
+  await popup.getByRole('button',{name:'Ölçmə alətləri',exact:true}).click();
+  await popup.getByRole('menuitem',{name:/Uzunluq/}).click();
+  const measurementCanvas=await popup.locator('[data-panel="A"] .dicom-canvas').boundingBox();
+  await popup.mouse.move(measurementCanvas.x+measurementCanvas.width*.4,measurementCanvas.y+measurementCanvas.height*.45);await popup.mouse.down();
+  await popup.mouse.move(measurementCanvas.x+measurementCanvas.width*.6,measurementCanvas.y+measurementCanvas.height*.55,{steps:8});await popup.mouse.up();
   mkdirSync('outputs/stitch-qa',{recursive:true});await popup.screenshot({path:'outputs/stitch-qa/detached-stitch-measurement.png'});
-  await popup.getByRole('button',{name:'Ayrıca DICOM kimi saxla'}).click();
+  await popup.getByRole('button',{name:'Ölçülərlə DICOM saxla'}).click();
   await popup.waitForEvent('close',{timeout:30000});
   if(process.env.RADAZ_TEST_PROD==='1'){
    await page.getByText('Birləşmiş rentgen ayrıca DICOM seriyası kimi saxlandı.').waitFor({timeout:20000});
    return;
   }
   await page.waitForFunction(async()=>{const {getArchiveFiles}=await import('/lib/local-archive.ts');return (await getArchiveFiles('2.25.987654323')).length===3;},null,{timeout:20000});
-  const bytes=await page.evaluate(async()=>{const {getArchiveFiles}=await import('/lib/local-archive.ts');const {parseDicomFile}=await import('/lib/dicom-file.ts');for(const file of await getArchiveFiles('2.25.987654323')){const data=new Uint8Array(await file.arrayBuffer());if(parseDicomFile(data).string('x0008103e')==='RADAZ Stitched Radiograph')return [...data];}throw Error('Derived DICOM missing');});
+  const bytes=await page.evaluate(async()=>{const {getArchiveFiles}=await import('/lib/local-archive.ts');const {parseDicomFile}=await import('/lib/dicom-file.ts');for(const file of await getArchiveFiles('2.25.987654323')){const data=new Uint8Array(await file.arrayBuffer());if(parseDicomFile(data).string('x00080060')==='OT')return [...data];}throw Error('Derived DICOM missing');});
   const data=Uint8Array.from(bytes),ds=dicomParser.parseDicom(data);assert.equal(ds.string('x00280301'),'YES');
   const element=ds.elements.x7fe00010,rgb=data.subarray(element.dataOffset,element.dataOffset+element.length);
   assert.ok(rgb.some((v,i)=>i%3===0&&v!==rgb[i+1]),'measurement color is in exported pixels');

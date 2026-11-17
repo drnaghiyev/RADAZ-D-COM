@@ -129,7 +129,7 @@ function ToolbarWorkspaceBody({scope,children}:{scope:string;children:ReactNode}
       });
       const fixed=[...header.querySelectorAll<HTMLElement>('.brand,.mode-identity,.records-header-filters')]
         .reduce((sum,node)=>sum+(node.matches('.records-header-filters')?Math.min(680,header.clientWidth*.6):node.getBoundingClientRect().width)+gap,0);
-      const available=header.clientWidth-fixed-(parseFloat(style.paddingLeft)||0)-(parseFloat(style.paddingRight)||0);
+      const available=Math.min(header.clientWidth,window.innerWidth-header.getBoundingClientRect().left)-fixed-(parseFloat(style.paddingLeft)||0)-(parseFloat(style.paddingRight)||0)-44;
       let used=groups.reduce((sum,group)=>sum+group.width,0);
       const hidden:string[]=[];
       // Keep workspace switching and measurements immediately reachable when possible.
@@ -144,7 +144,7 @@ function ToolbarWorkspaceBody({scope,children}:{scope:string;children:ReactNode}
       setOverflow(current=>current.join('|')===hidden.join('|')?current:hidden);
     };
     const schedule=()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(measure);};
-    const observer=new ResizeObserver(schedule);observer.observe(header);
+    const observer=new ResizeObserver(schedule);observer.observe(header);for(const node of root.current!.querySelectorAll<HTMLElement>('[data-toolbar-group]'))observer.observe(node);
     const mutations=new MutationObserver(schedule);mutations.observe(root.current!,{childList:true,subtree:true});
     window.addEventListener('resize',schedule);schedule();
     return()=>{cancelAnimationFrame(frame);observer.disconnect();mutations.disconnect();window.removeEventListener('resize',schedule);};

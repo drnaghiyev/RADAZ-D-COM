@@ -463,7 +463,7 @@ function ViewportPane({ onHover, projectionViews, anatomyControl, anatomyVolume,
   </section>;
 }
 
-export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) {
+export default function Home({ detachedMode, initialFiles }: { detachedMode?: DetachedMode; initialFiles?:File[] }) {
   useUiTranslation();
   const {limited,label:licenseStatus}=useViewerLicense();
   const [ready, setReady] = useState(false);
@@ -989,6 +989,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         if (detachedMode && new URLSearchParams(window.location.search).has('handoff')) {
           if(!listRef.current.length)setStatus('Açıq müayinə gözlənilir…'); return;
         }
+        if(initialFiles?.length){await importFiles(initialFiles);return;}
         const archivedStudies = detachedMode?[]:requestedStudies(window.location.hash);
         if (archivedStudies.length) {
           setStatus('Local arxivdən müayinə açılır…');

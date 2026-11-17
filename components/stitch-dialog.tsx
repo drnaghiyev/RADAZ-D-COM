@@ -38,7 +38,7 @@ function cropEdges(x:number,y:number,r:StitchRect,tolerance:number){
  return edges;
 }
 
-export function StitchDialog({open,onOpenChange,series,initialImage,onCreated,standalone=false}:{open:boolean;onOpenChange:(open:boolean)=>void;series:Item[];initialImage?:string;onCreated:(file:File)=>Promise<void>;standalone?:boolean}){
+export function StitchDialog({open,onOpenChange,series,initialImage,onCreated,onMeasure,standalone=false}:{open:boolean;onOpenChange:(open:boolean)=>void;series:Item[];initialImage?:string;onCreated:(file:File)=>Promise<void>;onMeasure?:(file:File)=>void;standalone?:boolean}){
  const options=series.flatMap(item=>item.imageIds.map((id,index)=>({id,label:`${item.name} · ${index+1}/${item.imageIds.length}`})));
  const optionsKey=options.map(item=>item.id).join('|');
  const [first,setFirst]=useState(''),[second,setSecond]=useState(''),[rasters,setRasters]=useState<[Raster,Raster]|null>(null);
@@ -46,6 +46,7 @@ export function StitchDialog({open,onOpenChange,series,initialImage,onCreated,st
  const [topOffset,setTopOffset]=useState({x:0,y:0}),[topScale,setTopScale]=useState(1);
  const [brightness,setBrightness]=useState<[number,number]>([0,0]),[contrast,setContrast]=useState<[number,number]>([1,1]),[feather,setFeather]=useState(true);
  const [mode,setMode]=useState<Mode>('align'),[selected,setSelected]=useState<0|1>(1),[viewPan,setViewPan]=useState({x:0,y:0});
+ const [viewFit,setViewFit]=useState(1);
  const [marks,setMarks]=useState<StitchMeasure[]>([]),[draft,setDraft]=useState<StitchMeasure|null>(null),[selectedMark,setSelectedMark]=useState<string|null>(null);
  const markDrag=useRef<{id:string;point:number;start:StitchPoint;original:StitchPoint[]}|null>(null);
  const [error,setError]=useState(''),[busy,setBusy]=useState(false),[maximized,setMaximized]=useState(true),[minimized,setMinimized]=useState(false);
@@ -66,8 +67,8 @@ export function StitchDialog({open,onOpenChange,series,initialImage,onCreated,st
   setRasters(pair);setCrops([emptyCrop(),emptyCrop()]);setOffsetX(0);setOffsetY(Math.round(pair[0].height-Math.min(pair[0].height,pair[1].height*scale)*.12));setLowerScale(Math.max(.25,Math.min(4,scale)));setTopOffset({x:0,y:0});setTopScale(1);setBrightness([0,0]);setContrast([1,1]);setMarks([]);setDraft(null);setSelectedMark(null);
  }).catch(reason=>{if(!cancelled){setRasters(null);setError(reason instanceof Error?reason.message:String(reason));}});return()=>{cancelled=true;};},[open,first,second]);
 
- const view=()=>{if(!stage.current||!rasters)return null;const width=stage.current.clientWidth,height=stage.current.clientHeight,baseWidth=Math.max(rasters[0].width,rasters[1].width),baseHeight=rasters[0].height+rasters[1].height*.88,scale=Math.min(width/baseWidth,height/baseHeight);
-  return {width,height,scale,x:width/2-((layout?.left||0)+(layout?.width||baseWidth)/2)*scale+viewPan.x,y:height/2-((layout?.topEdge||0)+(layout?.height||baseHeight)/2)*scale+viewPan.y};};
+ const view=()=>{if(!stage.current||!rasters)return null;const width=stage.current.clientWidth,height=stage.current.clientHeight,baseWidth=Math.max(rasters[0].width,rasters[1].width),baseHeight=rasters[0].height+rasters[1].height*.88,scale=Math.min(width/baseWidth,height/baseHeight)*viewFit;
+  return {width,height,scale,x:(width-baseWidth*scale)/2+viewPan.x,y:(height-baseHeight*scale)/2+viewPan.y};};
  useEffect(()=>{if(!rasters||!layers||!layout||!canvasNode||!stageNode||minimized||!open)return;const redraw=()=>{
   const v=view(),target=canvasNode;if(!v||!target)return;const dpr=Math.min(2,window.devicePixelRatio||1);target.width=Math.max(1,Math.round(v.width*dpr));target.height=Math.max(1,Math.round(v.height*dpr));
   const ctx=target.getContext('2d');if(!ctx)return;ctx.scale(dpr,dpr);ctx.fillStyle='#000';ctx.fillRect(0,0,v.width,v.height);
@@ -77,7 +78,7 @@ export function StitchDialog({open,onOpenChange,series,initialImage,onCreated,st
   if(mode==='crop'){for(const i of [0,1] as const){const r=layout.rects[i];ctx.strokeStyle=i===selected?'#58e6f0':'#e4ad5b';ctx.lineWidth=2/v.scale;ctx.setLineDash([8/v.scale,5/v.scale]);ctx.strokeRect(r.x,r.y,r.width,r.height);ctx.setLineDash([]);
     for(const [x,y] of [[r.x+r.width/2,r.y],[r.x+r.width/2,r.y+r.height],[r.x,r.y+r.height/2],[r.x+r.width,r.y+r.height/2]]){ctx.fillStyle=ctx.strokeStyle;ctx.fillRect(x-5/v.scale,y-5/v.scale,10/v.scale,10/v.scale);}}}
   ctx.restore();};redraw();const observer=new ResizeObserver(redraw);observer.observe(stageNode);return()=>observer.disconnect();
- },[rasters,layers,crops,offsetX,offsetY,lowerScale,topOffset,topScale,brightness,contrast,feather,mode,selected,maximized,minimized,open,stageNode,canvasNode,viewPan,marks,draft,selectedMark]);
+ },[rasters,layers,crops,offsetX,offsetY,lowerScale,topOffset,topScale,brightness,contrast,feather,mode,selected,maximized,minimized,open,stageNode,canvasNode,viewPan,viewFit,marks,draft,selectedMark]);
 
  const pointer=(event:ReactPointerEvent<HTMLDivElement>)=>{const v=view(),bounds=stage.current?.getBoundingClientRect();if(!v||!bounds||!layout)return null;
   const x=event.clientX-bounds.left,y=event.clientY-bounds.top;return {x,y,worldX:(x-v.x)/v.scale,worldY:(y-v.y)/v.scale,view:v};};
@@ -111,17 +112,19 @@ export function StitchDialog({open,onOpenChange,series,initialImage,onCreated,st
   if(clicked===0){setTopOffset(current=>({x:Math.round(p.worldX-(p.worldX-current.x)*factor),y:Math.round(p.worldY-(p.worldY-current.y)*factor)}));setTopScale(next);}
   else{setOffsetX(value=>Math.round(p.worldX-(p.worldX-value)*factor));setOffsetY(value=>Math.round(p.worldY-(p.worldY-value)*factor));setLowerScale(next);}};
  const reset=()=>{if(!rasters)return;setCrops([emptyCrop(),emptyCrop()]);setOffsetX(0);setOffsetY(Math.round(rasters[0].height-Math.min(rasters[0].height,rasters[1].height)*.12));setLowerScale(1);setTopOffset({x:0,y:0});setTopScale(1);setBrightness([0,0]);setContrast([1,1]);setViewPan({x:0,y:0});setMarks([]);setDraft(null);setSelectedMark(null);};
- const centerFrames=()=>setViewPan({x:0,y:0});
- const save=async()=>{if(!rasters||!layers||busy)return;setBusy(true);setError('');try{
+ const centerFrames=()=>{const v=view();if(!v||!layout||!rasters)return;const baseWidth=Math.max(rasters[0].width,rasters[1].width),baseHeight=rasters[0].height+rasters[1].height*.88,scale=Math.min(v.width/layout.width,v.height/layout.height)*.96;setViewFit(scale/Math.min(v.width/baseWidth,v.height/baseHeight));setViewPan({x:(baseWidth/2-layout.left-layout.width/2)*scale,y:(baseHeight/2-layout.topEdge-layout.height/2)*scale});};
+ const save=async(measure=false)=>{if(!rasters||!layers||busy)return;setBusy(true);setError('');try{
   const merged=renderStitch(rasters,layers,stitch),ctx=merged.getContext('2d');if(!ctx)throw Error('Birləşmiş görüntü hazırlanmadı');
   const spacing=calibrated&&rasters[0].spacing?[rasters[0].spacing[0]/topScale,rasters[0].spacing[1]/topScale] as [number,number]:undefined;
   drawStitchMeasures(ctx,marks,spacing);
   ctx.save();ctx.resetTransform();ctx.font=`${Math.max(14,Math.min(24,Math.round(merged.width*.015)))}px Arial`;ctx.textBaseline='top';ctx.fillStyle='#f4f7f7';ctx.shadowColor='#000';ctx.shadowBlur=4;
   const label=[rasters[0].source.patientName,rasters[0].source.patientId,rasters[0].source.studyDate,'RADAZ STITCH'].filter(Boolean).join('  ·  ');
-  ctx.fillText(label,12,12,merged.width-24);ctx.restore();
+  if(!measure)ctx.fillText(label,12,12,merged.width-24);ctx.restore();
   const rgba=ctx.getImageData(0,0,merged.width,merged.height).data;
   const blob=await createStitchedDicom([rasters[0].source,rasters[1].source],merged.width,merged.height,rgba,spacing,true);
-  await onCreated(new File([blob],`RADAZ-Stitch-${Date.now()}.dcm`,{type:'application/dicom'}));onOpenChange(false);
+  const file=new File([blob],`RADAZ-Stitch-${Date.now()}.dcm`,{type:'application/dicom'});
+  if(measure&&onMeasure){onMeasure(file);return;}
+  await onCreated(file);onOpenChange(false);
  }catch(reason){setError(reason instanceof Error?reason.message:String(reason));}finally{setBusy(false);}};
 
  const onShortcut=(event:ReactKeyboardEvent)=>{if(event.altKey||event.ctrlKey||event.metaKey||event.target instanceof HTMLElement&&event.target.closest('input,select,textarea'))return;const key=event.key.toLowerCase();const modes:Record<string,Mode>={'1':'align','2':'crop','3':'pan','4':'window','l':'length','a':'angle','b':'cobb','r':'ellipse','e':'erase'};
@@ -133,11 +136,12 @@ export function StitchDialog({open,onOpenChange,series,initialImage,onCreated,st
     <button aria-label="Yaxınlaşdır" title="Seçilmiş kadrı yaxınlaşdır · +" onClick={()=>scaleSelected(1.1)}><ZoomIn size={16}/></button><button aria-label="Uzaqlaşdır" title="Seçilmiş kadrı uzaqlaşdır · −" onClick={()=>scaleSelected(.9)}><ZoomOut size={16}/></button><button title="Seçilmiş kadrın miqyasını sıfırla" onClick={()=>{if(selected===0)setTopScale(1);else setLowerScale(1);}}><Maximize2 size={16}/>Miqyası sıfırla</button>
     <button title="Görüntüləri mərkəzləşdir · C" onClick={centerFrames}><Focus size={16}/>Görüntüləri mərkəzləşdir</button>
     <span className="stitch-tool-separator"/>
-    <button className={mode==='length'?'active':''} aria-label="Uzunluq ölç" title="Uzunluq · L" onClick={()=>{setMode('length');setDraft(null);}}><Ruler size={16}/></button>
+    {onMeasure&&<button aria-label="Əsas Viewer ölçü alətləri" title="Əsas Viewer-in bütün ölçü alətləri" disabled={!rasters||busy} onClick={()=>void save(true)}><Ruler size={16}/></button>}
+    {!onMeasure&&<><button className={mode==='length'?'active':''} aria-label="Uzunluq ölç" title="Uzunluq · L" onClick={()=>{setMode('length');setDraft(null);}}><Ruler size={16}/></button>
     <button className={mode==='angle'?'active':''} aria-label="Bucaq ölç" title="Bucaq · A" onClick={()=>{setMode('angle');setDraft(null);}}><Triangle size={16}/></button>
     <button className={mode==='cobb'?'active':''} aria-label="Cobb bucağı ölç" title="Cobb · B" onClick={()=>{setMode('cobb');setDraft(null);}}><Waypoints size={16}/></button>
     <button className={mode==='ellipse'?'active':''} aria-label="Sahə ölç" title="Ellips sahəsi · R" onClick={()=>{setMode('ellipse');setDraft(null);}}><Circle size={16}/></button>
-    <button className={mode==='erase'?'active':''} aria-label="Ölçünü sil" title="Ölçünü sil · E / Delete" onClick={()=>{setMode('erase');setDraft(null);}}><Eraser size={16}/></button>
+    <button className={mode==='erase'?'active':''} aria-label="Ölçünü sil" title="Ölçünü sil · E / Delete" onClick={()=>{setMode('erase');setDraft(null);}}><Eraser size={16}/></button></>}
   </div><div ref={bindStage} className={`stitch-preview stitch-mode-${mode}`} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={()=>{gesture.current=null;markDrag.current=null;}} onPointerCancel={()=>{gesture.current=null;markDrag.current=null;}} onWheel={onWheel}><canvas ref={bindCanvas} aria-label="Birləşmiş rentgen ön baxışı"/></div>
   <p id="stitch-guidance" className="stitch-guidance">{mode==='align'?'Seçilmiş kadrı digər kadra uyğunlaşdırın.':mode==='crop'?'Kadrın yuxarı, aşağı və yan kənarından tutub kəsim sahəsini dəyişin.':mode==='window'?'Seçilmiş kadrda sağa-sola sürükləyin: parlaqlıq; yuxarı-aşağı: kontrast.':mode==='pan'?'Seçilmiş kadrı sürüşdürün. Siçan çarxı ilə yalnız həmin kadrı yaxınlaşdırın.':mode==='erase'?'Ölçünü silmək üçün xəttin üzərinə basın.':'Ölçü nöqtələrini ardıcıl qoyun; xətti və ya ucunu sürüşdürərək düzəldin.'} Q/W: kadr seçimi · C: ümumi mərkəz · L/A/B/R: ölçülər · Delete: sil.</p></div>
   <aside className="stitch-controls"><label>Yuxarı kadr<select value={first} onChange={event=>setFirst(event.target.value)}>{options.map(item=><option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
