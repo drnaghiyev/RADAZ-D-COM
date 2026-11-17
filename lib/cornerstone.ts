@@ -222,7 +222,7 @@ export async function loadDicomThumbnail(imageId: string): Promise<string | unde
 }
 
 /** Decode compressed DICOM for the offline CD preview without retaining a volume. */
-export async function dicomMediaPreview(bytes: Uint8Array): Promise<{rows:number;columns:number;pixels:Uint8Array}> {
+export async function dicomMediaPreview(bytes: Uint8Array): Promise<{rows:number;columns:number;pixels:Uint8Array;values?:Float32Array;modality?:string;spacing?:[number,number]}> {
   const ds=parseDicomFile(bytes),id=registerLocalDicom(bytes,ds);
   try {
     await decodeRegisteredDicom(id);
@@ -230,14 +230,19 @@ export async function dicomMediaPreview(bytes: Uint8Array): Promise<{rows:number
     const scale=Math.min(1,1024/item.columns,1024/item.rows);
     const columns=Math.max(1,Math.round(item.columns*scale)),rows=Math.max(1,Math.round(item.rows*scale));
     const pixels=new Uint8Array(columns*rows),{wl,ww}=defaultWindow(item);
+    const modality=ds.string('x00080060')||'';
+    const values=modality==='CT'&&!item.color?new Float32Array(columns*rows):undefined;
+    const sourceSpacing=(ds.string('x00280030')||ds.string('x00181164')||'').split('\\').map(Number);
+    const spacing=sourceSpacing.length===2&&sourceSpacing.every(value=>Number.isFinite(value)&&value>0)?[sourceSpacing[0]*item.rows/rows,sourceSpacing[1]*item.columns/columns] as [number,number]:undefined;
     const invert=ds.string('x00280004')==='MONOCHROME1';
     for(let y=0;y<rows;y++)for(let x=0;x<columns;x++){
       const p=Math.min(item.rows-1,Math.floor((y+.5)*item.rows/rows))*item.columns+Math.min(item.columns-1,Math.floor((x+.5)*item.columns/columns));
       const sample=item.color?item.pixels[p*3]:item.pixels[p];
+      if(values)values[y*columns+x]=sample;
       const value=Math.round(Math.max(0,Math.min(1,(sample-wl+ww/2)/ww))*255);
       pixels[y*columns+x]=invert?255-value:value;
     }
-    return {rows,columns,pixels};
+    return {rows,columns,pixels,values,modality,spacing};
   } finally { releaseLocalDicoms([id]); }
 }
 

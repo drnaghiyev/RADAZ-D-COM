@@ -1,7 +1,8 @@
 import {measurementCopies} from './measurement-copies';
 import JSZip from 'jszip';
 import type { ArchiveStudy } from './local-archive';
-import { readDicomPixels } from './dicom-pixels';
+import { readDicomPixels,bytesToBase64,type DicomPixelImage } from './dicom-pixels';
+import {viewerHtml} from './dicom-lite-html';
 import {parseDicomFile} from './dicom-file';
 import {createMeasurementDicom,type MeasurementDicomSource} from './measurement-dicom';
 import {saveMeasurementCopy} from './measurement-copies';
@@ -12,7 +13,7 @@ export async function buildDicomCdPackage(study: ArchiveStudy, files: File[], pr
   const zip = new JSZip();
   const dicom = zip.folder('DICOM')!;
   const previews = zip.folder('PREVIEWS')!;
-  const viewerImages: Array<{ name: string; path: string }> = [];
+  const viewerImages: Array<{ name: string; path: string; spacing?:[number,number]; hu?:string; rows:number; columns:number }> = [];
   for (let index = 0; index < files.length; index++) {
     const file = files[index];
     dicom.file(`IMG${String(index + 1).padStart(6, '0')}.dcm`, file);
@@ -30,7 +31,11 @@ export async function buildDicomCdPackage(study: ArchiveStudy, files: File[], pr
       const preview=await new Promise<Blob>((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(Error('CD önbaxışı hazırlana bilmədi')),'image/jpeg',.87));
       const path=`PREVIEWS/IMG${String(index+1).padStart(6,'0')}.jpg`;
       previews.file(path.slice('PREVIEWS/'.length),preview);
-      viewerImages.push({name:file.name,path});
+      const calibrated=image as Partial<DicomPixelImage>,raw=calibrated.values;
+      const hu=raw&&calibrated.modality==='CT'?`HU/IMG${String(index+1).padStart(6,'0')}.js`:undefined;
+      if(hu&&raw){const values=new Int16Array(raw.length);for(let k=0;k<values.length;k++)values[k]=Math.max(-32768,Math.min(32767,Math.round(raw[k])));
+        zip.file(hu,'window.__RADAZ_HU={index:'+viewerImages.length+',data:"'+bytesToBase64(new Uint8Array(values.buffer))+'"};',{compression:'DEFLATE'});}
+      viewerImages.push({name:file.name,path,spacing:'spacing' in image?image.spacing as [number,number]|undefined:undefined,hu,rows:image.rows,columns:image.columns});
     } catch { /* DICOM file remains on the media even when Lite preview cannot decode it. */ }
     if (index % 10 === 0) progress?.(`CD paketi hazırlanır: ${index + 1} / ${files.length}`);
   }
@@ -69,13 +74,3 @@ export async function createDicomCdPackage(study: ArchiveStudy, files: File[], p
   link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 30_000);
   return previews;
 }
-
-function viewerHtml(study: ArchiveStudy, images: Array<{ name: string; path: string }>) {
-  const payload = JSON.stringify({ patient: study.patient, images }).replace(/</g, '\\u003c');
-  return `<!doctype html><html lang="az"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>RADAZ DICOM Lite</title><style>
-*{box-sizing:border-box}html,body{margin:0;height:100%;overflow:hidden;background:#05090d;color:#eaf7ff;font:14px Arial}.bar{height:58px;display:flex;align-items:center;gap:10px;padding:8px 14px;background:#102331;border-bottom:1px solid #315269}.brand{font-size:19px;font-weight:800;letter-spacing:.08em;margin-right:auto}.brand small{display:block;color:#7bc9eb;font-size:9px}.bar button{border:1px solid #385d73;background:#17364a;color:#eaf7ff;border-radius:5px;padding:8px 11px;font-weight:700}.bar button.on{background:#1686b9}.meta{color:#a9cad9}.stage{height:calc(100% - 58px);position:relative;display:grid;place-items:center;overflow:hidden}.stage img{max-width:100%;max-height:100%;object-fit:contain;transform-origin:center}.info{position:absolute;left:12px;top:10px;color:#bce7f8;text-shadow:0 1px 2px #000;white-space:pre-line}.measure{position:absolute;inset:0;pointer-events:none}.hint{position:absolute;right:12px;bottom:10px;color:#86aebe}</style></head><body>
-<div class="bar"><div class="brand">RADAZ<small>DICOM LITE</small></div><span class="meta">${escapeHtml(study.patient)} · ${escapeHtml(study.description || '')}</span><button data-tool="pan">Pan</button><button data-tool="zoom">Zoom</button><button data-tool="wl">İşıq / kontrast</button><button data-tool="measure">Ölçü</button><button id="reset">Sıfırla</button></div><div class="stage" id="stage"><img id="image" alt="DICOM önbaxışı"><canvas class="measure" id="overlay"></canvas><div class="info" id="info"></div><div class="hint">Mouse çarxı: görüntülər · Klinik baxış üçün DICOMDIR açın</div></div>
-<script>const DATA=${payload};let i=0,tool='pan',scale=1,tx=0,ty=0,level=127,width=255,start=null,line=null;const c=document.querySelector('#image'),o=document.querySelector('#overlay'),ox=o.getContext('2d'),stage=document.querySelector('#stage'),info=document.querySelector('#info');function draw(){const im=DATA.images[i];if(!im){c.hidden=true;info.textContent='Lite önbaxışı hazırlanmayan görüntülər var. DICOMDIR faylını DICOM viewer-də açın.';return}c.hidden=false;c.src=im.path;c.style.transform='translate('+tx+'px,'+ty+'px) scale('+scale+')';c.style.filter='brightness('+Math.max(.1,1+(127-level)/255)+') contrast('+Math.max(.1,255/width)+')';info.textContent=DATA.patient+'\\n'+im.name+'\\n'+(i+1)+' / '+DATA.images.length;overlay()}function overlay(){o.width=stage.clientWidth;o.height=stage.clientHeight;ox.strokeStyle='#39ff72';ox.lineWidth=2;if(line){ox.beginPath();ox.moveTo(line[0],line[1]);ox.lineTo(line[2],line[3]);ox.stroke();const d=Math.hypot(line[2]-line[0],line[3]-line[1]);ox.fillStyle='#ffe24a';ox.fillText(Math.round(d)+' px',line[2]+8,line[3]-8)}}document.querySelectorAll('[data-tool]').forEach(b=>b.onclick=()=>{tool=b.dataset.tool;document.querySelectorAll('[data-tool]').forEach(x=>x.classList.toggle('on',x===b))});stage.onwheel=e=>{e.preventDefault();i=(i+(e.deltaY>0?1:-1)+DATA.images.length)%DATA.images.length;draw()};stage.onpointerdown=e=>{start=[e.clientX,e.clientY,tx,ty,scale,level,width];stage.setPointerCapture(e.pointerId)};stage.onpointermove=e=>{if(!start)return;const dx=e.clientX-start[0],dy=e.clientY-start[1];if(tool==='pan'){tx=start[2]+dx;ty=start[3]+dy}else if(tool==='zoom')scale=Math.max(.15,start[4]*(1-dy/180));else if(tool==='wl'){level=start[5]+dy;width=Math.max(1,start[6]+dx*2)}else line=[start[0],start[1],e.clientX,e.clientY];draw()};stage.onpointerup=()=>start=null;document.querySelector('#reset').onclick=()=>{scale=1;tx=ty=0;level=127;width=255;line=null;draw()};addEventListener('resize',overlay);document.querySelector('[data-tool="pan"]').classList.add('on');draw();</script></body></html>`;
-}
-
-const escapeHtml = (value: string) => value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]!));

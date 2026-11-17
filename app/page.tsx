@@ -1,6 +1,7 @@
 'use client';
 import {SharedVolumeView} from '@/components/shared-volume-view';
 import {MeasurementCopies} from '@/components/measurement-copies';
+import {StitchDialog} from '@/components/stitch-dialog';
 import {CineControls} from '@/components/cine-controls';
 import {workstationSettings} from '@/lib/volume-workstation';
 import {VolumeDisplayControls} from '@/components/volume-display-controls';
@@ -445,7 +446,7 @@ function ViewportPane({ onHover, projectionViews, anatomyControl, anatomyVolume,
     {!limited && <LocalizerOverlay element={elementRef.current} viewport={viewport} imageId={imageId} otherImages={otherImages} enabled={localizers} onMoveSource={onMoveSource} onMoveIntersection={onMoveIntersection} targetPanel={id} onRotateSource={onRotateSource} onRotateStart={onRotateStart} onPreviewRotateSource={onPreviewRotateSource}/>}
     <ViewerInteractionOverlay anatomyLabel={anatomyLabel} viewport={viewport} element={elementRef.current} imageId={imageId} tool={tool} slice={slice} count={series?.imageIds.length || 0}
       marks={paneMarks} selectedMarkId={selectedMarkId} onSelectMark={onSelectMark} cursor={cursor} onCursor={onCursor} onEditArrow={setEditingArrow} onUpdate={onUpdateMark} onAdd={mark=>{addPaneMark(mark);if(mark.kind==='arrow'&&!mark.anatomyId)setEditingArrow(mark.id);}} onRemove={onRemoveMark} onSelect={onSelect} navigate={navigate}/>
-    <MeasurementCopies pane={containerRef.current} imageId={imageId} modality={series?.modality} studyId={series?.studyId}/>
+    <MeasurementCopies pane={containerRef.current} imageId={imageId} modality={series?.modality} seriesName={series?.name} studyId={series?.studyId}/>
     <ViewportMouseControls tool={tool} container={containerRef} element={elementRef.current} viewport={viewport} imageId={imageId} disabled={limited} marks={paneMarks}
       onSelect={onSelect} onRemove={onRemoveMark} onClear={clearPaneImage} onEditArrow={setEditingArrow}/>
     {editingArrow&&paneMarks.filter(mark=>mark.id===editingArrow&&mark.imageId===imageId&&mark.kind==='arrow').map(mark=><ArrowCommentEditor key={mark.id} mark={mark} onSave={comment=>onUpdateMark(mark.id,{comment})} onClose={()=>setEditingArrow(null)}/>)}
@@ -508,6 +509,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   const [maximizedPane, setMaximizedPane] = useState<string | null>(null);
   const [maximizedMprPane, setMaximizedMprPane] = useState<string | null>(null);
   const [datasetVersion, setDatasetVersion] = useState(0);
+  const [stitchOpen,setStitchOpen]=useState(false);
   const [workspace, setWorkspace] = useState<'viewer' | 'mpr' | '3d'>(detachedMode || 'viewer');
   useEffect(()=>{if(limited){setTool('scroll');setLayout({rows:1,columns:1});setActive('A');setMaximizedPane(null);setLocalizers(false);setSelectedMarkId(null);setWorkspace('viewer');}},[limited]);
   const [mprSettings, setMprSettings] = useState<MprSettings>(newMprSettings);
@@ -1488,7 +1490,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         {!limited&&workspace==='viewer'&&<ToolbarGroup className="toolbar-group" groupId="smart-volume" order={61}><Button aria-label="Smart Volume" title="Smart Volume" disabled={!anatomyVolumeSeries||anatomyVolumeSeries.loading||!['CT','MR'].includes(anatomyVolumeSeries.modality)} onClick={()=>{if(anatomyVolumeSeries)setSmartVolumeSource({id:anatomyVolumeSeries.id,imageIds:[...anatomyVolumeSeries.imageIds],modality:anatomyVolumeSeries.modality});}}><Box size={19}/></Button></ToolbarGroup>}
         {!limited && detachedMode !== '3d' && <ToolbarGroup className="toolbar-group" role="group" aria-label={tr('ui.navigation_and_measurement_e7a8e')} groupId="measure" order={70}>{viewTools.map(t => <Button key={t.id} variant="ghost" className={`header-control view-tool ${tool === t.id ? 'selected-tool' : ''}`} aria-pressed={tool === t.id} title={`${t.label} · ${t.hint}`} onClick={() => setTool(t.id)}><t.icon size={17}/><span>{t.label}</span></Button>)}
         <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className="header-control" title={tr('ui.measurement_tools_0762c')} aria-label={tr('ui.measurement_tools_0762c')}><Ruler size={17}/><span>{tr('ui.measurements_a4480')}</span><ChevronDown size={14}/></Button></DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="header-menu">{measureTools.map(t => <DropdownMenuItem key={t.id} toolbarId={t.id} onSelect={() => setTool(t.id)} className={tool === t.id ? 'menu-selected' : ''}><t.icon size={16}/>{t.label}<kbd>{t.hint}</kbd></DropdownMenuItem>)}<div className="menu-separator"/><DropdownMenuItem onSelect={() => setClearToken(x => x + 1)}><Trash2 size={16}/> {tr('ui.delete_all_on_current_slice_cc1ac')}<kbd>Ctrl+D</kbd></DropdownMenuItem><div className="menu-separator"/><DropdownMenuItem onSelect={()=>setMeasurementSettingsOpen(true)}><Settings2 size={16}/>Ölçü ayarları <kbd>{measurementUnit==='cm'?'sm':'mm'}</kbd></DropdownMenuItem><div className="menu-hint">{tr('ui.select_a_measurement_delete_to_remove_7f481')}</div></DropdownMenuContent>
+          <DropdownMenuContent align="end" className="header-menu">{measureTools.map(t => <DropdownMenuItem key={t.id} toolbarId={t.id} onSelect={() => setTool(t.id)} className={tool === t.id ? 'menu-selected' : ''}><t.icon size={16}/>{t.label}<kbd>{t.hint}</kbd></DropdownMenuItem>)}{currentSeries&&['CR','DX','DR','RG','RF'].includes(currentSeries.modality)&&<><div className="menu-separator"/><DropdownMenuItem onSelect={()=>setStitchOpen(true)}><Layers3 size={16}/>İki rentgeni birləşdir (stitch)</DropdownMenuItem></>}<div className="menu-separator"/><DropdownMenuItem onSelect={() => setClearToken(x => x + 1)}><Trash2 size={16}/> {tr('ui.delete_all_on_current_slice_cc1ac')}<kbd>Ctrl+D</kbd></DropdownMenuItem><div className="menu-separator"/><DropdownMenuItem onSelect={()=>setMeasurementSettingsOpen(true)}><Settings2 size={16}/>Ölçü ayarları <kbd>{measurementUnit==='cm'?'sm':'mm'}</kbd></DropdownMenuItem><div className="menu-hint">{tr('ui.select_a_measurement_delete_to_remove_7f481')}</div></DropdownMenuContent>
         </DropdownMenu>
         </ToolbarGroup>}
         {!limited && detachedMode !== '3d' && <ToolbarGroup className="toolbar-group" role="group" aria-label={tr('ui.window_and_localizer_1e413')} groupId="window" order={80}>
@@ -1513,6 +1515,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       <ToolbarGroup className="toolbar-group help-command" groupId="help" order={100}>{workspace!=='3d'&&<DicomInfoButton imageId={currentImages[workspace==='mpr'?mprActive:active]}/>}<AppHelpMenu/></ToolbarGroup>
     </header>
     <MeasurementSettings open={measurementSettingsOpen} onOpenChange={setMeasurementSettingsOpen}/>
+    <StitchDialog open={stitchOpen} onOpenChange={setStitchOpen} series={seriesList.filter(s=>s.studyId===currentSeries?.studyId&&['CR','DX','DR','RG','RF'].includes(s.modality))} initialImage={currentImages[active]} onCreated={async file=>{await saveArchiveFiles([file]);await importFiles([file]);setStatus('Birləşmiş rentgen ayrıca DICOM seriyası kimi saxlandı.');}}/>
     <Dialog open={importOpen} onOpenChange={open => { if (!importBusy) setImportOpen(open); }}>
       <DialogContent className="import-dialog" showCloseButton={false}>
         <DialogHeader><DialogTitle>{tr('ui.folder_and_zip_rar_import_a1225')}</DialogTitle><DialogDescription>{tr('ui.select_multiple_sources_and_open_them_togethe_b9a18')}</DialogDescription></DialogHeader>

@@ -12,13 +12,23 @@ export type MeasurementDicomSource = {
 
 const randomUID = () => `2.25.${BigInt('0x' + crypto.randomUUID().replaceAll('-', '')).toString(10)}`;
 
-async function measuredSeriesUID(studyUID: string) {
-  const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`RADAZ-measured-${studyUID}`)));
+async function measuredSeriesUID(studyUID: string,description:string) {
+  const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`RADAZ-${description}-${studyUID}`)));
   return `2.25.${BigInt('0x' + [...hash.subarray(0, 16)].map(byte => byte.toString(16).padStart(2, '0')).join('')).toString(10)}`;
 }
 
 /** A derived RGB Secondary Capture. It never mutates the source DICOM. */
 export async function createMeasurementDicom(source: MeasurementDicomSource, width: number, height: number, rgba: Uint8ClampedArray): Promise<Blob> {
+  return createDerivedRgbDicom(source,[source],width,height,rgba,'RADAZ Measured Images',true);
+}
+
+/** A separate stitched image with both originals referenced in DICOM metadata. */
+export async function createStitchedDicom(sources: [MeasurementDicomSource,MeasurementDicomSource], width:number,height:number,rgba:Uint8ClampedArray,pixelSpacing?:[number,number]):Promise<Blob>{
+  if(sources[0].studyUID!==sources[1].studyUID||sources[0].patientId!==sources[1].patientId)throw Error('Yalnız eyni pasiyent və müayinənin görüntüləri birləşdirilə bilər');
+  return createDerivedRgbDicom(sources[0],sources,width,height,rgba,'RADAZ Stitched Radiograph',false,pixelSpacing);
+}
+
+async function createDerivedRgbDicom(source:MeasurementDicomSource,references:MeasurementDicomSource[],width:number,height:number,rgba:Uint8ClampedArray,description:string,burnedIn:boolean,pixelSpacing?:[number,number]):Promise<Blob>{
   if (!source.studyUID || !source.sopUID || !source.sopClassUID || width < 1 || height < 1 || width > 65535 || height > 65535 || rgba.length !== width * height * 4)
     throw new Error('Ölçülü DICOM üçün mənbə və görüntü ölçüsü düzgün deyil');
   const rgb = new Uint8Array(width * height * 3);
@@ -28,17 +38,18 @@ export async function createMeasurementDicom(source: MeasurementDicomSource, wid
   const sopUID = randomUID();
   const dataset: Record<string, unknown> = {
     SpecificCharacterSet: 'ISO_IR 192', SOPClassUID: SECONDARY_CAPTURE, SOPInstanceUID: sopUID,
-    StudyInstanceUID: source.studyUID, SeriesInstanceUID: await measuredSeriesUID(source.studyUID),
+    StudyInstanceUID: source.studyUID, SeriesInstanceUID: await measuredSeriesUID(source.studyUID,description),
     PatientName: source.patientName || 'UNKNOWN', PatientID: source.patientId || '',
     PatientBirthDate: source.birthDate || '', PatientSex: source.patientSex || '',
     StudyDate: source.studyDate || date, StudyTime: source.studyTime || time,
     SeriesDate: date, SeriesTime: time, ContentDate: date, ContentTime: time,
     InstanceCreationDate: date, InstanceCreationTime: time,
     AccessionNumber: source.accessionNumber || '', StudyDescription: source.studyDescription || '',
-    Modality: 'OT', SeriesDescription: 'RADAZ Measured Images', SeriesNumber: '900',
+    Modality: 'OT', SeriesDescription: description, SeriesNumber: description.includes('Stitched')?'901':'900',
     InstanceNumber: source.instanceNumber || '1', Manufacturer: 'RADAZ',
-    ImageType: ['DERIVED', 'SECONDARY'], ConversionType: 'WSD', BurnedInAnnotation: 'YES',
-    SourceImageSequence: [{ReferencedSOPClassUID: source.sopClassUID, ReferencedSOPInstanceUID: source.sopUID}],
+    ImageType: ['DERIVED', 'SECONDARY'], ConversionType: 'WSD', BurnedInAnnotation: burnedIn?'YES':'NO',
+    SourceImageSequence: references.map(item=>({ReferencedSOPClassUID:item.sopClassUID,ReferencedSOPInstanceUID:item.sopUID})),
+    ...(pixelSpacing?{PixelSpacing:pixelSpacing.map(String)}:{}),
     SamplesPerPixel: 3, PhotometricInterpretation: 'RGB', PlanarConfiguration: 0,
     Rows: height, Columns: width, BitsAllocated: 8, BitsStored: 8, HighBit: 7, PixelRepresentation: 0,
   };

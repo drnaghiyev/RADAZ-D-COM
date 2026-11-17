@@ -4,6 +4,7 @@ export type DicomPixelImage = {
   overlay?: HTMLCanvasElement;
   name: string; rows: number; columns: number; pixels: Uint8Array;
   windowCenter: number; windowWidth: number; photometric: string;
+  values?: Float32Array; spacing?: [number,number]; modality?: string;
 };
 
 const firstNumber = (value: string | undefined, fallback: number) => {
@@ -49,7 +50,8 @@ export async function readDicomPixels(file: File): Promise<DicomPixelImage | nul
     if (invert) value = 255 - value;
     pixels[index] = value;
   }
-  return { name: file.name, rows, columns, pixels, windowCenter, windowWidth, photometric: invert ? 'MONOCHROME1' : 'MONOCHROME2' };
+  const spacing=(data.string('x00280030')||data.string('x00181164')||'').split('\\').map(Number);
+  return { name: file.name, rows, columns, pixels, values:raw, spacing:spacing.length===2&&spacing.every(value=>Number.isFinite(value)&&value>0)?spacing as [number,number]:undefined,modality:data.string('x00080060')||'',windowCenter, windowWidth, photometric: invert ? 'MONOCHROME1' : 'MONOCHROME2' };
 }
 
 export function bytesToBase64(bytes: Uint8Array): string {
