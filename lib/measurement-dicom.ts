@@ -23,9 +23,9 @@ export async function createMeasurementDicom(source: MeasurementDicomSource, wid
 }
 
 /** A separate stitched image with both originals referenced in DICOM metadata. */
-export async function createStitchedDicom(sources: [MeasurementDicomSource,MeasurementDicomSource], width:number,height:number,rgba:Uint8ClampedArray,pixelSpacing?:[number,number]):Promise<Blob>{
+export async function createStitchedDicom(sources: [MeasurementDicomSource,MeasurementDicomSource], width:number,height:number,rgba:Uint8ClampedArray,pixelSpacing?:[number,number],burnedIn=true):Promise<Blob>{
   if(sources[0].studyUID!==sources[1].studyUID||sources[0].patientId!==sources[1].patientId)throw Error('Yalnız eyni pasiyent və müayinənin görüntüləri birləşdirilə bilər');
-  return createDerivedRgbDicom(sources[0],sources,width,height,rgba,'RADAZ Stitched Radiograph',false,pixelSpacing);
+  return createDerivedRgbDicom(sources[0],sources,width,height,rgba,'RADAZ Stitched Radiograph',burnedIn,pixelSpacing);
 }
 
 async function createDerivedRgbDicom(source:MeasurementDicomSource,references:MeasurementDicomSource[],width:number,height:number,rgba:Uint8ClampedArray,description:string,burnedIn:boolean,pixelSpacing?:[number,number]):Promise<Blob>{

@@ -24,7 +24,7 @@ test('measured X-ray is a separate valid RGB DICOM with source reference',async(
 test('stitched radiograph is a separate DICOM referencing both sources',async()=>{
  const source={studyUID:'1.2.3.4',sopUID:'1.2.3.5',sopClassUID:'1.2.840.10008.5.1.4.1.1.1',patientName:'TEST^PATIENT',patientId:'QA',studyDate:'20261117',studyTime:'100000',accessionNumber:'',studyDescription:'',birthDate:'',patientSex:'',instanceNumber:'1'};
  const second={...source,sopUID:'1.2.3.6',instanceNumber:'2'};
- const blob=await createStitchedDicom([source,second],2,2,new Uint8ClampedArray(16).fill(255),[.2,.2]);
+ const blob=await createStitchedDicom([source,second],2,2,new Uint8ClampedArray(16).fill(255),[.2,.2],false);
  const bytes=new Uint8Array(await blob.arrayBuffer()),ds=dicomParser.parseDicom(bytes);
  assert.equal(ds.string('x0008103e'),'RADAZ Stitched Radiograph');
  assert.equal(ds.string('x00280030'),'0.2\\0.2');
