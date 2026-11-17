@@ -14,7 +14,7 @@ import {StitchMeasurementViewport,type StitchMeasurementHandle} from './stitch-m
 
 type Item={id:string;name:string;modality:string;studyId:string;imageIds:string[]};
 type Raster=StitchRaster&{source:MeasurementDicomSource;spacing?:[number,number];burnedIn:boolean};
-type Mode='align'|'crop'|'pan'|'window'|StitchMeasureKind|'erase';
+type Mode='none'|'align'|'crop'|'pan'|'window'|StitchMeasureKind|'erase';
 type Gesture={mode:Mode|'view';startX:number;startY:number;offsetX:number;offsetY:number;brightness:number;contrast:number;crop:Crop;edges:('left'|'right'|'top'|'bottom')[];layer:0|1;scale:number};
 const number=(value:string|undefined)=>{const parsed=Number(value);return Number.isFinite(parsed)&&parsed>0?parsed:0;};
 
@@ -51,8 +51,10 @@ export function StitchDialog({open,onOpenChange,series,initialImage,onCreated,on
  const [viewFit,setViewFit]=useState(1);
  const [measurementFile,setMeasurementFile]=useState<File|null>(null),[measurementTool,setMeasurementTool]=useState<Tool|null>(null);
  const measurementViewport=useRef<StitchMeasurementHandle>(null);
+ const renderedGeometry=useRef('');
+ const [measurementFileGeometry,setMeasurementFileGeometry]=useState<import('@/lib/stitch-annotation-geometry').StitchAnnotationGeometry|null>(null);
  const measurementGeometry=JSON.stringify([first,second,crops,offsetX,offsetY,lowerScale,topOffset,topScale,brightness,contrast,feather]);
- useEffect(()=>{setMeasurementFile(null);setMeasurementTool(null);},[measurementGeometry]);
+ useEffect(()=>{setMeasurementFile(null);setMeasurementTool(null);},[first,second]);
  const [marks,setMarks]=useState<StitchMeasure[]>([]),[draft,setDraft]=useState<StitchMeasure|null>(null),[selectedMark,setSelectedMark]=useState<string|null>(null);
  const markDrag=useRef<{id:string;point:number;start:StitchPoint;original:StitchPoint[]}|null>(null);
  const [error,setError]=useState(''),[busy,setBusy]=useState(false),[maximized,setMaximized]=useState(true),[minimized,setMinimized]=useState(false);
@@ -63,6 +65,7 @@ export function StitchDialog({open,onOpenChange,series,initialImage,onCreated,on
  const layers=useMemo(()=>rasters?[makeStitchCanvas(rasters[0]),makeStitchCanvas(rasters[1])] as [HTMLCanvasElement,HTMLCanvasElement]:null,[rasters]);
  const stitch:StitchOptions={crops,offsetX,offsetY,lowerScale,topOffsetX:topOffset.x,topOffsetY:topOffset.y,topScale,brightness,contrast,feather};
  const layout=rasters?stitchLayout(rasters,stitch):null;
+ const annotationGeometry=layout?{sourceKey:first+'|'+second,left:layout.left,topEdge:layout.topEdge,origins:[topOffset,{x:offsetX,y:offsetY}] as [{x:number;y:number},{x:number;y:number}],scales:[topScale,lowerScale] as [number,number],rects:layout.rects,selected}:null;
  const sourceScale=rasters?.[0].spacing&&rasters?.[1].spacing?rasters[1].spacing[0]/rasters[0].spacing[0]*topScale:1;
  const calibrated=!!rasters?.[0].spacing&&!!rasters?.[1].spacing&&Math.abs(lowerScale-sourceScale)/sourceScale<.01&&Math.abs(rasters[1].spacing[1]/rasters[0].spacing[1]*topScale-sourceScale)<.01;
 
@@ -87,8 +90,9 @@ export function StitchDialog({open,onOpenChange,series,initialImage,onCreated,on
  },[rasters,layers,crops,offsetX,offsetY,lowerScale,topOffset,topScale,brightness,contrast,feather,mode,selected,maximized,minimized,open,stageNode,canvasNode,viewPan,viewFit,marks,draft,selectedMark]);
 
  const pointer=(event:ReactPointerEvent<HTMLDivElement>)=>{const v=view(),bounds=stage.current?.getBoundingClientRect();if(!v||!bounds||!layout)return null;
-  const x=event.clientX-bounds.left,y=event.clientY-bounds.top;return {x,y,worldX:(x-v.x)/v.scale,worldY:(y-v.y)/v.scale,view:v};};
+  const x=event.clientX-bounds.left,y=event.clientY-bounds.top,projected=measurementFile?measurementViewport.current?.project(x,y):null;return {x,y,worldX:projected?.x??(x-v.x)/v.scale,worldY:projected?.y??(y-v.y)/v.scale,view:projected?{...v,scale:projected.scale}:v};};
  const onDown=(event:ReactPointerEvent<HTMLDivElement>)=>{if(!rasters||!layout||event.button!==0&&event.button!==1)return;const p=pointer(event);if(!p)return;event.preventDefault();stage.current?.setPointerCapture(event.pointerId);
+  if(mode==='none')return;
   if(['length','angle','cobb','ellipse','erase'].includes(mode)){
    const hit=nearestStitchMark(marks,{x:p.worldX,y:p.worldY},12/p.view.scale);
    if(mode==='erase'){if(hit){setMarks(current=>current.filter(mark=>mark.id!==hit.id));setSelectedMark(null);}return;}
@@ -112,39 +116,38 @@ export function StitchDialog({open,onOpenChange,series,initialImage,onCreated,on
   if(g.edges.includes('left'))base.left+=dx/factor;if(g.edges.includes('right'))base.right-=dx/factor;
   if(g.edges.includes('top'))base.top+=dy/factor;if(g.edges.includes('bottom'))base.bottom-=dy/factor;
   const next=sanitizeCrop(base,rasters[g.layer]);setCrops(old=>g.layer===0?[next,old[1]]:[old[0],next]);};
- const scaleSelected=(ratio:number)=>{if(selected===0)setTopScale(value=>Math.max(.25,Math.min(4,Math.round(value*ratio*100)/100)));else setLowerScale(value=>Math.max(.25,Math.min(4,Math.round(value*ratio*100)/100)));};
+ const scaleSelected=(ratio:number)=>{if(measurementFile){measurementViewport.current?.zoom(ratio);return;}if(selected===0)setTopScale(value=>Math.max(.25,Math.min(4,Math.round(value*ratio*100)/100)));else setLowerScale(value=>Math.max(.25,Math.min(4,Math.round(value*ratio*100)/100)));};
  const onWheel=(event:ReactWheelEvent<HTMLDivElement>)=>{event.preventDefault();const p=pointer(event as unknown as ReactPointerEvent<HTMLDivElement>);if(!p||!layout)return;const clicked=inside(p.worldX,p.worldY,layout.rects[selected])?selected:inside(p.worldX,p.worldY,layout.rects[1-selected])?1-selected as 0|1:selected;setSelected(clicked);
   const ratio=event.deltaY>0?.9:1.1,old=clicked===0?topScale:lowerScale,next=Math.max(.25,Math.min(4,Math.round(old*ratio*100)/100)),factor=next/old;
   if(clicked===0){setTopOffset(current=>({x:Math.round(p.worldX-(p.worldX-current.x)*factor),y:Math.round(p.worldY-(p.worldY-current.y)*factor)}));setTopScale(next);}
   else{setOffsetX(value=>Math.round(p.worldX-(p.worldX-value)*factor));setOffsetY(value=>Math.round(p.worldY-(p.worldY-value)*factor));setLowerScale(next);}};
- const reset=()=>{if(!rasters)return;setCrops([emptyCrop(),emptyCrop()]);setOffsetX(0);setOffsetY(Math.round(rasters[0].height-Math.min(rasters[0].height,rasters[1].height)*.12));setLowerScale(1);setTopOffset({x:0,y:0});setTopScale(1);setBrightness([0,0]);setContrast([1,1]);setViewPan({x:0,y:0});setMarks([]);setDraft(null);setSelectedMark(null);};
+ const reset=()=>{if(!rasters)return;setCrops([emptyCrop(),emptyCrop()]);setOffsetX(0);setOffsetY(Math.round(rasters[0].height-Math.min(rasters[0].height,rasters[1].height)*.12));setLowerScale(1);setTopOffset({x:0,y:0});setTopScale(1);setBrightness([0,0]);setContrast([1,1]);setViewPan({x:0,y:0});setMarks([]);setDraft(null);setSelectedMark(null);setMeasurementFile(null);setMeasurementTool(null);};
  const centerFrames=()=>{const v=view();if(!v||!layout||!rasters)return;const baseWidth=Math.max(rasters[0].width,rasters[1].width),baseHeight=rasters[0].height+rasters[1].height*.88,scale=Math.min(v.width/layout.width,v.height/layout.height)*.96;setViewFit(scale/Math.min(v.width/baseWidth,v.height/baseHeight));setViewPan({x:(baseWidth/2-layout.left-layout.width/2)*scale,y:(baseHeight/2-layout.topEdge-layout.height/2)*scale});};
  const save=async(measure=false)=>{if(!rasters||!layers||busy)return;setBusy(true);setError('');try{
   const measured=!measure&&measurementFile&&measurementViewport.current?await measurementViewport.current.capture():null;
   const merged=measured?measured.canvas:renderStitch(rasters,layers,stitch),ctx=merged.getContext('2d');if(!ctx)throw Error('Birləşmiş görüntü hazırlanmadı');
   const spacing=calibrated?(measured?measured.spacing:rasters[0].spacing?[rasters[0].spacing[0]/topScale,rasters[0].spacing[1]/topScale] as [number,number]:undefined):undefined;
   if(!measured)drawStitchMeasures(ctx,marks,spacing);
-  ctx.save();ctx.resetTransform();ctx.font=`${Math.max(14,Math.min(24,Math.round(merged.width*.015)))}px Arial`;ctx.textBaseline='top';ctx.fillStyle='#f4f7f7';ctx.shadowColor='#000';ctx.shadowBlur=4;
-  const label=[rasters[0].source.patientName,rasters[0].source.patientId,rasters[0].source.birthDate,rasters[0].source.patientSex,rasters[0].source.studyDate].filter(Boolean).join('  ·  ');
-  if(!measure)ctx.fillText(label,12,12,merged.width-24);ctx.restore();
   const rgba=ctx.getImageData(0,0,merged.width,merged.height).data;
   const blob=await createStitchedDicom([rasters[0].source,rasters[1].source],merged.width,merged.height,rgba,spacing,true);
   const file=new File([blob],`RADAZ-Stitch-${Date.now()}.dcm`,{type:'application/dicom'});
-  if(measure){setMeasurementFile(file);return;}
+  if(measure){renderedGeometry.current=measurementGeometry;setMeasurementFileGeometry(annotationGeometry);setMeasurementFile(file);return;}
   await onCreated(file);onOpenChange(false);
  }catch(reason){setError(reason instanceof Error?reason.message:String(reason));}finally{setBusy(false);}};
+ useEffect(()=>{if(!measurementFile||!rasters||busy||renderedGeometry.current===measurementGeometry)return;const timer=setTimeout(()=>void save(true),100);return()=>clearTimeout(timer);},[measurementGeometry,busy,measurementFile]);
+ const toggleMode=(next:Mode)=>{setMeasurementTool(null);setMode(current=>current===next?'none':next);};
 
  const onShortcut=(event:ReactKeyboardEvent)=>{if(event.altKey||event.ctrlKey||event.metaKey||event.target instanceof HTMLElement&&event.target.closest('input,select,textarea'))return;const key=event.key.toLowerCase();const modes:Record<string,Mode>={'1':'align','2':'crop','3':'pan','4':'window','l':'length','a':'angle','b':'cobb','r':'ellipse','e':'erase'};
   const measurement=measureTools.find(item=>item.hint.toLowerCase()===key);if(measurement){event.preventDefault();setMeasurementTool(measurement.id);if(!measurementFile)void save(true);return;}
   if(modes[key]){setMeasurementTool(null);setMode(modes[key]);setDraft(null);}else if(key==='delete'&&selectedMark){setMarks(current=>current.filter(mark=>mark.id!==selectedMark));setSelectedMark(null);}else if(key==='escape'){setDraft(null);setSelectedMark(null);}else if(key==='w')setSelected(1);else if(key==='+'||key==='=')scaleSelected(1.1);else if(key==='-')scaleSelected(.9);else if(key==='0')reset();else if(key==='f'){setMeasurementTool(null);centerFrames();}else if(key==='f11'&&!standalone)setMaximized(value=>!value);else return;event.preventDefault();};
  const content=<>
   <div className="stitch-body"><div className="stitch-stage-wrap"><div className="stitch-stage-toolbar" role="toolbar" aria-label="Stitch ön baxış alətləri">
-    <button className={mode==='align'?'active':''} title="Kadrı sürüşdür · 1" onClick={()=>{setMeasurementTool(null);setMode('align');}}><Move size={16}/>Kadrı sürüşdür</button><button className={mode==='crop'?'active':''} title="Kənardan kəs · 2" onClick={()=>{setMeasurementTool(null);setMode('crop');}}><CropIcon size={16}/>Kənardan kəs</button><button className={mode==='pan'?'active':''} title="Seçilmiş kadrı hərəkət etdir · 3" onClick={()=>{setMeasurementTool(null);setMode('pan');}}><Hand size={16}/>Pan</button>
-    <button className={mode==='window'?'active':''} title="Seçilmiş kadrın parlaqlığı və kontrastı · 4" onClick={()=>{setMeasurementTool(null);setMode('window');}}><SunMoon size={16}/>Parlaqlıq / kontrast</button>
+    <button className={mode==='align'?'active':''} title="Kadrı sürüşdür · 1" onClick={()=>toggleMode('align')}><Move size={16}/>Kadrı sürüşdür</button><button className={mode==='crop'?'active':''} title="Kənardan kəs · 2" onClick={()=>toggleMode('crop')}><CropIcon size={16}/>Kənardan kəs</button><button className={mode==='pan'?'active':''} title="Seçilmiş kadrı hərəkət etdir · 3" onClick={()=>toggleMode('pan')}><Hand size={16}/>Pan</button>
+    <button className={mode==='window'?'active':''} title="Seçilmiş kadrın parlaqlığı və kontrastı · 4" onClick={()=>toggleMode('window')}><SunMoon size={16}/>Parlaqlıq / kontrast</button>
     <button aria-label="Yaxınlaşdır" title="Seçilmiş kadrı yaxınlaşdır · +" onClick={()=>scaleSelected(1.1)}><ZoomIn size={16}/></button><button aria-label="Uzaqlaşdır" title="Seçilmiş kadrı uzaqlaşdır · −" onClick={()=>scaleSelected(.9)}><ZoomOut size={16}/></button><button title="Seçilmiş kadrın miqyasını sıfırla" onClick={()=>{if(selected===0)setTopScale(1);else setLowerScale(1);}}><Maximize2 size={16}/>Miqyası sıfırla</button>
-    <button title="Görüntüləri mərkəzləşdir · F" onClick={()=>{setMeasurementTool(null);centerFrames();}}><Focus size={16}/>Görüntüləri mərkəzləşdir</button>
+    <button title="Görüntüləri mərkəzləşdir · F" onClick={()=>{if(measurementFile)measurementViewport.current?.center();else centerFrames();}}><Focus size={16}/>Görüntüləri mərkəzləşdir</button>
     <span className="stitch-tool-separator"/>
-    {measureTools.map(item=><button key={item.id} aria-label={item.label} title={`${item.label} · ${item.hint}`} className={measurementTool===item.id?'active':''} disabled={!rasters||busy} onClick={()=>{setMeasurementTool(item.id);if(!measurementFile)void save(true);}}><item.icon size={16}/></button>)}  </div><div ref={bindStage} className={`stitch-preview stitch-mode-${mode}`} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={()=>{gesture.current=null;markDrag.current=null;}} onPointerCancel={()=>{gesture.current=null;markDrag.current=null;}} onWheel={onWheel}><canvas ref={bindCanvas} aria-label="Birləşmiş rentgen ön baxışı"/>{measurementFile&&<div className="stitch-measure-layer" style={{visibility:measurementTool?"visible":"hidden"}} onPointerDown={event=>event.stopPropagation()} onPointerMove={event=>event.stopPropagation()} onPointerUp={event=>event.stopPropagation()} onWheel={event=>event.stopPropagation()}><StitchMeasurementViewport ref={measurementViewport} file={measurementFile} tool={measurementTool||"length"}/></div>}</div>
+    {measureTools.map(item=><button key={item.id} aria-label={item.label} title={`${item.label} · ${item.hint}`} className={measurementTool===item.id?'active':''} disabled={!rasters||busy} onClick={()=>{setMode("none");setMeasurementTool(current=>current===item.id?null:item.id);if(!measurementFile)void save(true);}}><item.icon size={16}/></button>)}  </div><div ref={bindStage} className={`stitch-preview stitch-mode-${mode}`} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={()=>{gesture.current=null;markDrag.current=null;}} onPointerCancel={()=>{gesture.current=null;markDrag.current=null;}} onWheel={onWheel}><canvas ref={bindCanvas} aria-label="Birləşmiş rentgen ön baxışı"/>{measurementFile&&annotationGeometry&&<div className="stitch-measure-layer" style={{pointerEvents:measurementTool||mode==="pan"||mode==="window"?"auto":"none"}} onWheelCapture={event=>{event.preventDefault();event.stopPropagation();measurementViewport.current?.zoom(event.deltaY>0?.9:1.1);}} onPointerDown={event=>event.stopPropagation()} onPointerMove={event=>event.stopPropagation()} onPointerUp={event=>event.stopPropagation()} onWheel={event=>event.stopPropagation()}><StitchMeasurementViewport ref={measurementViewport} file={measurementFile} geometry={measurementFileGeometry!} tool={measurementTool||(mode==="pan"?"pan":mode==="window"?"wl":"scroll")}/></div>}</div>
   <p id="stitch-guidance" className="stitch-guidance">{mode==='align'?'Seçilmiş kadrı digər kadra uyğunlaşdırın.':mode==='crop'?'Kadrın yuxarı, aşağı və yan kənarından tutub kəsim sahəsini dəyişin.':mode==='window'?'Seçilmiş kadrda sağa-sola sürükləyin: parlaqlıq; yuxarı-aşağı: kontrast.':mode==='pan'?'Seçilmiş kadrı sürüşdürün. Siçan çarxı ilə yalnız həmin kadrı yaxınlaşdırın.':mode==='erase'?'Ölçünü silmək üçün xəttin üzərinə basın.':'Ölçü nöqtələrini ardıcıl qoyun; xətti və ya ucunu sürüşdürərək düzəldin.'} Q/W: kadr seçimi · C: ümumi mərkəz · L/A/B/R: ölçülər · Delete: sil.</p></div>
   <aside className="stitch-controls"><label>Yuxarı kadr<select value={first} onChange={event=>setFirst(event.target.value)}>{options.map(item=><option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
    <label>Aşağı kadr<select value={second} onChange={event=>setSecond(event.target.value)}>{options.map(item=><option key={item.id} value={item.id}>{item.label}</option>)}</select></label>

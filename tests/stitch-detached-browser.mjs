@@ -45,6 +45,16 @@ test('stitch uses a separate web window, preserves registration on center, and b
   await popup.mouse.move(measurementCanvas.x+measurementCanvas.width*.6,measurementCanvas.y+measurementCanvas.height*.55,{steps:8});await popup.mouse.up();
   await popup.waitForTimeout(600);
   assert.ok(await popup.locator('.stitch-inline-measurements .dicom-canvas svg text').count()>0,'measurement values are shown with the lines');
+  const labels=popup.locator('.stitch-inline-measurements .dicom-canvas svg text');
+  await popup.locator('.stitch-stage-toolbar').getByRole('button',{name:/Uzunluq/}).click();
+  assert.ok(!(await popup.locator('.stitch-stage-toolbar').getByRole('button',{name:/Uzunluq/}).getAttribute('class')||'').includes('active'),'second click disables the tool');
+  await popup.getByRole('button',{name:'Yaxınlaşdır',exact:true}).click();await popup.waitForTimeout(300);assert.ok(await labels.count()>0,'zoom preserves measurements');
+  await popup.locator('button[title="Seçilmiş kadrı hərəkət etdir · 3"]').click();
+  await popup.mouse.move(measurementCanvas.x+measurementCanvas.width*.5,measurementCanvas.y+measurementCanvas.height*.5);await popup.mouse.down();await popup.mouse.move(measurementCanvas.x+measurementCanvas.width*.5+20,measurementCanvas.y+measurementCanvas.height*.5+10,{steps:6});await popup.mouse.up();
+  assert.ok(await labels.count()>0,'pan preserves measurements');
+  await popup.getByRole('button',{name:'Kadrı sürüşdür',exact:false}).click();
+  await popup.mouse.move(measurementCanvas.x+measurementCanvas.width*.5,measurementCanvas.y+measurementCanvas.height*.75);await popup.mouse.down();await popup.mouse.move(measurementCanvas.x+measurementCanvas.width*.5+24,measurementCanvas.y+measurementCanvas.height*.75+12,{steps:6});await popup.mouse.up();
+  await popup.waitForTimeout(1800);assert.ok(await labels.count()>0,'frame alignment preserves the original Viewer annotations');
   mkdirSync('outputs/stitch-qa',{recursive:true});await popup.screenshot({path:'outputs/stitch-qa/detached-stitch-measurement.png'});
   await popup.getByRole('button',{name:'Ayrıca DICOM kimi saxla'}).click();
   await popup.waitForEvent('close',{timeout:30000});
