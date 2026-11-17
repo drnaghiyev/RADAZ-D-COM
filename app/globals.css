@@ -1212,6 +1212,10 @@ body .toolbar-workspace .toolbar-overflow-trigger{position:absolute!important;ri
 @media(min-width:1500px){body .toolbar-workspace main.workstation.grouped-workstation .topbar{justify-content:flex-start!important;gap:8px!important}body .toolbar-workspace main.workstation.grouped-workstation .topbar .help-command{margin-left:auto!important}}
 body .toolbar-workspace.has-right-dock main.workstation.grouped-workstation .topbar{width:100vw!important;max-width:none!important}
 .stitch-dialog.stitch-maximized{--tw-translate-x:0px!important;--tw-translate-y:0px!important}
+.stitch-dialog.stitch-standalone{position:fixed!important;inset:0!important;width:100vw!important;height:100dvh!important;max-width:none!important;max-height:none!important;border:0!important;border-radius:0!important;grid-template-rows:minmax(0,1fr) auto!important;z-index:1}
+.stitch-stage-toolbar button{font-size:0!important;width:34px;height:34px;padding:0!important;flex:none}.stitch-stage-toolbar button svg{width:17px;height:17px;flex:none}.stitch-tool-separator{height:24px;width:1px;margin:0 5px;background:#416277}
+.stitch-footer button,.stitch-controls>button{font-size:0!important;width:36px;height:34px;padding:0!important}.stitch-footer .stitch-save{width:44px}.stitch-mode-length,.stitch-mode-angle,.stitch-mode-cobb,.stitch-mode-ellipse,.stitch-mode-erase{cursor:crosshair}
+.stitch-side-actions{display:flex;gap:8px;margin-top:auto;padding-top:12px;position:sticky;bottom:0;background:#102633}.stitch-side-actions button{font-size:0!important;flex:1;min-height:38px;padding:0!important}.stitch-side-error{color:#ffb3a8;font-size:12px;overflow-wrap:anywhere}
 /* Canvas and custom drawing layers share the selected tool cursor. Annotation
    handles/localizers and active secondary gestures retain their own cursors. */
 .viewport { cursor:var(--viewer-tool-cursor,crosshair) }

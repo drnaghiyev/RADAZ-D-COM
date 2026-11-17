@@ -1,18 +1,19 @@
 'use client';
 import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import type {KeyboardEvent as ReactKeyboardEvent,PointerEvent as ReactPointerEvent,WheelEvent as ReactWheelEvent} from 'react';
-import {Crop as CropIcon,Focus,Hand,Maximize2,Minimize2,Minus,Move,RotateCcw,Save,SunMoon,X,ZoomIn,ZoomOut} from 'lucide-react';
+import {ArrowDown, ArrowUp, Circle, Crop as CropIcon, Eraser, Focus, Hand, Maximize2, Minimize2, Minus, Move, RotateCcw, Ruler, Save, SunMoon, Triangle, Waypoints, X, ZoomIn, ZoomOut} from 'lucide-react';
 import {Dialog,DialogContent,DialogHeader,DialogTitle} from './ui/dialog';
 import {getOriginalDicom} from '@/lib/cornerstone';
 import {parseDicomFile} from '@/lib/dicom-file';
 import {readDicomPixels} from '@/lib/dicom-pixels';
 import {createStitchedDicom,type MeasurementDicomSource} from '@/lib/measurement-dicom';
 import {drawStitch,emptyCrop,makeStitchCanvas,renderStitch,sanitizeCrop,stitchLayout,type Crop,type StitchOptions,type StitchRaster,type StitchRect} from '@/lib/xray-stitch';
+import {drawStitchMeasures,measurePointCount,nearestStitchMark,type StitchMeasure,type StitchMeasureKind,type StitchPoint} from '@/lib/stitch-measurements';
 
 type Item={id:string;name:string;modality:string;studyId:string;imageIds:string[]};
 type Raster=StitchRaster&{source:MeasurementDicomSource;spacing?:[number,number];burnedIn:boolean};
-type Mode='align'|'crop'|'pan'|'window';
-type Gesture={mode:Mode;startX:number;startY:number;offsetX:number;offsetY:number;brightness:number;contrast:number;crop:Crop;edges:('left'|'right'|'top'|'bottom')[];layer:0|1;scale:number};
+type Mode='align'|'crop'|'pan'|'window'|StitchMeasureKind|'erase';
+type Gesture={mode:Mode|'view';startX:number;startY:number;offsetX:number;offsetY:number;brightness:number;contrast:number;crop:Crop;edges:('left'|'right'|'top'|'bottom')[];layer:0|1;scale:number};
 const number=(value:string|undefined)=>{const parsed=Number(value);return Number.isFinite(parsed)&&parsed>0?parsed:0;};
 
 async function load(id:string):Promise<Raster>{
@@ -37,14 +38,16 @@ function cropEdges(x:number,y:number,r:StitchRect,tolerance:number){
  return edges;
 }
 
-export function StitchDialog({open,onOpenChange,series,initialImage,onCreated}:{open:boolean;onOpenChange:(open:boolean)=>void;series:Item[];initialImage?:string;onCreated:(file:File)=>Promise<void>}){
+export function StitchDialog({open,onOpenChange,series,initialImage,onCreated,standalone=false}:{open:boolean;onOpenChange:(open:boolean)=>void;series:Item[];initialImage?:string;onCreated:(file:File)=>Promise<void>;standalone?:boolean}){
  const options=series.flatMap(item=>item.imageIds.map((id,index)=>({id,label:`${item.name} · ${index+1}/${item.imageIds.length}`})));
  const optionsKey=options.map(item=>item.id).join('|');
  const [first,setFirst]=useState(''),[second,setSecond]=useState(''),[rasters,setRasters]=useState<[Raster,Raster]|null>(null);
  const [crops,setCrops]=useState<[Crop,Crop]>([emptyCrop(),emptyCrop()]),[offsetX,setOffsetX]=useState(0),[offsetY,setOffsetY]=useState(0),[lowerScale,setLowerScale]=useState(1);
  const [topOffset,setTopOffset]=useState({x:0,y:0}),[topScale,setTopScale]=useState(1);
  const [brightness,setBrightness]=useState<[number,number]>([0,0]),[contrast,setContrast]=useState<[number,number]>([1,1]),[feather,setFeather]=useState(true);
- const [mode,setMode]=useState<Mode>('align'),[selected,setSelected]=useState<0|1>(1);
+ const [mode,setMode]=useState<Mode>('align'),[selected,setSelected]=useState<0|1>(1),[viewPan,setViewPan]=useState({x:0,y:0});
+ const [marks,setMarks]=useState<StitchMeasure[]>([]),[draft,setDraft]=useState<StitchMeasure|null>(null),[selectedMark,setSelectedMark]=useState<string|null>(null);
+ const markDrag=useRef<{id:string;point:number;start:StitchPoint;original:StitchPoint[]}|null>(null);
  const [error,setError]=useState(''),[busy,setBusy]=useState(false),[maximized,setMaximized]=useState(true),[minimized,setMinimized]=useState(false);
  const stage=useRef<HTMLDivElement>(null),canvas=useRef<HTMLCanvasElement>(null),gesture=useRef<Gesture|null>(null);
  const [stageNode,setStageNode]=useState<HTMLDivElement|null>(null),[canvasNode,setCanvasNode]=useState<HTMLCanvasElement|null>(null);
@@ -60,31 +63,42 @@ export function StitchDialog({open,onOpenChange,series,initialImage,onCreated}:{
  useEffect(()=>{if(!open||!first||!second||first===second){setRasters(null);return;}let cancelled=false;setError('');void Promise.all([load(first),load(second)]).then(value=>{
   if(cancelled)return;const pair=value as [Raster,Raster];if(pair[0].source.studyUID!==pair[1].source.studyUID||pair[0].source.patientId!==pair[1].source.patientId)throw Error('Yalnız eyni pasiyent və müayinənin kadrlarını seçin');
   const scale=pair[0].spacing&&pair[1].spacing?pair[1].spacing[0]/pair[0].spacing[0]:1;
-  setRasters(pair);setCrops([emptyCrop(),emptyCrop()]);setOffsetX(0);setOffsetY(Math.round(pair[0].height-Math.min(pair[0].height,pair[1].height*scale)*.12));setLowerScale(Math.max(.25,Math.min(4,scale)));setTopOffset({x:0,y:0});setTopScale(1);setBrightness([0,0]);setContrast([1,1]);
+  setRasters(pair);setCrops([emptyCrop(),emptyCrop()]);setOffsetX(0);setOffsetY(Math.round(pair[0].height-Math.min(pair[0].height,pair[1].height*scale)*.12));setLowerScale(Math.max(.25,Math.min(4,scale)));setTopOffset({x:0,y:0});setTopScale(1);setBrightness([0,0]);setContrast([1,1]);setMarks([]);setDraft(null);setSelectedMark(null);
  }).catch(reason=>{if(!cancelled){setRasters(null);setError(reason instanceof Error?reason.message:String(reason));}});return()=>{cancelled=true;};},[open,first,second]);
 
  const view=()=>{if(!stage.current||!rasters)return null;const width=stage.current.clientWidth,height=stage.current.clientHeight,baseWidth=Math.max(rasters[0].width,rasters[1].width),baseHeight=rasters[0].height+rasters[1].height*.88,scale=Math.min(width/baseWidth,height/baseHeight);
-  return {width,height,scale,x:(width-baseWidth*scale)/2,y:(height-baseHeight*scale)/2};};
+  return {width,height,scale,x:width/2-((layout?.left||0)+(layout?.width||baseWidth)/2)*scale+viewPan.x,y:height/2-((layout?.topEdge||0)+(layout?.height||baseHeight)/2)*scale+viewPan.y};};
  useEffect(()=>{if(!rasters||!layers||!layout||!canvasNode||!stageNode||minimized||!open)return;const redraw=()=>{
   const v=view(),target=canvasNode;if(!v||!target)return;const dpr=Math.min(2,window.devicePixelRatio||1);target.width=Math.max(1,Math.round(v.width*dpr));target.height=Math.max(1,Math.round(v.height*dpr));
   const ctx=target.getContext('2d');if(!ctx)return;ctx.scale(dpr,dpr);ctx.fillStyle='#000';ctx.fillRect(0,0,v.width,v.height);
   ctx.save();ctx.translate(v.x,v.y);ctx.scale(v.scale,v.scale);drawStitch(ctx,rasters,layers,stitch);
+  const spacing=calibrated&&rasters[0].spacing?[rasters[0].spacing[0]/topScale,rasters[0].spacing[1]/topScale] as [number,number]:undefined;
+  drawStitchMeasures(ctx,draft?[...marks,draft]:marks,spacing,selectedMark||undefined,v.scale);
   if(mode==='crop'){for(const i of [0,1] as const){const r=layout.rects[i];ctx.strokeStyle=i===selected?'#58e6f0':'#e4ad5b';ctx.lineWidth=2/v.scale;ctx.setLineDash([8/v.scale,5/v.scale]);ctx.strokeRect(r.x,r.y,r.width,r.height);ctx.setLineDash([]);
     for(const [x,y] of [[r.x+r.width/2,r.y],[r.x+r.width/2,r.y+r.height],[r.x,r.y+r.height/2],[r.x+r.width,r.y+r.height/2]]){ctx.fillStyle=ctx.strokeStyle;ctx.fillRect(x-5/v.scale,y-5/v.scale,10/v.scale,10/v.scale);}}}
   ctx.restore();};redraw();const observer=new ResizeObserver(redraw);observer.observe(stageNode);return()=>observer.disconnect();
- },[rasters,layers,crops,offsetX,offsetY,lowerScale,topOffset,topScale,brightness,contrast,feather,mode,selected,maximized,minimized,open,stageNode,canvasNode]);
+ },[rasters,layers,crops,offsetX,offsetY,lowerScale,topOffset,topScale,brightness,contrast,feather,mode,selected,maximized,minimized,open,stageNode,canvasNode,viewPan,marks,draft,selectedMark]);
 
  const pointer=(event:ReactPointerEvent<HTMLDivElement>)=>{const v=view(),bounds=stage.current?.getBoundingClientRect();if(!v||!bounds||!layout)return null;
   const x=event.clientX-bounds.left,y=event.clientY-bounds.top;return {x,y,worldX:(x-v.x)/v.scale,worldY:(y-v.y)/v.scale,view:v};};
  const onDown=(event:ReactPointerEvent<HTMLDivElement>)=>{if(!rasters||!layout||event.button!==0&&event.button!==1)return;const p=pointer(event);if(!p)return;event.preventDefault();stage.current?.setPointerCapture(event.pointerId);
+  if(['length','angle','cobb','ellipse','erase'].includes(mode)){
+   const hit=nearestStitchMark(marks,{x:p.worldX,y:p.worldY},12/p.view.scale);
+   if(mode==='erase'){if(hit){setMarks(current=>current.filter(mark=>mark.id!==hit.id));setSelectedMark(null);}return;}
+   if(hit&&!draft){const found=marks.find(mark=>mark.id===hit.id)!;setSelectedMark(hit.id);markDrag.current={id:hit.id,point:hit.point,start:{x:p.worldX,y:p.worldY},original:found.points.map(point=>({...point}))};return;}
+   const kind=mode as StitchMeasureKind,nextPoints=[...(draft?.kind===kind?draft.points:[]),{x:p.worldX,y:p.worldY}];
+   if(nextPoints.length>=measurePointCount[kind]){const mark={id:crypto.randomUUID(),kind,points:nextPoints};setMarks(current=>[...current,mark]);setSelectedMark(mark.id);setDraft(null);}
+   else setDraft({id:'draft',kind,points:nextPoints});return;
+  }
   const clicked:0|1=inside(p.worldX,p.worldY,layout.rects[selected])?selected:inside(p.worldX,p.worldY,layout.rects[1-selected])?1-selected as 0|1:selected;
   let layer=selected,edges=mode==='crop'?cropEdges(p.worldX,p.worldY,layout.rects[selected],12/p.view.scale):[];
   if(mode==='crop'&&!edges.length){const other=1-selected as 0|1;edges=cropEdges(p.worldX,p.worldY,layout.rects[other],12/p.view.scale);if(edges.length)layer=other;else{setSelected(clicked);return;}}
   const actualMode=event.button===1?'pan':mode;
-  if(actualMode!=='crop'&&!inside(p.worldX,p.worldY,layout.rects[clicked]))return;
+  if(actualMode!=='crop'&&!inside(p.worldX,p.worldY,layout.rects[clicked])){gesture.current={mode:'view',startX:event.clientX,startY:event.clientY,offsetX:viewPan.x,offsetY:viewPan.y,brightness:0,contrast:1,crop:emptyCrop(),edges:[],layer:clicked,scale:p.view.scale};return;}
   if(actualMode!=='crop')layer=clicked;setSelected(layer);
   gesture.current={mode:actualMode,startX:event.clientX,startY:event.clientY,offsetX:layer===0?topOffset.x:offsetX,offsetY:layer===0?topOffset.y:offsetY,brightness:brightness[layer],contrast:contrast[layer],crop:{...crops[layer]},edges,layer,scale:p.view.scale};};
- const onMove=(event:ReactPointerEvent<HTMLDivElement>)=>{const g=gesture.current;if(!g||!rasters)return;const dx=(event.clientX-g.startX)/g.scale,dy=(event.clientY-g.startY)/g.scale;
+ const onMove=(event:ReactPointerEvent<HTMLDivElement>)=>{const drag=markDrag.current;if(drag){const p=pointer(event);if(!p)return;const dx=p.worldX-drag.start.x,dy=p.worldY-drag.start.y;setMarks(current=>current.map(mark=>mark.id===drag.id?{...mark,points:drag.original.map((point,index)=>drag.point<0||drag.point===index?{x:point.x+dx,y:point.y+dy}:point)}:mark));return;}const g=gesture.current;if(!g||!rasters)return;const dx=(event.clientX-g.startX)/g.scale,dy=(event.clientY-g.startY)/g.scale;
+  if(g.mode==='view'){setViewPan({x:g.offsetX+event.clientX-g.startX,y:g.offsetY+event.clientY-g.startY});return;}
   if(g.mode==='pan'||g.mode==='align'){if(g.layer===0)setTopOffset({x:Math.round(g.offsetX+dx),y:Math.round(g.offsetY+dy)});else{setOffsetX(Math.round(g.offsetX+dx));setOffsetY(Math.round(g.offsetY+dy));}return;}
   if(g.mode==='window'){const b=Math.max(-80,Math.min(80,Math.round(g.brightness+dx*.4))),c=Math.max(.5,Math.min(2,Math.round((g.contrast-dy*.004)*100)/100));setBrightness(current=>g.layer===0?[b,current[1]]:[current[0],b]);setContrast(current=>g.layer===0?[c,current[1]]:[current[0],c]);return;}
   const factor=g.layer===0?topScale:lowerScale,base={...g.crop};
@@ -96,37 +110,50 @@ export function StitchDialog({open,onOpenChange,series,initialImage,onCreated}:{
   const ratio=event.deltaY>0?.9:1.1,old=clicked===0?topScale:lowerScale,next=Math.max(.25,Math.min(4,Math.round(old*ratio*100)/100)),factor=next/old;
   if(clicked===0){setTopOffset(current=>({x:Math.round(p.worldX-(p.worldX-current.x)*factor),y:Math.round(p.worldY-(p.worldY-current.y)*factor)}));setTopScale(next);}
   else{setOffsetX(value=>Math.round(p.worldX-(p.worldX-value)*factor));setOffsetY(value=>Math.round(p.worldY-(p.worldY-value)*factor));setLowerScale(next);}};
- const reset=()=>{if(!rasters)return;setCrops([emptyCrop(),emptyCrop()]);setOffsetX(0);setOffsetY(Math.round(rasters[0].height-Math.min(rasters[0].height,rasters[1].height)*.12));setLowerScale(1);setTopOffset({x:0,y:0});setTopScale(1);setBrightness([0,0]);setContrast([1,1]);};
- const centerFrames=()=>{if(!rasters)return;const top=sanitizeCrop(crops[0],rasters[0]),bottom=sanitizeCrop(crops[1],rasters[1]),topWidth=(rasters[0].width-top.left-top.right)*topScale,topHeight=(rasters[0].height-top.top-top.bottom)*topScale,bottomWidth=(rasters[1].width-bottom.left-bottom.right)*lowerScale,bottomHeight=(rasters[1].height-bottom.top-bottom.bottom)*lowerScale,center=Math.max(topWidth,bottomWidth)/2;
-  setTopOffset({x:Math.round(center-topWidth/2-top.left*topScale),y:Math.round(-top.top*topScale)});setOffsetX(Math.round(center-bottomWidth/2-bottom.left*lowerScale));setOffsetY(Math.round(topHeight-Math.min(topHeight,bottomHeight)*.12-bottom.top*lowerScale));};
+ const reset=()=>{if(!rasters)return;setCrops([emptyCrop(),emptyCrop()]);setOffsetX(0);setOffsetY(Math.round(rasters[0].height-Math.min(rasters[0].height,rasters[1].height)*.12));setLowerScale(1);setTopOffset({x:0,y:0});setTopScale(1);setBrightness([0,0]);setContrast([1,1]);setViewPan({x:0,y:0});setMarks([]);setDraft(null);setSelectedMark(null);};
+ const centerFrames=()=>setViewPan({x:0,y:0});
  const save=async()=>{if(!rasters||!layers||busy)return;setBusy(true);setError('');try{
-  const merged=renderStitch(rasters,layers,stitch),rgba=merged.getContext('2d')?.getImageData(0,0,merged.width,merged.height).data;if(!rgba)throw Error('Birləşmiş görüntü hazırlanmadı');
+  const merged=renderStitch(rasters,layers,stitch),ctx=merged.getContext('2d');if(!ctx)throw Error('Birləşmiş görüntü hazırlanmadı');
   const spacing=calibrated&&rasters[0].spacing?[rasters[0].spacing[0]/topScale,rasters[0].spacing[1]/topScale] as [number,number]:undefined;
-  const blob=await createStitchedDicom([rasters[0].source,rasters[1].source],merged.width,merged.height,rgba,spacing,rasters.some(item=>item.burnedIn));
+  drawStitchMeasures(ctx,marks,spacing);
+  ctx.save();ctx.resetTransform();ctx.font=`${Math.max(14,Math.min(24,Math.round(merged.width*.015)))}px Arial`;ctx.textBaseline='top';ctx.fillStyle='#f4f7f7';ctx.shadowColor='#000';ctx.shadowBlur=4;
+  const label=[rasters[0].source.patientName,rasters[0].source.patientId,rasters[0].source.studyDate,'RADAZ STITCH'].filter(Boolean).join('  ·  ');
+  ctx.fillText(label,12,12,merged.width-24);ctx.restore();
+  const rgba=ctx.getImageData(0,0,merged.width,merged.height).data;
+  const blob=await createStitchedDicom([rasters[0].source,rasters[1].source],merged.width,merged.height,rgba,spacing,true);
   await onCreated(new File([blob],`RADAZ-Stitch-${Date.now()}.dcm`,{type:'application/dicom'}));onOpenChange(false);
  }catch(reason){setError(reason instanceof Error?reason.message:String(reason));}finally{setBusy(false);}};
 
- const onShortcut=(event:ReactKeyboardEvent)=>{if(event.altKey||event.ctrlKey||event.metaKey||event.target instanceof HTMLElement&&event.target.closest('input,select,textarea'))return;const key=event.key.toLowerCase();const modes:Record<string,Mode>={'1':'align','2':'crop','3':'pan','4':'window'};
-  if(modes[key])setMode(modes[key]);else if(key==='q')setSelected(0);else if(key==='w')setSelected(1);else if(key==='+'||key==='=')scaleSelected(1.1);else if(key==='-')scaleSelected(.9);else if(key==='0')reset();else if(key==='c')centerFrames();else if(key==='f11')setMaximized(value=>!value);else return;event.preventDefault();};
- return <>{open&&minimized&&<button className="stitch-restore" onClick={()=>setMinimized(false)}><Maximize2 size={16}/>Stitch pəncərəsini aç</button>}<Dialog open={open&&!minimized} onOpenChange={busy?undefined:onOpenChange}><DialogContent className={`stitch-dialog ${maximized?'stitch-maximized translate-x-0 translate-y-0':''}`} showCloseButton={false} aria-describedby="stitch-guidance" onKeyDown={onShortcut}><DialogHeader className="stitch-window-header"><DialogTitle>İki rentgen görüntüsünü birləşdir</DialogTitle><div className="stitch-window-actions"><button aria-label="Pəncərəni kiçilt" title="Pəncərəni kiçilt" onClick={()=>setMinimized(true)}><Minus size={17}/></button><button aria-label={maximized?'Pəncərəni bərpa et':'Pəncərəni böyüt'} title={maximized?'Pəncərəni bərpa et · F11':'Tam ekran · F11'} onClick={()=>setMaximized(value=>!value)}>{maximized?<Minimize2 size={17}/>:<Maximize2 size={17}/>}</button><button aria-label="Stitch pəncərəsini bağla" title="Bağla" onClick={()=>onOpenChange(false)}><X size={17}/></button></div></DialogHeader>
+ const onShortcut=(event:ReactKeyboardEvent)=>{if(event.altKey||event.ctrlKey||event.metaKey||event.target instanceof HTMLElement&&event.target.closest('input,select,textarea'))return;const key=event.key.toLowerCase();const modes:Record<string,Mode>={'1':'align','2':'crop','3':'pan','4':'window','l':'length','a':'angle','b':'cobb','r':'ellipse','e':'erase'};
+  if(modes[key]){setMode(modes[key]);setDraft(null);}else if(key==='delete'&&selectedMark){setMarks(current=>current.filter(mark=>mark.id!==selectedMark));setSelectedMark(null);}else if(key==='escape'){setDraft(null);setSelectedMark(null);}else if(key==='q')setSelected(0);else if(key==='w')setSelected(1);else if(key==='+'||key==='=')scaleSelected(1.1);else if(key==='-')scaleSelected(.9);else if(key==='0')reset();else if(key==='c')centerFrames();else if(key==='f11'&&!standalone)setMaximized(value=>!value);else return;event.preventDefault();};
+ const content=<>
   <div className="stitch-body"><div className="stitch-stage-wrap"><div className="stitch-stage-toolbar" role="toolbar" aria-label="Stitch ön baxış alətləri">
     <button className={mode==='align'?'active':''} title="Kadrı sürüşdür · 1" onClick={()=>setMode('align')}><Move size={16}/>Kadrı sürüşdür</button><button className={mode==='crop'?'active':''} title="Kənardan kəs · 2" onClick={()=>setMode('crop')}><CropIcon size={16}/>Kənardan kəs</button><button className={mode==='pan'?'active':''} title="Seçilmiş kadrı hərəkət etdir · 3" onClick={()=>setMode('pan')}><Hand size={16}/>Pan</button>
     <button className={mode==='window'?'active':''} title="Seçilmiş kadrın parlaqlığı və kontrastı · 4" onClick={()=>setMode('window')}><SunMoon size={16}/>Parlaqlıq / kontrast</button>
     <button aria-label="Yaxınlaşdır" title="Seçilmiş kadrı yaxınlaşdır · +" onClick={()=>scaleSelected(1.1)}><ZoomIn size={16}/></button><button aria-label="Uzaqlaşdır" title="Seçilmiş kadrı uzaqlaşdır · −" onClick={()=>scaleSelected(.9)}><ZoomOut size={16}/></button><button title="Seçilmiş kadrın miqyasını sıfırla" onClick={()=>{if(selected===0)setTopScale(1);else setLowerScale(1);}}><Maximize2 size={16}/>Miqyası sıfırla</button>
     <button title="Görüntüləri mərkəzləşdir · C" onClick={centerFrames}><Focus size={16}/>Görüntüləri mərkəzləşdir</button>
-  </div><div ref={bindStage} className={`stitch-preview stitch-mode-${mode}`} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={()=>gesture.current=null} onPointerCancel={()=>gesture.current=null} onWheel={onWheel}><canvas ref={bindCanvas} aria-label="Birləşmiş rentgen ön baxışı"/></div>
-  <p id="stitch-guidance" className="stitch-guidance">{mode==='align'?'Seçilmiş kadrı digər kadra uyğunlaşdırın.':mode==='crop'?'Kadrın yuxarı, aşağı və yan kənarından tutub kəsim sahəsini dəyişin.':mode==='window'?'Seçilmiş kadrda sağa-sola sürükləyin: parlaqlıq; yuxarı-aşağı: kontrast.':'Seçilmiş kadrı sürüşdürün. Siçan çarxı ilə yalnız həmin kadrı yaxınlaşdırın.'} Q/W: kadr seçimi · 1–4: alətlər · +/−: miqyas · C: mərkəz · 0: sıfırla.</p></div>
+    <span className="stitch-tool-separator"/>
+    <button className={mode==='length'?'active':''} aria-label="Uzunluq ölç" title="Uzunluq · L" onClick={()=>{setMode('length');setDraft(null);}}><Ruler size={16}/></button>
+    <button className={mode==='angle'?'active':''} aria-label="Bucaq ölç" title="Bucaq · A" onClick={()=>{setMode('angle');setDraft(null);}}><Triangle size={16}/></button>
+    <button className={mode==='cobb'?'active':''} aria-label="Cobb bucağı ölç" title="Cobb · B" onClick={()=>{setMode('cobb');setDraft(null);}}><Waypoints size={16}/></button>
+    <button className={mode==='ellipse'?'active':''} aria-label="Sahə ölç" title="Ellips sahəsi · R" onClick={()=>{setMode('ellipse');setDraft(null);}}><Circle size={16}/></button>
+    <button className={mode==='erase'?'active':''} aria-label="Ölçünü sil" title="Ölçünü sil · E / Delete" onClick={()=>{setMode('erase');setDraft(null);}}><Eraser size={16}/></button>
+  </div><div ref={bindStage} className={`stitch-preview stitch-mode-${mode}`} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={()=>{gesture.current=null;markDrag.current=null;}} onPointerCancel={()=>{gesture.current=null;markDrag.current=null;}} onWheel={onWheel}><canvas ref={bindCanvas} aria-label="Birləşmiş rentgen ön baxışı"/></div>
+  <p id="stitch-guidance" className="stitch-guidance">{mode==='align'?'Seçilmiş kadrı digər kadra uyğunlaşdırın.':mode==='crop'?'Kadrın yuxarı, aşağı və yan kənarından tutub kəsim sahəsini dəyişin.':mode==='window'?'Seçilmiş kadrda sağa-sola sürükləyin: parlaqlıq; yuxarı-aşağı: kontrast.':mode==='pan'?'Seçilmiş kadrı sürüşdürün. Siçan çarxı ilə yalnız həmin kadrı yaxınlaşdırın.':mode==='erase'?'Ölçünü silmək üçün xəttin üzərinə basın.':'Ölçü nöqtələrini ardıcıl qoyun; xətti və ya ucunu sürüşdürərək düzəldin.'} Q/W: kadr seçimi · C: ümumi mərkəz · L/A/B/R: ölçülər · Delete: sil.</p></div>
   <aside className="stitch-controls"><label>Yuxarı kadr<select value={first} onChange={event=>setFirst(event.target.value)}>{options.map(item=><option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
    <label>Aşağı kadr<select value={second} onChange={event=>setSecond(event.target.value)}>{options.map(item=><option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
    <small data-testid="stitch-offset">Seçilmiş: {selected===0?'yuxarı':'aşağı'} · X {selected===0?topOffset.x:offsetX} px · Y {selected===0?topOffset.y:offsetY} px · miqyas {Math.round((selected===0?topScale:lowerScale)*100)}%</small>
-   <div className="stitch-layer-select"><button className={selected===0?'active':''} title="Yuxarı kadr · Q" onClick={()=>setSelected(0)}><CropIcon size={15}/>Yuxarı kadr</button><button className={selected===1?'active':''} title="Aşağı kadr · W" onClick={()=>setSelected(1)}><CropIcon size={15}/>Aşağı kadr</button></div>
+   <div className="stitch-layer-select"><button className={selected===0?'active':''} aria-label="Yuxarı kadr" title="Yuxarı kadr · Q" onClick={()=>setSelected(0)}><ArrowUp size={15}/></button><button className={selected===1?'active':''} aria-label="Aşağı kadr" title="Aşağı kadr · W" onClick={()=>setSelected(1)}><ArrowDown size={15}/></button></div>
    {rasters&&<><small>Kəsim, px: sol {crops[selected].left} · sağ {crops[selected].right} · yuxarı {crops[selected].top} · aşağı {crops[selected].bottom}</small>
-    <button onClick={()=>setCrops(current=>selected===0?[emptyCrop(),current[1]]:[current[0],emptyCrop()])}><RotateCcw size={15}/>Seçilən kəsimi sıfırla</button>
+    <button aria-label="Seçilən kəsimi sıfırla" title="Seçilən kəsimi sıfırla" onClick={()=>setCrops(current=>selected===0?[emptyCrop(),current[1]]:[current[0],emptyCrop()])}><RotateCcw size={15}/></button>
     <small>Parlaqlıq {brightness[selected]} · kontrast {contrast[selected].toFixed(2)} · miqyas {(selected===0?topScale:lowerScale).toFixed(2)}</small>
     <label className="stitch-check"><input type="checkbox" checked={feather} onChange={event=>setFeather(event.target.checked)}/>Birləşmə xəttini yumşalt</label>
     <small>{calibrated?'Piksel kalibrləməsi uyğunlaşdırılıb; mm ölçüsü saxlanacaq.':'Kalibrləmə qeyri-müəyyəndir; yanlış mm ölçüsü yazılmayacaq.'}</small>
     {rasters.some(item=>item.burnedIn)&&<small>Kadr yazıları DICOM pikselindədirsə, kənarlarını kəsin; anatomiyanın üstündəki yazını avtomatik silmək mümkün deyil.</small>}
    </>}
-  </aside></div><footer className="stitch-footer"><button onClick={reset} disabled={!rasters||busy} title="Hamısını sıfırla · 0"><RotateCcw size={15}/>Hamısını sıfırla</button>{error&&<span role="alert">{error}</span>}<button className="stitch-save" disabled={!rasters||busy||first===second} onClick={()=>void save()}><Save size={15}/>{busy?'Saxlanır…':'Ayrıca DICOM kimi saxla'}</button></footer>
- </DialogContent></Dialog></>;
+   {error&&<span role="alert" className="stitch-side-error">{error}</span>}
+   <div className="stitch-side-actions"><button aria-label="Hamısını sıfırla" onClick={reset} disabled={!rasters||busy} title="Bərpa et · 0"><RotateCcw size={17}/></button><button aria-label="Ayrıca DICOM kimi saxla" title={busy?'Saxlanır…':'Ayrıca DICOM kimi saxla'} className="stitch-save" disabled={!rasters||busy||first===second} onClick={()=>void save()}><Save size={17}/></button></div>
+  </aside></div></>;
+ if(standalone)return <div className="stitch-dialog stitch-standalone" onKeyDown={onShortcut} tabIndex={-1}>{content}</div>;
+ return <>{open&&minimized&&<button className="stitch-restore" onClick={()=>setMinimized(false)}><Maximize2 size={16}/>Stitch pəncərəsini aç</button>}<Dialog open={open&&!minimized} onOpenChange={busy?undefined:onOpenChange}><DialogContent className={`stitch-dialog ${maximized?'stitch-maximized translate-x-0 translate-y-0':''}`} showCloseButton={false} aria-describedby="stitch-guidance" onKeyDown={onShortcut}><DialogHeader className="stitch-window-header"><DialogTitle>İki rentgen görüntüsünü birləşdir</DialogTitle><div className="stitch-window-actions"><button aria-label="Pəncərəni kiçilt" title="Pəncərəni kiçilt" onClick={()=>setMinimized(true)}><Minus size={17}/></button><button aria-label={maximized?'Pəncərəni bərpa et':'Pəncərəni böyüt'} title={maximized?'Pəncərəni bərpa et · F11':'Tam ekran · F11'} onClick={()=>setMaximized(value=>!value)}>{maximized?<Minimize2 size={17}/>:<Maximize2 size={17}/>}</button><button aria-label="Stitch pəncərəsini bağla" title="Bağla" onClick={()=>onOpenChange(false)}><X size={17}/></button></div></DialogHeader>{content}</DialogContent></Dialog></>;
 }

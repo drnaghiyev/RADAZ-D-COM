@@ -163,6 +163,8 @@ export function getDefaultWindow(imageId: string) {
 
 /** Original source bytes; derived MPR frames deliberately have no source DICOM. */
 export async function getOriginalDicom(imageId: string): Promise<Uint8Array | null> {
+  const borrowed = borrowedLoads.get(imageId);
+  if (borrowed) await borrowed();
   const disk = diskDicoms.get(imageId);
   if (disk) {
     const response = await fetch(disk.url, {signal: disk.signal, cache: 'no-store'});

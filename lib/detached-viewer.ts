@@ -3,7 +3,7 @@ import type {SharedDicom} from './cornerstone';
 
 export type DetachedSeries={id:string;studyId:string;name:string;modality:string;patient:string;patientId:string;
   birth:string;date:string;number:string;thumb?:string;mediaSession?:string;archived?:boolean;discovered?:number;loading?:boolean;images:SharedDicom[]};
-export type DetachedSnapshot={revision:string;series:DetachedSeries[];preferredSeriesId?:string;anatomy?:AnatomyVolumeResult|null};
+export type DetachedSnapshot={revision:string;series:DetachedSeries[];preferredSeriesId?:string;preferredImageId?:string;anatomy?:AnatomyVolumeResult|null};
 type SourceWindow=Window&{radazDetachedSources?:Map<string,()=>DetachedSnapshot>};
 
 export function publishDetachedSource(token:string,read:()=>DetachedSnapshot){

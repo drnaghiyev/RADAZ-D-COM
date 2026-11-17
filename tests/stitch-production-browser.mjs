@@ -22,11 +22,11 @@ test('production stitch fills the installed-size window and toolbar reaches the 
   await page.locator('input[type="file"]').first().setInputFiles([join(root,'rf-0.dcm'),join(root,'rf-1.dcm')]);
   await page.locator('[data-panel="A"][data-has-image="true"]').waitFor();
   const button=page.getByRole('button',{name:'İki rentgeni birləşdir',exact:true});await button.waitFor();assert.equal(await button.getAttribute('title'),'İki rentgeni birləşdir (stitch)');
-  await button.click();const dialog=page.getByRole('dialog',{name:'İki rentgen görüntüsünü birləşdir'});await dialog.waitFor();
-  const box=await dialog.boundingBox();assert.ok(Math.abs(box.x)<2&&Math.abs(box.y)<2&&box.width>=1918&&box.height>=998,`production dialog is fullscreen: ${JSON.stringify(box)}`);
-  const css=await dialog.evaluate(node=>({translate:getComputedStyle(node).translate,classes:node.className}));assert.ok(css.classes.includes('translate-x-0'),JSON.stringify(css));
-  await dialog.getByRole('button',{name:'Pəncərəni kiçilt'}).click();await dialog.waitFor({state:'hidden'});
-  await page.getByRole('button',{name:'Stitch pəncərəsini aç'}).click();await dialog.waitFor();await page.waitForFunction(()=>{const canvas=document.querySelector('.stitch-preview canvas');if(!canvas||!canvas.width||!canvas.height)return false;return canvas.getContext('2d')?.getImageData(Math.floor(canvas.width/2),Math.floor(canvas.height/2),1,1).data[0]>5;},null,{timeout:8000});await page.waitForTimeout(350);
-  mkdirSync('outputs/stitch-qa',{recursive:true});await page.screenshot({path:'outputs/stitch-qa/stitch-production-fullscreen.png'});
+  const [popup]=await Promise.all([page.waitForEvent('popup'),button.click()]);await popup.waitForLoadState();
+  const editor=popup.locator('.stitch-standalone');await editor.waitFor();const box=await editor.boundingBox(),viewport=await popup.evaluate(()=>({width:innerWidth,height:innerHeight}));
+  assert.ok(Math.abs(box.x)<2&&Math.abs(box.y)<2&&Math.abs(box.width-viewport.width)<2&&Math.abs(box.height-viewport.height)<2,`stitch fills its own window: ${JSON.stringify({box,viewport})}`);
+  assert.equal(await popup.locator('.stitch-window-header').count(),0,'old modal title strip is absent');
+  await popup.waitForFunction(()=>{const canvas=document.querySelector('.stitch-preview canvas');if(!canvas||!canvas.width||!canvas.height)return false;return canvas.getContext('2d')?.getImageData(Math.floor(canvas.width/2),Math.floor(canvas.height/2),1,1).data[0]>5;},null,{timeout:8000});
+  mkdirSync('outputs/stitch-qa',{recursive:true});await popup.screenshot({path:'outputs/stitch-qa/stitch-production-fullscreen.png'});
  }finally{await browser?.close();rmSync(root,{recursive:true,force:true});}
 });

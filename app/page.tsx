@@ -1,7 +1,6 @@
 'use client';
 import {SharedVolumeView} from '@/components/shared-volume-view';
 import {MeasurementCopies} from '@/components/measurement-copies';
-import {StitchDialog} from '@/components/stitch-dialog';
 import {CineControls} from '@/components/cine-controls';
 import {workstationSettings} from '@/lib/volume-workstation';
 import {VolumeDisplayControls} from '@/components/volume-display-controls';
@@ -510,7 +509,6 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   const [maximizedPane, setMaximizedPane] = useState<string | null>(null);
   const [maximizedMprPane, setMaximizedMprPane] = useState<string | null>(null);
   const [datasetVersion, setDatasetVersion] = useState(0);
-  const [stitchOpen,setStitchOpen]=useState(false);
   const [workspace, setWorkspace] = useState<'viewer' | 'mpr' | '3d'>(detachedMode || 'viewer');
   useEffect(()=>{if(limited){setTool('scroll');setLayout({rows:1,columns:1});setActive('A');setMaximizedPane(null);setLocalizers(false);setSelectedMarkId(null);setWorkspace('viewer');}},[limited]);
   const [mprSettings, setMprSettings] = useState<MprSettings>(newMprSettings);
@@ -596,20 +594,25 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     return()=>cancelAnimationFrame(frame);
   },[assigned[active],detachedMode]);
   assignmentsRef.current=assigned;
-  const connectHandoff = (mode: DetachedMode | 'report', token: string, seriesId = selectedIdRef.current) => {
+  const connectHandoff = (mode: DetachedMode | 'report' | 'stitch', token: string, seriesId = selectedIdRef.current) => {
     const key = mode === 'report' ? mode : `${mode}:${seriesId}`;
     if(mode!=='report'){
       detachedSources.current.get(key)?.();
       detachedSources.current.set(key,publishDetachedSource(token,()=>{
         const selected=listRef.current.find(s=>s.id===seriesId);
-        return {revision:selected?`${selected.id}:${selected.imageIds.join(',')}:${selected.loading}`:'empty',
-          series:selected?[{...selected,images:shareLocalDicoms(selected.imageIds)}]:[],preferredSeriesId:selected?.id,anatomy:selected&&anatomyRef.current.result?.sourceKey===volumeSourceKey(selected.imageIds)?anatomyRef.current.result:null};
+        const sources=mode==='stitch'&&selected?listRef.current.filter(s=>s.studyId===selected.studyId&&['CR','DX','DR','RG','RF'].includes(s.modality)):(selected?[selected]:[]);
+        return {revision:sources.map(s=>`${s.id}:${s.imageIds.join(',')}:${s.loading}`).join('|')||'empty',
+          series:sources.map(s=>({...s,images:shareLocalDicoms(s.imageIds)})),preferredSeriesId:selected?.id,preferredImageId:mode==='stitch'?currentImages[active]:undefined,anatomy:selected&&anatomyRef.current.result?.sourceKey===volumeSourceKey(selected.imageIds)?anatomyRef.current.result:null};
       }));
     }
     channels.current.get(key)?.close();
     const channel = new BroadcastChannel(`radaz-${token}`);
     const { imageIds: reportIds, preferredSeriesId, mediaSessions } = reportHandoff(listRef.current, selectedIdRef.current);
     channel.onmessage = event => {
+      if(mode==='stitch'&&event.data?.kind==='STITCH_SAVE'){
+        void (async()=>{const file=event.data.file as File;await saveArchiveFiles([file]);await importFiles([file]);setStatus('Birləşmiş rentgen ayrıca DICOM seriyası kimi saxlandı.');channel.postMessage({kind:'STITCH_SAVED',requestId:event.data.requestId});})().catch(error=>channel.postMessage({kind:'STITCH_SAVE_ERROR',requestId:event.data.requestId,message:String(error)}));
+        return;
+      }
       if (event.data?.kind !== 'READY') return;
       if (mode !== 'report') { channel.postMessage({kind:'SHARED_READY'}); return; }
       void (async () => {
@@ -970,7 +973,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   useEffect(() => {
     if (!detachedMode) {
       try { for (const entry of JSON.parse(sessionStorage.getItem('radaz-detached-handoffs-v2') || '[]')) {
-        if (['mpr','3d'].includes(entry.mode) && typeof entry.seriesId === 'string' && typeof entry.token === 'string') connectHandoff(entry.mode,entry.token,entry.seriesId);
+        if (['mpr','3d','stitch'].includes(entry.mode) && typeof entry.seriesId === 'string' && typeof entry.token === 'string') connectHandoff(entry.mode,entry.token,entry.seriesId);
       } } catch {}
     }
     return () => { channels.current.forEach(channel => channel.close()); channels.current.clear();detachedSources.current.forEach(dispose=>dispose());detachedSources.current.clear(); };
@@ -1013,7 +1016,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     return registerViewer(load, (progress,error) => { setTransferProgress(progress); if(error)setStatus(error); });
   }, [detachedMode, loadArchiveStudies]);
 
-  const openDetached = (mode: DetachedMode) => {
+  const openDetached = (mode: DetachedMode | 'stitch') => {
     const source=listRef.current.find(s=>s.id===selectedIdRef.current);
     if(!source){setStatus('Əvvəlcə seriya seçin');return;}
     const key=`${mode}:${source.id}`;
@@ -1493,7 +1496,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className="header-control" title={tr('ui.measurement_tools_0762c')} aria-label={tr('ui.measurement_tools_0762c')}><Ruler size={17}/><span>{tr('ui.measurements_a4480')}</span><ChevronDown size={14}/></Button></DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="header-menu">{measureTools.map(t => <DropdownMenuItem key={t.id} toolbarId={t.id} onSelect={() => setTool(t.id)} className={tool === t.id ? 'menu-selected' : ''}><t.icon size={16}/>{t.label}<kbd>{t.hint}</kbd></DropdownMenuItem>)}<div className="menu-separator"/><DropdownMenuItem onSelect={() => setClearToken(x => x + 1)}><Trash2 size={16}/> {tr('ui.delete_all_on_current_slice_cc1ac')}<kbd>Ctrl+D</kbd></DropdownMenuItem><div className="menu-separator"/><DropdownMenuItem onSelect={()=>setMeasurementSettingsOpen(true)}><Settings2 size={16}/>Ölçü ayarları <kbd>{measurementUnit==='cm'?'sm':'mm'}</kbd></DropdownMenuItem><div className="menu-hint">{tr('ui.select_a_measurement_delete_to_remove_7f481')}</div></DropdownMenuContent>
         </DropdownMenu>
-        <Button variant="ghost" className="header-control" aria-label="İki rentgeni birləşdir" title="İki rentgeni birləşdir (stitch)" disabled={!currentSeries||!['CR','DX','DR','RG','RF'].includes(currentSeries.modality)} onClick={()=>setStitchOpen(true)}><StitchPersonIcon/></Button>
+        <Button variant="ghost" className="header-control" aria-label="İki rentgeni birləşdir" title="İki rentgeni birləşdir (stitch)" disabled={!currentSeries||!['CR','DX','DR','RG','RF'].includes(currentSeries.modality)} onClick={()=>openDetached('stitch')}><StitchPersonIcon/></Button>
         </ToolbarGroup>}
         {!limited && detachedMode !== '3d' && <ToolbarGroup className="toolbar-group" role="group" aria-label={tr('ui.window_and_localizer_1e413')} groupId="window" order={80}>
         {/* Open on click as well as touch/keyboard activation (remote clients may send no pointerdown). */}
@@ -1517,7 +1520,6 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       <ToolbarGroup className="toolbar-group help-command" groupId="help" order={100}>{workspace!=='3d'&&<DicomInfoButton imageId={currentImages[workspace==='mpr'?mprActive:active]}/>}<AppHelpMenu/></ToolbarGroup>
     </header>
     <MeasurementSettings open={measurementSettingsOpen} onOpenChange={setMeasurementSettingsOpen}/>
-    <StitchDialog open={stitchOpen} onOpenChange={setStitchOpen} series={seriesList.filter(s=>s.studyId===currentSeries?.studyId&&['CR','DX','DR','RG','RF'].includes(s.modality))} initialImage={currentImages[active]} onCreated={async file=>{await saveArchiveFiles([file]);await importFiles([file]);setStatus('Birləşmiş rentgen ayrıca DICOM seriyası kimi saxlandı.');}}/>
     <Dialog open={importOpen} onOpenChange={open => { if (!importBusy) setImportOpen(open); }}>
       <DialogContent className="import-dialog" showCloseButton={false}>
         <DialogHeader><DialogTitle>{tr('ui.folder_and_zip_rar_import_a1225')}</DialogTitle><DialogDescription>{tr('ui.select_multiple_sources_and_open_them_togethe_b9a18')}</DialogDescription></DialogHeader>
