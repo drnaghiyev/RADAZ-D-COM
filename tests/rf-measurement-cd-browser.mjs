@@ -36,9 +36,9 @@ test('RF measurement becomes a visible separate DICOM on offline CD; stitch open
   const bytes=new Uint8Array(await zip.file(measured).async('uint8array')),ds=dicomParser.parseDicom(bytes);
   assert.equal(ds.string('x00280301'),'YES');assert.equal(ds.string('x00080060'),'OT');
   const pixel=ds.elements.x7fe00010,rgb=bytes.subarray(pixel.dataOffset,pixel.dataOffset+pixel.length);assert.ok(rgb.some((v,i)=>i%3===0&&v!==rgb[i+1]),'annotation color is burned into the DICOM pixels');
-  await page.getByRole('button',{name:'Ölçmə alətləri',exact:true}).click();await page.getByRole('menuitem',{name:/İki rentgeni birləşdir/}).click();
+  await page.getByRole('button',{name:'İki rentgeni birləşdir',exact:true}).click();
   const dialog=page.getByRole('dialog',{name:'İki rentgen görüntüsünü birləşdir'});await dialog.waitFor();
-  const bounds=await dialog.boundingBox();assert.ok(bounds.width>=1490&&bounds.height>=890,'stitch window opens fullscreen');
+  const bounds=await dialog.boundingBox();assert.ok(bounds.width>=1490&&bounds.height>=890&&Math.abs(bounds.x)<2&&Math.abs(bounds.y)<2,`stitch window opens at the top left and fills the screen: ${JSON.stringify(bounds)}`);
   await dialog.getByRole('button',{name:'Pəncərəni kiçilt'}).click();await dialog.waitFor({state:'hidden'});
   await page.getByRole('button',{name:'Stitch pəncərəsini aç'}).click();await dialog.waitFor({state:'visible'});
   await dialog.getByRole('button',{name:'Pəncərəni bərpa et'}).click();assert.ok((await dialog.boundingBox()).height<bounds.height,'restore returns to the smaller window');

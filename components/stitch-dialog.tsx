@@ -1,5 +1,5 @@
 'use client';
-import {useEffect,useMemo,useRef,useState} from 'react';
+import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import type {KeyboardEvent as ReactKeyboardEvent,PointerEvent as ReactPointerEvent,WheelEvent as ReactWheelEvent} from 'react';
 import {Crop as CropIcon,Focus,Hand,Maximize2,Minimize2,Minus,Move,RotateCcw,Save,SunMoon,X,ZoomIn,ZoomOut} from 'lucide-react';
 import {Dialog,DialogContent,DialogHeader,DialogTitle} from './ui/dialog';
@@ -47,6 +47,9 @@ export function StitchDialog({open,onOpenChange,series,initialImage,onCreated}:{
  const [mode,setMode]=useState<Mode>('align'),[selected,setSelected]=useState<0|1>(1);
  const [error,setError]=useState(''),[busy,setBusy]=useState(false),[maximized,setMaximized]=useState(true),[minimized,setMinimized]=useState(false);
  const stage=useRef<HTMLDivElement>(null),canvas=useRef<HTMLCanvasElement>(null),gesture=useRef<Gesture|null>(null);
+ const [stageNode,setStageNode]=useState<HTMLDivElement|null>(null),[canvasNode,setCanvasNode]=useState<HTMLCanvasElement|null>(null);
+ const bindStage=useCallback((node:HTMLDivElement|null)=>{stage.current=node;setStageNode(node);},[]);
+ const bindCanvas=useCallback((node:HTMLCanvasElement|null)=>{canvas.current=node;setCanvasNode(node);},[]);
  const layers=useMemo(()=>rasters?[makeStitchCanvas(rasters[0]),makeStitchCanvas(rasters[1])] as [HTMLCanvasElement,HTMLCanvasElement]:null,[rasters]);
  const stitch:StitchOptions={crops,offsetX,offsetY,lowerScale,topOffsetX:topOffset.x,topOffsetY:topOffset.y,topScale,brightness,contrast,feather};
  const layout=rasters?stitchLayout(rasters,stitch):null;
@@ -62,14 +65,14 @@ export function StitchDialog({open,onOpenChange,series,initialImage,onCreated}:{
 
  const view=()=>{if(!stage.current||!rasters)return null;const width=stage.current.clientWidth,height=stage.current.clientHeight,baseWidth=Math.max(rasters[0].width,rasters[1].width),baseHeight=rasters[0].height+rasters[1].height*.88,scale=Math.min(width/baseWidth,height/baseHeight);
   return {width,height,scale,x:(width-baseWidth*scale)/2,y:(height-baseHeight*scale)/2};};
- useEffect(()=>{if(!rasters||!layers||!layout||!canvas.current||!stage.current)return;const redraw=()=>{
-  const v=view(),target=canvas.current;if(!v||!target)return;const dpr=Math.min(2,window.devicePixelRatio||1);target.width=Math.max(1,Math.round(v.width*dpr));target.height=Math.max(1,Math.round(v.height*dpr));
+ useEffect(()=>{if(!rasters||!layers||!layout||!canvasNode||!stageNode||minimized||!open)return;const redraw=()=>{
+  const v=view(),target=canvasNode;if(!v||!target)return;const dpr=Math.min(2,window.devicePixelRatio||1);target.width=Math.max(1,Math.round(v.width*dpr));target.height=Math.max(1,Math.round(v.height*dpr));
   const ctx=target.getContext('2d');if(!ctx)return;ctx.scale(dpr,dpr);ctx.fillStyle='#000';ctx.fillRect(0,0,v.width,v.height);
   ctx.save();ctx.translate(v.x,v.y);ctx.scale(v.scale,v.scale);drawStitch(ctx,rasters,layers,stitch);
   if(mode==='crop'){for(const i of [0,1] as const){const r=layout.rects[i];ctx.strokeStyle=i===selected?'#58e6f0':'#e4ad5b';ctx.lineWidth=2/v.scale;ctx.setLineDash([8/v.scale,5/v.scale]);ctx.strokeRect(r.x,r.y,r.width,r.height);ctx.setLineDash([]);
     for(const [x,y] of [[r.x+r.width/2,r.y],[r.x+r.width/2,r.y+r.height],[r.x,r.y+r.height/2],[r.x+r.width,r.y+r.height/2]]){ctx.fillStyle=ctx.strokeStyle;ctx.fillRect(x-5/v.scale,y-5/v.scale,10/v.scale,10/v.scale);}}}
-  ctx.restore();};redraw();const observer=new ResizeObserver(redraw);observer.observe(stage.current);return()=>observer.disconnect();
- },[rasters,layers,crops,offsetX,offsetY,lowerScale,topOffset,topScale,brightness,contrast,feather,mode,selected,maximized,minimized]);
+  ctx.restore();};redraw();const observer=new ResizeObserver(redraw);observer.observe(stageNode);return()=>observer.disconnect();
+ },[rasters,layers,crops,offsetX,offsetY,lowerScale,topOffset,topScale,brightness,contrast,feather,mode,selected,maximized,minimized,open,stageNode,canvasNode]);
 
  const pointer=(event:ReactPointerEvent<HTMLDivElement>)=>{const v=view(),bounds=stage.current?.getBoundingClientRect();if(!v||!bounds||!layout)return null;
   const x=event.clientX-bounds.left,y=event.clientY-bounds.top;return {x,y,worldX:(x-v.x)/v.scale,worldY:(y-v.y)/v.scale,view:v};};
@@ -105,13 +108,13 @@ export function StitchDialog({open,onOpenChange,series,initialImage,onCreated}:{
 
  const onShortcut=(event:ReactKeyboardEvent)=>{if(event.altKey||event.ctrlKey||event.metaKey||event.target instanceof HTMLElement&&event.target.closest('input,select,textarea'))return;const key=event.key.toLowerCase();const modes:Record<string,Mode>={'1':'align','2':'crop','3':'pan','4':'window'};
   if(modes[key])setMode(modes[key]);else if(key==='q')setSelected(0);else if(key==='w')setSelected(1);else if(key==='+'||key==='=')scaleSelected(1.1);else if(key==='-')scaleSelected(.9);else if(key==='0')reset();else if(key==='c')centerFrames();else if(key==='f11')setMaximized(value=>!value);else return;event.preventDefault();};
- return <>{open&&minimized&&<button className="stitch-restore" onClick={()=>setMinimized(false)}><Maximize2 size={16}/>Stitch pəncərəsini aç</button>}<Dialog open={open&&!minimized} onOpenChange={busy?undefined:onOpenChange}><DialogContent className={`stitch-dialog ${maximized?'stitch-maximized':''}`} showCloseButton={false} aria-describedby="stitch-guidance" onKeyDown={onShortcut}><DialogHeader className="stitch-window-header"><DialogTitle>İki rentgen görüntüsünü birləşdir</DialogTitle><div className="stitch-window-actions"><button aria-label="Pəncərəni kiçilt" title="Pəncərəni kiçilt" onClick={()=>setMinimized(true)}><Minus size={17}/></button><button aria-label={maximized?'Pəncərəni bərpa et':'Pəncərəni böyüt'} title={maximized?'Pəncərəni bərpa et · F11':'Tam ekran · F11'} onClick={()=>setMaximized(value=>!value)}>{maximized?<Minimize2 size={17}/>:<Maximize2 size={17}/>}</button><button aria-label="Stitch pəncərəsini bağla" title="Bağla" onClick={()=>onOpenChange(false)}><X size={17}/></button></div></DialogHeader>
+ return <>{open&&minimized&&<button className="stitch-restore" onClick={()=>setMinimized(false)}><Maximize2 size={16}/>Stitch pəncərəsini aç</button>}<Dialog open={open&&!minimized} onOpenChange={busy?undefined:onOpenChange}><DialogContent className={`stitch-dialog ${maximized?'stitch-maximized translate-x-0 translate-y-0':''}`} showCloseButton={false} aria-describedby="stitch-guidance" onKeyDown={onShortcut}><DialogHeader className="stitch-window-header"><DialogTitle>İki rentgen görüntüsünü birləşdir</DialogTitle><div className="stitch-window-actions"><button aria-label="Pəncərəni kiçilt" title="Pəncərəni kiçilt" onClick={()=>setMinimized(true)}><Minus size={17}/></button><button aria-label={maximized?'Pəncərəni bərpa et':'Pəncərəni böyüt'} title={maximized?'Pəncərəni bərpa et · F11':'Tam ekran · F11'} onClick={()=>setMaximized(value=>!value)}>{maximized?<Minimize2 size={17}/>:<Maximize2 size={17}/>}</button><button aria-label="Stitch pəncərəsini bağla" title="Bağla" onClick={()=>onOpenChange(false)}><X size={17}/></button></div></DialogHeader>
   <div className="stitch-body"><div className="stitch-stage-wrap"><div className="stitch-stage-toolbar" role="toolbar" aria-label="Stitch ön baxış alətləri">
     <button className={mode==='align'?'active':''} title="Kadrı sürüşdür · 1" onClick={()=>setMode('align')}><Move size={16}/>Kadrı sürüşdür</button><button className={mode==='crop'?'active':''} title="Kənardan kəs · 2" onClick={()=>setMode('crop')}><CropIcon size={16}/>Kənardan kəs</button><button className={mode==='pan'?'active':''} title="Seçilmiş kadrı hərəkət etdir · 3" onClick={()=>setMode('pan')}><Hand size={16}/>Pan</button>
     <button className={mode==='window'?'active':''} title="Seçilmiş kadrın parlaqlığı və kontrastı · 4" onClick={()=>setMode('window')}><SunMoon size={16}/>Parlaqlıq / kontrast</button>
     <button aria-label="Yaxınlaşdır" title="Seçilmiş kadrı yaxınlaşdır · +" onClick={()=>scaleSelected(1.1)}><ZoomIn size={16}/></button><button aria-label="Uzaqlaşdır" title="Seçilmiş kadrı uzaqlaşdır · −" onClick={()=>scaleSelected(.9)}><ZoomOut size={16}/></button><button title="Seçilmiş kadrın miqyasını sıfırla" onClick={()=>{if(selected===0)setTopScale(1);else setLowerScale(1);}}><Maximize2 size={16}/>Miqyası sıfırla</button>
     <button title="Görüntüləri mərkəzləşdir · C" onClick={centerFrames}><Focus size={16}/>Görüntüləri mərkəzləşdir</button>
-  </div><div ref={stage} className={`stitch-preview stitch-mode-${mode}`} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={()=>gesture.current=null} onPointerCancel={()=>gesture.current=null} onWheel={onWheel}><canvas ref={canvas} aria-label="Birləşmiş rentgen ön baxışı"/></div>
+  </div><div ref={bindStage} className={`stitch-preview stitch-mode-${mode}`} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={()=>gesture.current=null} onPointerCancel={()=>gesture.current=null} onWheel={onWheel}><canvas ref={bindCanvas} aria-label="Birləşmiş rentgen ön baxışı"/></div>
   <p id="stitch-guidance" className="stitch-guidance">{mode==='align'?'Seçilmiş kadrı digər kadra uyğunlaşdırın.':mode==='crop'?'Kadrın yuxarı, aşağı və yan kənarından tutub kəsim sahəsini dəyişin.':mode==='window'?'Seçilmiş kadrda sağa-sola sürükləyin: parlaqlıq; yuxarı-aşağı: kontrast.':'Seçilmiş kadrı sürüşdürün. Siçan çarxı ilə yalnız həmin kadrı yaxınlaşdırın.'} Q/W: kadr seçimi · 1–4: alətlər · +/−: miqyas · C: mərkəz · 0: sıfırla.</p></div>
   <aside className="stitch-controls"><label>Yuxarı kadr<select value={first} onChange={event=>setFirst(event.target.value)}>{options.map(item=><option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
    <label>Aşağı kadr<select value={second} onChange={event=>setSecond(event.target.value)}>{options.map(item=><option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
