@@ -21,3 +21,12 @@ test('crop edges cannot erase the entire radiograph',()=>{
  assert.ok(image.width-crop.left-crop.right>=16);
  assert.ok(image.height-crop.top-crop.bottom>=16);
 });
+
+test('upper-frame pan and zoom preserve the lower-frame projection',()=>{
+ const image={width:100,height:200,pixels:new Uint8Array(20000)};
+ const base={crops:[emptyCrop(),emptyCrop()],offsetX:0,offsetY:170,lowerScale:1,brightness:[0,0],contrast:[1,1],feather:true};
+ const before=stitchLayout([image,image],base);
+ const after=stitchLayout([image,image],{...base,topOffsetX:15,topOffsetY:9,topScale:1.5});
+ assert.deepEqual(after.rects[1],before.rects[1]);
+ assert.deepEqual(after.rects[0],{x:15,y:9,width:150,height:300});
+});

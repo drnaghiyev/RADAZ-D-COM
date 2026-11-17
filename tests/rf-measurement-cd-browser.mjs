@@ -42,17 +42,29 @@ test('RF measurement becomes a visible separate DICOM on offline CD; stitch open
   const stitchButton=page.getByRole('button',{name:'Ayrıca DICOM kimi saxla'});
   try{await stitchButton.waitFor({state:'visible',timeout:10000});await page.waitForFunction(()=>[...document.querySelectorAll('.stitch-dialog button')].find(e=>e.textContent.includes('Ayrıca DICOM'))?.disabled===false,null,{timeout:10000});}
   catch{throw Error('Stitch unavailable: '+await page.getByRole('dialog',{name:'İki rentgen görüntüsünü birləşdir'}).innerText());}
-  await dialog.getByRole('button',{name:'Aşağı kəsim'}).click();
+  await dialog.getByRole('button',{name:'Kənardan kəs'}).click();
   const cropEdge=await page.locator('.stitch-preview canvas').evaluate(canvas=>{const ctx=canvas.getContext('2d'),{data,width,height}=ctx.getImageData(0,0,canvas.width,canvas.height);let x=width,y=0;for(let row=0;row<height;row++)for(let col=0;col<width;col++){const i=(row*width+col)*4;if(data[i]<150&&data[i+1]>190&&data[i+2]>190&&col<x){x=col;y=row}}return {x,y,width,height}});
   assert.ok(cropEdge.x<cropEdge.width,'crop outline is visible');
   const stitchStage=await page.locator('.stitch-preview').boundingBox();
   await page.mouse.move(stitchStage.x+cropEdge.x,stitchStage.y+cropEdge.y);await page.mouse.down();await page.mouse.move(stitchStage.x+cropEdge.x+24,stitchStage.y+cropEdge.y,{steps:8});await page.mouse.up();
   await page.waitForFunction(()=>{const text=document.querySelector('.stitch-controls')?.textContent||'';return /Kəsim, px: sol [1-9]/.test(text)},null,{timeout:5000});
+  const cropBounds=async()=>page.locator('.stitch-preview canvas').evaluate(canvas=>{const {data,width,height}=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height);let minX=width,maxX=0,minY=height,maxY=0;for(let y=0;y<height;y++)for(let x=0;x<width;x++){const i=(y*width+x)*4;if(data[i]<150&&data[i+1]>190&&data[i+2]>190){minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y)}}return {minX,maxX,minY,maxY}});
+  for(const [edge,dx,dy,pattern] of [['right',-24,0,/sağ [1-9]/],['top',0,24,/yuxarı [1-9]/],['bottom',0,-24,/aşağı [1-9]/]]){
+   const b=await cropBounds(),px=edge==='right'?b.maxX:(b.minX+b.maxX)/2,py=edge==='top'?b.minY:edge==='bottom'?b.maxY:(b.minY+b.maxY)/2;
+   await page.mouse.move(stitchStage.x+px,stitchStage.y+py);await page.mouse.down();await page.mouse.move(stitchStage.x+px+dx,stitchStage.y+py+dy,{steps:8});await page.mouse.up();
+   assert.match(await dialog.locator('.stitch-controls').innerText(),pattern,`${edge} crop edge moves with the mouse`);
+  }
   await dialog.getByRole('button',{name:'Kadrı sürüşdür'}).click();
   const alignment=await page.getByTestId('stitch-offset').innerText();
   await page.mouse.move(stitchStage.x+stitchStage.width/2,stitchStage.y+stitchStage.height*.75);await page.mouse.down();await page.mouse.move(stitchStage.x+stitchStage.width/2+30,stitchStage.y+stitchStage.height*.75+12,{steps:8});await page.mouse.up();
   assert.notEqual(await page.getByTestId('stitch-offset').innerText(),alignment,'mouse drag aligns lower frame');
-  await page.locator('.stitch-preview').hover();await page.mouse.wheel(0,-120);await page.waitForFunction(()=>!(document.querySelector('[data-testid="stitch-offset"]')?.textContent||'').includes('100%'));
+  await page.locator('.stitch-preview').hover();await page.mouse.wheel(0,-120);await page.waitForFunction(()=>!(document.querySelector('[data-testid="stitch-offset"]')?.textContent||'').includes('miqyas 100%'));
+  await dialog.getByRole('button',{name:'Parlaqlıq / kontrast'}).click();const windowBefore=await dialog.locator('.stitch-controls').innerText();
+  await page.mouse.move(stitchStage.x+stitchStage.width/2,stitchStage.y+stitchStage.height*.75);await page.mouse.down();await page.mouse.move(stitchStage.x+stitchStage.width/2+35,stitchStage.y+stitchStage.height*.75-20,{steps:8});await page.mouse.up();
+  assert.notEqual(await dialog.locator('.stitch-controls').innerText(),windowBefore,'mouse drag changes brightness and contrast of selected frame');
+  await dialog.getByRole('button',{name:'Yuxarı kadr'}).click();const topBefore=await page.getByTestId('stitch-offset').innerText();await dialog.getByRole('button',{name:'Yaxınlaşdır'}).click();assert.notEqual(await page.getByTestId('stitch-offset').innerText(),topBefore,'selected upper frame zoom changes independently');
+  await page.keyboard.press('w');assert.match(await page.getByTestId('stitch-offset').innerText(),/Seçilmiş: aşağı/,'W selects the lower frame');
+  await page.keyboard.press('2');assert.match(await dialog.getByRole('button',{name:'Kənardan kəs'}).getAttribute('class'),/active/,'2 selects crop');
   mkdirSync('outputs/stitch-qa',{recursive:true});await page.screenshot({path:'outputs/stitch-qa/large-interactive-stitch.png'});
   await stitchButton.click();
   await page.waitForFunction(async()=>{const archive=await import('/lib/local-archive.ts');const files=await archive.getArchiveFiles('2.25.987654321');return files.length===3;},null,{timeout:20000});
