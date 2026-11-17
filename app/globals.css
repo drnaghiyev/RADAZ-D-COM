@@ -1232,4 +1232,6 @@ body .toolbar-workspace .right-tool-dock .toolbar-drag-handle{width:8px!importan
 .grouped-workstation .series-rail .series-thumb img{width:100%;height:100%;object-fit:contain}
 .grouped-workstation .series-rail .series-info strong{white-space:normal;overflow-wrap:anywhere}
 .grouped-workstation .series-rail .series-thumb>span{display:none}
+.grouped-workstation .series-rail .series-thumb{aspect-ratio:1;height:auto;display:grid;place-items:center}
+.grouped-workstation .series-rail .series-thumb img{width:100%;height:100%;object-fit:scale-down;object-position:center}
 .grouped-workstation .series-rail .drag-handle{position:absolute;right:3px;bottom:5px}

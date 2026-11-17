@@ -173,6 +173,19 @@ export async function getOriginalDicom(imageId: string): Promise<Uint8Array | nu
   return item && !derived.has(imageId) ? new Uint8Array(item.dataSet.byteArray) : null;
 }
 
+export function getMeasurementDicomSource(imageId: string) {
+  const ds=records.get(imageId)?.dataSet;
+  if(!ds || derived.has(imageId))return null;
+  return {
+    studyUID:ds.string('x0020000d')||'', sopUID:ds.string('x00080018')||'', sopClassUID:ds.string('x00080016')||'',
+    patientName:ds.string('x00100010')||'', patientId:ds.string('x00100020')||'',
+    studyDate:ds.string('x00080020')||'', studyTime:ds.string('x00080030')||'',
+    accessionNumber:ds.string('x00080050')||'', studyDescription:ds.string('x00081030')||'',
+    birthDate:ds.string('x00100030')||'', patientSex:ds.string('x00100040')||'',
+    instanceNumber:ds.string('x00200013')||'1',
+  };
+}
+
 export function getLocalizerGeometry(imageId: string): ImageGeometry | null {
   if(geometryOverrides.has(imageId))return geometryOverrides.get(imageId)!;
   if (derived.has(imageId)) return derived.get(imageId)!.geometry;
@@ -212,7 +225,8 @@ export function thumbnailLocalDicom(imageId: string): string | undefined {
   const item = records.get(imageId);
   if (!item || !item.pixels.length || typeof document === 'undefined') return;
   const { rows, columns, pixels, dataSet } = item;
-  const width = Math.min(112, columns), height = Math.min(112, rows);
+  const scale=Math.min(1,112/columns,112/rows);
+  const width = Math.max(1,Math.round(columns*scale)), height = Math.max(1,Math.round(rows*scale));
   const canvas = document.createElement('canvas');
   canvas.width = width; canvas.height = height;
   const context = canvas.getContext('2d');

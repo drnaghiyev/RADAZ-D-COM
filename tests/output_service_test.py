@@ -1,5 +1,6 @@
 """Real DIMSE print protocol, DICOMDIR media and local encoder integration."""
 import base64
+import copy
 import io
 import json
 import sys
@@ -82,20 +83,30 @@ class MediaTests(unittest.TestCase):
         self.assertEqual(loaded.PixelData,original.PixelData);self.assertEqual(loaded.SOPInstanceUID,original.SOPInstanceUID)
         self.assertTrue((root/'START.html').exists())
         with ZipFile(io.BytesIO(self.output.zip_package(job['id']))) as zip:self.assertIn('DICOMDIR',zip.namelist())
-    def test_measurement_png_is_separate_from_original_dicom(self):
+    def test_measurement_secondary_capture_is_separate_from_original_dicom(self):
         data,original=self.package()
-        source=io.BytesIO(data); annotated=io.BytesIO()
-        png=b'\x89PNG\r\n\x1a\n' + b'test-annotation-raster'
-        with ZipFile(source) as old,ZipFile(annotated,'w') as new:
+        source=io.BytesIO(data); archive=io.BytesIO()
+        measured=copy.deepcopy(original)
+        measured.SOPClassUID='1.2.840.10008.5.1.4.1.1.7'
+        measured.SOPInstanceUID=generate_uid()
+        measured.SeriesInstanceUID=generate_uid()
+        measured.SeriesDescription='RADAZ Measured Images'
+        measured.Modality='OT';measured.ImageType=['DERIVED','SECONDARY']
+        measured.ConversionType='WSD';measured.BurnedInAnnotation='YES'
+        measured.file_meta.MediaStorageSOPClassUID=measured.SOPClassUID
+        measured.file_meta.MediaStorageSOPInstanceUID=measured.SOPInstanceUID
+        saved=io.BytesIO();measured.save_as(saved,enforce_file_format=True)
+        with ZipFile(source) as old,ZipFile(archive,'w') as new:
             for name in old.namelist():new.writestr(name,old.read(name))
-            new.writestr('MEASUREMENTS/IMAGE000001.png',png)
-        job=self.output.prepare(annotated.getvalue());root=self.output.job_path(job['id'])/'disc'
-        self.assertEqual((root/'MEASUREMENTS'/'IMAGE000001.png').read_bytes(),png)
-        self.assertIn('IMAGE000001.png',(root/'MEASUREMENTS'/'index.html').read_text(encoding='utf-8'))
-        self.assertIn('MEASUREMENTS/index.html',(root/'README.txt').read_text(encoding='utf-8'))
-        saved=next(iter(FileSet(root/'DICOMDIR'))).load()
-        self.assertEqual(saved.PixelData,original.PixelData)
-        self.assertEqual(saved.SOPInstanceUID,original.SOPInstanceUID)
+            new.writestr('MEASUREMENTS/IMG000001.dcm',saved.getvalue())
+        job=self.output.prepare(archive.getvalue());root=self.output.job_path(job['id'])/'disc'
+        self.assertEqual(job['count'],2)
+        self.assertIn('Secondary Capture',(root/'README.txt').read_text(encoding='utf-8'))
+        instances=[record.load() for record in FileSet(root/'DICOMDIR')]
+        source_image=next(ds for ds in instances if ds.SOPInstanceUID==original.SOPInstanceUID)
+        measured_image=next(ds for ds in instances if ds.SOPInstanceUID==measured.SOPInstanceUID)
+        self.assertEqual(source_image.PixelData,original.PixelData)
+        self.assertEqual(measured_image.BurnedInAnnotation,'YES')
     def test_zip_path_traversal_is_rejected(self):
         data=io.BytesIO()
         with ZipFile(data,'w') as zip:zip.writestr('../outside.txt','no')

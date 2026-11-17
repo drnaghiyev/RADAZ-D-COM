@@ -1621,9 +1621,9 @@ export const uiMessages={
   "ru": "Выбранные изображения и инструкции отправляются в OpenAI только при создании заключения. Использование OpenAI API оплачивается отдельно."
  },
  "ui.help_f1_8115e": {
-  "az": "Yardım · F1",
-  "en": "Help · F1",
-  "ru": "Справка · F1"
+  "az": "Yardım · F10",
+  "en": "Help · F10",
+  "ru": "Справка · F10"
  },
  "ui.help_and_licence_be57c": {
   "az": "Yardım və lisenziya",

@@ -58,7 +58,7 @@ import { Sparkles, Mic } from 'lucide-react';
 import type * as Core from '@cornerstonejs/core';
 
 type Tool = 'anatomy-volume' | 'anatomy-auto' | 'anatomy' | 'scroll' | 'arrow' | 'pencil' | 'cursor3d' | 'wl' | 'pan' | 'zoom' | 'length' | 'angle' | 'arch' | 'cobb' | 'ellipse' | 'hu' | 'deviation' | 'erase';
-type Series = { sourceId?: string; institution?: string; id: string; studyId: string; name: string; modality: string; patient: string; patientId: string; birth: string; date: string; number: string; imageIds: string[]; initialImageId?:string; thumb?: string; mediaSession?: string; archived?: boolean; discovered?: number; loading?: boolean };
+type Series = { sourceId?: string; institution?: string; id: string; studyId: string; name: string; modality: string; patient: string; patientId: string; birth: string; date: string; number: string; imageIds: string[]; initialImageId?:string; thumb?: string; thumbImageId?:string; mediaSession?: string; archived?: boolean; discovered?: number; loading?: boolean };
 type Preset = { ww: number; wl: number; token: number; panel: string; seriesId: string; imageId: string } | null;
 type ImportSource = { id: number; label: string; files: File[] };
 type MprData = { sourceId: string; stacks: Record<'SAG' | 'COR' | 'AX', string[]>; planes: Series[]; owned: string[]; orientations: MprOrientations | null; pivot?: Point3 | null };
@@ -632,13 +632,6 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
   const onClearImage = useCallback((imageId: string, panelId?: string) => setMarks(current => current.filter(mark => mark.imageId !== imageId || (!!mark.panelId && mark.panelId !== panelId))), []);
   const onImageChange = useCallback((panel: string, imageId: string) => {
     setCurrentImages(current => current[panel] === imageId ? current : { ...current, [panel]: imageId });
-    const source = listRef.current.find(s => s.mediaSession && !s.thumb && s.imageIds.includes(imageId));
-    const thumb = source && thumbnailLocalDicom(imageId);
-    if (source && thumb) {
-      const updated = {...source, thumb};
-      if (mediaSeries.current.has(source.id)) mediaSeries.current.set(source.id, updated);
-      const next = listRef.current.map(s => s.id === source.id ? updated : s); listRef.current=next; setSeriesList(next);
-    }
   }, []);
 
   useEffect(() => {
@@ -696,7 +689,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         if (ordered.some(i => i.sop === item.sopUID)) { releaseLocalDicoms([imageId]); return; }
         ordered.push({ id: imageId, n: item.instance, sop: item.sopUID }); ordered.sort((a, b) => a.n - b.n);
         mediaOrder.current.set(id, ordered);
-        mediaSeries.current.set(id, { ...existing, imageIds: ordered.map(i => i.id), thumb: existing.thumb || thumbnailLocalDicom(imageId) });
+        mediaSeries.current.set(id, { ...existing, imageIds: ordered.map(i => i.id) });
         const next = mergeMedia(listRef.current);
         listRef.current = next; setSeriesList(next);
 
@@ -751,14 +744,15 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     if (!ready) return;
     for (const series of seriesList) {
       if (thumbnailJobs.current.size >= 2) break;
-      const image = series.imageIds[0];
-      if (series.thumb || !image || thumbnailAttempts.current.has(image)) continue;
+      if(series.loading)continue;
+      const image = series.imageIds[Math.floor(series.imageIds.length/2)];
+      if ((series.thumb && series.thumbImageId===image) || !image || thumbnailAttempts.current.has(image)) continue;
       thumbnailAttempts.current.add(image); thumbnailJobs.current.add(image);
       void loadDicomThumbnail(image).then(thumb => {
         if (!thumb || !listRef.current.some(item => item.id === series.id && item.imageIds.includes(image))) return;
         const media = mediaSeries.current.get(series.id);
-        if (media) mediaSeries.current.set(series.id, {...media, thumb});
-        const next = listRef.current.map(item => item.id === series.id ? {...item, thumb} : item);
+        if (media) mediaSeries.current.set(series.id, {...media, thumb,thumbImageId:image});
+        const next = listRef.current.map(item => item.id === series.id ? {...item, thumb,thumbImageId:image} : item);
         listRef.current = next; setSeriesList(next);
       }).catch(() => {}).finally(() => {
         thumbnailJobs.current.delete(image);
@@ -795,7 +789,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     const publish = () => {
       const imported = [...found.values()].map(({ ordered, sopUIDs, ...s }) => {
         const imageIds = ordered.sort((a, b) => a.n - b.n).map(o => o.id);
-        return { ...s, imageIds, loading: (!finished && (!registered || ordered.some(o => filesById.has(o.id) && !decodedIds.has(o.id)))) || !!job?.pending?.(s.id), thumb: s.thumb || thumbnailLocalDicom(imageIds[0]) };
+        return { ...s, imageIds, loading: (!finished && (!registered || ordered.some(o => filesById.has(o.id) && !decodedIds.has(o.id)))) || !!job?.pending?.(s.id) };
       });
       if (!imported.length) return;
       if (!published && (!job || job.select())) {
@@ -1040,6 +1034,12 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
     if (!tab) { channel.close(); channels.current.delete('report'); sessionStorage.removeItem('radaz-report-handoff'); setStatus('Hesabat vərəqəsi açıla bilmədi'); }
   };
 
+  const applyWindowPreset=useCallback((p:typeof presets[number])=>{
+    if(workspace==='mpr'&&mprData){const plane=mprData.planes[{MS:0,MC:1,MA:2}[mprActive as 'MS'|'MC'|'MA']||0];setPreset({...p,token:Date.now(),panel:mprActive,seriesId:plane.id,imageId:currentImages[mprActive]||''});}
+    else if(workspace==='viewer'&&assigned[active])setPreset({...p,token:Date.now(),panel:active,seriesId:assigned[active],imageId:currentImages[active]||''});
+    setPresetMenuOpen(false);
+  },[workspace,mprData,mprActive,currentImages,assigned,active]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if(limited)return;
@@ -1050,6 +1050,10 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         return;
       }
       if(e.altKey||e.ctrlKey||e.metaKey)return;
+      const shortcutPreset:Record<string,typeof presets[number]>={F1:presets[1],F2:presets[0],F3:presets[2],F4:presets[3]};
+      if(shortcutPreset[e.key]){e.preventDefault();applyWindowPreset(shortcutPreset[e.key]);return;}
+      const panelCount=/^(Digit|Numpad)[1-4]$/.test(e.code)?Number(e.code.at(-1)):0;
+      if(workspace==='viewer'&&panelCount){e.preventDefault();const columns=panelCount===4?2:panelCount,rows=panelCount===4?2:1;setLayout({rows,columns});setActive(current=>paneIndex(current)<panelCount?current:'A');setMaximizedPane(null);setLayoutOpen(false);return;}
       if(e.key==='Escape'){setAnatomyLabel(null);setTool('wl');return;}
       if (e.key === 'Delete') {
         const panel = workspace === 'mpr' ? mprActive : active;
@@ -1073,12 +1077,10 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
       }
       const match = ['w','ü','ц'].includes(e.key.toLowerCase()) ? toolItems.find(t => t.id === 'wl') : toolItems.find(t => t.hint.toLowerCase() === e.key.toLowerCase());
       if (match) { e.preventDefault(); setTool(match.id); }
-      if (e.key === '1') { setLayout({ rows: 1, columns: 1 }); setActive('A'); setMaximizedPane(null); }
-      if (e.key === '2') { setLayout({ rows: 1, columns: 2 }); setMaximizedPane(null); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [workspace, active, mprActive, currentImages, marks, selectedMarkId, onRemoveMark, limited]);
+  }, [workspace, active, mprActive, currentImages, marks, selectedMarkId, onRemoveMark, limited,applyWindowPreset]);
 
   useEffect(() => {
     type Context = { registerTool: (tool: { name: string; title: string; description: string; inputSchema: object; annotations: object; execute: (input: any) => Promise<object> }, options: { signal: AbortSignal }) => void | Promise<void> };
@@ -1492,7 +1494,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
         {!limited && detachedMode !== '3d' && <ToolbarGroup className="toolbar-group" role="group" aria-label={tr('ui.window_and_localizer_1e413')} groupId="window" order={80}>
         {/* Open on click as well as touch/keyboard activation (remote clients may send no pointerdown). */}
         <DropdownMenu open={presetMenuOpen} onOpenChange={setPresetMenuOpen}><DropdownMenuTrigger asChild><Button onPointerDown={event=>event.preventDefault()} onClick={()=>setPresetMenuOpen(open=>!open)} variant="ghost" className="header-control" title={tr('ui.window_preset_b14ad')} aria-label={tr('ui.window_preset_menu_148b6')}><SunMoon size={17}/><span>{tr('ui.window_preset_b14ad')}</span><ChevronDown size={14}/></Button></DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="header-menu preset-menu">{presets.map(p => <DropdownMenuItem key={p.label} onSelect={() => { if (workspace === 'mpr' && mprData) { const plane = mprData.planes[{ MS:0, MC:1, MA:2 }[mprActive as 'MS'|'MC'|'MA'] || 0]; setPreset({ ...p, token: Date.now(), panel: mprActive, seriesId: plane.id, imageId: currentImages[mprActive] || '' }); } else if (assigned[active]) setPreset({ ...p, token: Date.now(), panel: active, seriesId: assigned[active], imageId: currentImages[active] || '' }); }}><span>{p.label}</span><small>WL {p.wl} · WW {p.ww}</small></DropdownMenuItem>)}</DropdownMenuContent>
+          <DropdownMenuContent align="end" className="header-menu preset-menu">{presets.map((p,i) => <DropdownMenuItem key={p.label} onSelect={() => applyWindowPreset(p)}><span>{p.label}</span><small>WL {p.wl} · WW {p.ww} · {['F2','F1','F3','F4'][i]}</small></DropdownMenuItem>)}</DropdownMenuContent>
         </DropdownMenu>
         <Button variant="ghost" className={`header-control sync-scroll ${syncScroll?'is-on':''}`} disabled={!syncEligible} aria-label="Sync Scroll" aria-pressed={syncScroll} title="Sync · kəsiklər, zoom, pan və WW/WL" onClick={()=>setSyncScroll(value=>!value)}><MoveVertical size={17}/><b className="sync-symbol">↔</b></Button><Button variant="ghost" className={`header-control localizer-toggle ${localizers ? 'is-on' : ''}`} aria-label={tr('ui.localizer_lines_1e289')} aria-pressed={localizers} title={tr('ui.show_localizer_lines_between_compatible_serie_67285')} onClick={() => setLocalizers(value => !value)}><Crosshair size={17}/><span>{tr('ui.localizer_8c497')}</span></Button></ToolbarGroup>}
         {!limited && detachedMode !== '3d' && <ToolbarGroup className="toolbar-group" role="group" aria-label={tr('ui.pane_layout_and_size_6ffc9')} groupId="layout" order={90}>
@@ -1540,7 +1542,7 @@ export default function Home({ detachedMode }: { detachedMode?: DetachedMode }) 
                 {modality.series.map(({ item: s, index }) => <button key={s.id} draggable onDragStart={e => { e.dataTransfer.clearData(); e.dataTransfer.setData('application/x-series-id', s.id); e.dataTransfer.effectAllowed = 'copy'; }}
                   className={`series-card ${assigned[active] === s.id ? 'chosen' : ''}`} onClick={() => place(s.id, active)} title={`${s.name} — panel ${active}`}>
                   <div className="series-thumb">{s.thumb ? <img src={s.thumb} alt="" draggable={false}/> : <ScanSearch size={30} strokeWidth={1}/>}<span>{String(index + 1).padStart(2, '0')}</span></div>
-                  <div className="series-info"><strong>{s.name}</strong><span>Seriya {s.number}</span></div><span className="drag-handle" aria-hidden="true">⋮⋮</span>
+                  <div className="series-info"><strong>{s.name}</strong><span>{s.imageIds.length} görüntü</span></div><span className="drag-handle" aria-hidden="true">⋮⋮</span>
                 </button>)}
               </div>)}
             </div>)}

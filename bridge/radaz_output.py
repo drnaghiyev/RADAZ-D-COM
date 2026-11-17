@@ -199,7 +199,7 @@ class OutputService:
         try:
             media = path / 'disc'; media.mkdir()
             fileset = FileSet(); fileset.ID = 'RADAZ'
-            count = 0; seen = set()
+            count = 0; measured = 0; seen = set()
             with safe_zip(data) as source:
                 for entry in source.infolist():
                     if entry.filename.upper().endswith('.DCM') and not entry.is_dir():
@@ -229,22 +229,14 @@ class OutputService:
                             if parent is not None: node.parent = parent
                             parent = node
                         fileset.add_custom(ds,parent); count += 1
+                        if entry.filename.startswith('MEASUREMENTS/'):
+                            if str(ds.SOPClassUID) != '1.2.840.10008.5.1.4.1.1.7': raise ValueError('Ölçülü görüntü Secondary Capture DICOM deyil')
+                            measured += 1
                 if not count: raise ValueError('Paketdə DICOM görüntüsü yoxdur')
                 fileset.write(media)
-                measured = []
-                for entry in source.infolist():
-                    if re.fullmatch(r'MEASUREMENTS/IMAGE[0-9]{6}\.png', entry.filename):
-                        image = source.read(entry)
-                        if not image.startswith(b'\x89PNG\r\n\x1a\n'): raise ValueError('Ölçülü görüntü PNG deyil')
-                        destination = media / entry.filename
-                        destination.parent.mkdir(exist_ok=True)
-                        destination.write_bytes(image)
-                        measured.append(destination.name)
-                if measured:
-                    (media / 'MEASUREMENTS' / 'index.html').write_text('<!doctype html><meta charset="utf-8"><title>RADAZ ölçülü nüsxələr</title><h1>Ölçülü nüsxələr — orijinal DICOM deyil</h1>'+''.join(f'<p><img style="max-width:100%" src="{name}"></p>' for name in measured),encoding='utf-8')
                 for name in ('START.html','README.txt','MANIFEST.json'):
                     if name in source.namelist(): (media / name).write_bytes(source.read(name))
-                (media / 'README.txt').write_text('RADAZ DICOM media\nDICOMDIR faylını DICOM viewer-də açın. START.html offline önbaxışı açır.\nDICOM görüntüləri PT qovluqlarındadır. Piksel məlumatları dəyişdirilməyib.\n'+('Ölçülü PNG nüsxələr MEASUREMENTS/index.html faylındadır.\n' if measured else '')+'Mənbədə ID boş olduqda yalnız kataloq qeydlərində RADAZ/MEDIA prefiksli texniki ID yaradılır; DICOM görüntüsündəki ID dəyişmir.\n',encoding='utf-8')
+                (media / 'README.txt').write_text('RADAZ DICOM media\nDICOMDIR faylını DICOM viewer-də açın. START.html offline önbaxışı açır.\nDICOM görüntüləri PT qovluqlarındadır. Piksel məlumatları dəyişdirilməyib.\n'+('Ölçülər ayrıca DICOM Secondary Capture seriyasındadır.\n' if measured else '')+'Mənbədə ID boş olduqda yalnız kataloq qeydlərində RADAZ/MEDIA prefiksli texniki ID yaradılır; DICOM görüntüsündəki ID dəyişmir.\n',encoding='utf-8')
                 (media / 'MANIFEST.json').write_text(json.dumps({'profile':'RADAZ-DICOM-MEDIA','files':[str(Path(item.path).relative_to(media)).replace('\\','/') for item in fileset]},ensure_ascii=False),encoding='utf-8')
             size = sum(file.stat().st_size for file in media.rglob('*') if file.is_file())
             return self.update(path,id=job,state='ready',count=count,size=size,message=f'{count} DICOM · DICOMDIR və offline viewer hazırdır')
