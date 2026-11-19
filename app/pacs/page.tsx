@@ -201,11 +201,11 @@ export default function PacsPage({embedded=false}:{embedded?:boolean}={}) {
     catch (error) { if (query === studyQuery.current) {const message=error instanceof Error?error.message:String(error);setStatus(message);if(open)notifyViewerProgress(reservedViewer||null,null,message);} }
     finally { if (query === studyQuery.current) setBusy(false); if (open) openingStudy.current = false; }
   };
-  const retrieve = async (destination: 'viewer' | 'media' = 'viewer', onlySeries?: string, selectedStudy = activeStudy, selectedSeries?: RemoteSeries[], reservedViewer?: ViewerTarget | null) => {
+  const retrieve = async (destination: 'viewer' | 'media' = 'viewer', onlySeries?: string, selectedStudy = activeStudy, selectedSeries?: RemoteSeries[], reservedViewer?: ViewerTarget | null, reservedMedia?: Window | null) => {
     if(destination==='viewer'&&!onlySeries&&!selectedSeries&&selection.checked.length){await openSelectedStudies();return;}
     if ((busy && !selectedSeries) || !location || !selectedStudy || (!selectedSeries && !onlySeries && !checked.length)) return;
     // Discover or reserve a Viewer before the long PACS transfer.
-    const mediaTab=destination==='media'?window.open('about:blank','_blank'):null;
+    const mediaTab=destination==='media'?(reservedMedia === undefined ? window.open('about:blank','_blank') : reservedMedia):null;
     const viewer = destination === 'viewer' ? (reservedViewer === undefined ? await focusViewer() : reservedViewer) : null;
     const updateTab = preparePacsTransferTab(mediaTab);
     const report = (message: string) => { setStatus(message); updateTab(message); };
@@ -248,6 +248,22 @@ export default function PacsPage({embedded=false}:{embedded?:boolean}={}) {
       setStatus(`PACS idxalı alınmadı: ${message}`);
     }
     finally { setBusy(false); }
+  };
+
+  const mediaSelectedStudies = async () => {
+    if(busy||!location||!selection.checked.length)return;
+    const targets=visibleStudies.filter(item=>selection.checked.includes(item.uid));
+    const tabs=targets.map(()=>window.open('about:blank','_blank'));
+    setBusy(true);
+    try {
+      for(const [index,item] of targets.entries()) {
+        if(!tabs[index])throw Error('CD pəncərəsi açıla bilmədi. Pop-up icazəsini yoxlayın.');
+        preparePacsTransferTab(tabs[index])('Seçilmiş müayinənin seriyaları oxunur…');
+        const entries=location.dicomwebUrl?await queryRemoteSeries(location.dicomwebUrl,token,item.uid):(await queryDimseSeries(location,aeTitle,item.uid)).items;
+        await retrieve('media',undefined,item,entries,undefined,tabs[index]);
+      }
+    } catch(error) {setStatus(String(error));for(const tab of tabs)if(tab&&!tab.closed&&tab.location.href==='about:blank')preparePacsTransferTab(tab)(String(error),true);}
+    finally {setBusy(false);}
   };
 
   const openSelectedStudies = async (fromRow = false) => {
@@ -313,7 +329,7 @@ export default function PacsPage({embedded=false}:{embedded?:boolean}={}) {
         {location && !location.dicomwebUrl && dimseReady !== location.id && <div className="pacs-connect-note">{tr('ui.for_ip_port_connections_on_this_computer_84946')}<a href="/radaz-pacs-bridge-v4.zip" download>{tr('ui.download_the_radaz_pacs_bridge_58b74')}</a>{tr('ui._extract_the_zip_and_run_c90bb')}<strong>start-radaz-pacs.cmd</strong> {tr('ui._close_any_old_bridge_and_start_the_new_versi_4c09d')}</div>}
         {location && !location.dicomwebUrl && dimseReady === location.id && bridgeVersion !== null && bridgeVersion < 3 && <div className="pacs-connect-note">{tr('ui.search_works_but_this_bridge_cannot_download_33441')}<a href="/radaz-pacs-bridge-v4.zip" download>{tr('ui.download_the_new_v4_zip_7196f')}</a> {tr('ui.and_5b121')}<strong>start-radaz-pacs.cmd</strong> {tr('ui.and_run_the_file_edc2b')}</div>}
         <div className="pacs-results"><ResizableTable storageKey="pacs-studies" className="records-table" aria-label={tr('ui.pacs_studies_d77a3')}><thead><tr><ResizableHeader column="select" label="Seç" minimum={24} className="study-check-column">{selection.all}</ResizableHeader><ResizableHeader column="open" label="Aç" className="study-open-column">{tr('ui.open_dcc08')}</ResizableHeader><SortHeader column="date" label="Tarix" {...studySort}/><SortHeader column="patient" label="Pasiyent" {...studySort}/><SortHeader column="patientId" label="Pasiyent ID" {...studySort}/><SortHeader column="modality" label="Modallıq" {...studySort}/><SortHeader column="description" label="Təsvir" {...studySort}/><SortHeader column="seriesCount" label="Seriya" {...studySort}/><SortHeader column="instanceCount" label="Görüntü" {...studySort}/><ResizableHeader column="bridgeSend" label="RADAZBRIDGE" minimum={210} className="bridge-send-column">RADAZBRIDGE</ResizableHeader></tr></thead><tbody>{studySort.rows.map(item => <tr key={item.uid} className={study === item.uid ? 'selected' : ''} onClick={() => { void chooseStudy(item); }} onDoubleClick={() => { void chooseStudy(item, true); }} title={tr('ui.double_click_to_open_in_the_viewer_442ac')}><td onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}><input type="checkbox" aria-label={`${item.patient} müayinəsini seç`} checked={selection.checked.includes(item.uid)} onChange={event => selection.toggle(item.uid, event.currentTarget.checked)}/></td><td><button className="record-open-button" disabled={busy} aria-label={`${item.patient} müayinəsini viewer-də aç`} onClick={event => { event.stopPropagation(); void chooseStudy(item, true); }}><ExternalLink size={16}/></button></td><td>{date(item.date)}</td><td>{item.patient}</td><td>{item.patientId || '—'}</td><td>{item.modality}</td><td>{item.description || '—'}</td><td>{item.seriesCount}</td><td>{item.instanceCount}</td><td className="bridge-send-column"><RadazBridgeRowSend study={{uid:item.uid,patient:item.patient,count:item.instanceCount}} pacs={location ? {...location,callingAe:aeTitle,listenerPort,token} : undefined} transfers={bridgeTransfers} disabled={busy || !location}/></td></tr>)}</tbody></ResizableTable>{!visibleStudies.length && <div className={`records-empty${searchError ? ' pacs-search-error' : ''}`} role={searchError ? 'alert' : undefined}>{searchError || (hasSearched ? 'Filtrə uyğun müayinə tapılmadı' : 'PACS ünvanını seçin və müayinə axtarın')}</div>}</div>
-        <div className="pacs-series-title"><strong>{activeStudy ? `${activeStudy.patient} · seriyalar` : tr('ui.series_c5d36')}</strong><div className="pacs-series-actions"><button className="records-primary" disabled={busy || !activeStudy || !checked.length} onClick={() => { void retrieve('media'); }}><Disc3 size={16}/> CD / DVD</button><button className="records-primary" disabled={busy || !activeStudy || !checked.length} onClick={() => { void retrieve('viewer'); }}><Download size={16}/> {tr('ui.download_to_archive_and_open_c66ec')}</button></div></div>
+        <div className="pacs-series-title"><strong>{activeStudy ? `${activeStudy.patient} · seriyalar` : tr('ui.series_c5d36')}</strong><div className="pacs-series-actions"><button className="records-primary" disabled={busy || !selection.checked.length} onClick={() => { void mediaSelectedStudies(); }}><Disc3 size={16}/> CD / DVD</button><button className="records-primary" disabled={busy || !activeStudy || !checked.length} onClick={() => { void retrieve('viewer'); }}><Download size={16}/> {tr('ui.download_to_archive_and_open_c66ec')}</button></div></div>
         <div className="pacs-series-scroll"><ResizableTable storageKey="pacs-series" className="records-table" aria-label={tr('ui.pacs_series_f313c')}><thead><tr><ResizableHeader column="select" label="Seç" minimum={24}>{tr('ui.select_6caa0')}</ResizableHeader><ResizableHeader column="open" label="Aç">{tr('ui.open_dcc08')}</ResizableHeader><SortHeader column="number" label="#" {...seriesSort}/><SortHeader column="modality" label="Modallıq" {...seriesSort}/><SortHeader column="description" label="Təsvir" {...seriesSort}/><SortHeader column="instanceCount" label="Görüntü" {...seriesSort}/></tr></thead><tbody>{(activeStudy ? seriesSort.rows : []).map(item => <tr key={item.uid} onDoubleClick={() => void retrieve('viewer', item.uid)}><td><input type="checkbox" aria-label={`${item.description} seç`} checked={checked.includes(item.uid)} onChange={event => setChecked(current => event.currentTarget.checked ? [...current, item.uid] : current.filter(uid => uid !== item.uid))}/></td><td><button className="record-open-button" disabled={busy} aria-label={`${item.description || 'Seriya'} viewer-də aç`} onClick={() => void retrieve('viewer', item.uid)}><ExternalLink size={16}/></button></td><td>{item.number}</td><td>{item.modality}</td><td>{item.description}</td><td>{item.instanceCount}</td></tr>)}</tbody></ResizableTable></div>
       </div>
     </div>
