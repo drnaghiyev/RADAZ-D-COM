@@ -75,6 +75,10 @@ class MediaTests(unittest.TestCase):
         with ZipFile(blob,'w') as zip:
             zip.writestr('DICOM/IMG000001.dcm',original.getvalue());zip.writestr('START.html','<!doctype html><title>Offline viewer</title>')
             zip.writestr('PREVIEWS/IMG000001.jpg',b'\xff\xd8\xff\xd9')
+            zip.writestr('HU/IMG000001.js','window.__RADAZ_HU={};')
+            zip.writestr('LITE/viewer.js','/* shared Viewer */')
+            zip.writestr('LITE/viewer.css','body{margin:0}')
+            zip.writestr('DATA/IMG000001_F000001.js','window.RADAZ_LITE_PACKET={};')
         return blob.getvalue(),ds
     def test_dicomdir_round_trip_and_source_pixels(self):
         data,original=self.package();job=self.output.prepare(data)
@@ -84,6 +88,7 @@ class MediaTests(unittest.TestCase):
         self.assertEqual(loaded.PixelData,original.PixelData);self.assertEqual(loaded.SOPInstanceUID,original.SOPInstanceUID)
         self.assertTrue((root/'START.html').exists())
         self.assertEqual((root/'PREVIEWS'/'IMG000001.jpg').read_bytes(),b'\xff\xd8\xff\xd9')
+        for name in ['HU/IMG000001.js','LITE/viewer.js','LITE/viewer.css','DATA/IMG000001_F000001.js']:self.assertTrue((root/name).is_file(),name)
         self.assertIn('shellexecute=START.html',(root/'AUTORUN.INF').read_text(encoding='ascii'))
         with ZipFile(io.BytesIO(self.output.zip_package(job['id']))) as zip:self.assertIn('DICOMDIR',zip.namelist())
     def test_measurement_secondary_capture_is_separate_from_original_dicom(self):
@@ -153,8 +158,37 @@ class MediaTests(unittest.TestCase):
         self.assertEqual(self.output.settings(),config)
     def test_iso_contains_dicomdir(self):
         data,_=self.package();job=self.output.prepare(data);path=self.output.job_path(job['id']);destination=path/'test.iso'
-        powershell('-Mode','Iso','-Source',path/'disc','-Destination',destination)
+        result=powershell('-Mode','Iso','-Source',path/'disc','-Destination',destination,'-ProgressPath',path/'progress.json')
+        self.assertIn('hazırdır',result['message'])
         content=destination.read_bytes();self.assertEqual(content[32769:32774],b'CD001');self.assertIn(b'DICOMDIR',content);self.assertIn(b'AUTORUN.INF',content)
+        progress=json.loads((path/'progress.json').read_text());self.assertEqual(progress['done'],len(content));self.assertEqual(progress['total'],len(content))
+    def test_async_prepare_reports_ready_and_preserves_offline_runtime(self):
+        import time
+        data,_=self.package();job=self.output.prepare_async(data);self.assertEqual(job['state'],'preparing')
+        deadline=time.monotonic()+10
+        while time.monotonic()<deadline:
+            status=self.output.status(job['id'])
+            if status['state'] in {'ready','error'}:break
+            time.sleep(.02)
+        self.assertEqual(status['state'],'ready',status)
+        self.assertEqual(status['progress']['done'],status['count'])
+    def test_streamed_media_validates_paths_and_finishes_without_browser_zip(self):
+        import time
+        data,original=self.package();job=self.output.begin_media()
+        with self.assertRaises(ValueError):self.output.receive_media(job['id'],'../archive.sqlite3',b'bad')
+        with ZipFile(io.BytesIO(data)) as archive:
+            for entry in archive.infolist():
+                if entry.filename.startswith(('PREVIEWS/','HU/')):continue
+                self.output.receive_media(job['id'],entry.filename,archive.read(entry))
+        with self.assertRaises(FileExistsError):self.output.receive_media(job['id'],'LITE/viewer.js',b'overwrite')
+        self.output.finalize_media(job['id']);deadline=time.monotonic()+10
+        while time.monotonic()<deadline:
+            status=self.output.status(job['id'])
+            if status['state'] in {'ready','error'}:break
+            time.sleep(.02)
+        self.assertEqual(status['state'],'ready',status)
+        root=self.output.job_path(job['id'])/'disc';self.assertTrue((root/'LITE/viewer.js').is_file());self.assertFalse((root.parent/'staging').exists())
+        self.assertEqual(next(iter(FileSet(root/'DICOMDIR'))).load().PixelData,original.PixelData)
     def test_mp4_and_wmv_contain_all_frames(self):
         from PIL import Image
         for fmt in ('mp4','wmv'):

@@ -71,3 +71,4 @@ openai-key.*.tmp
 # Local migration backups and unpublished anatomy research
 /.local-backups/
 /.local-research/
+/public/dicom-lite/

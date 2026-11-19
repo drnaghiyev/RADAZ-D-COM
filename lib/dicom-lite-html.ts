@@ -1,5 +1,9 @@
 import {liteScript} from './dicom-lite.ts';
 import type {ArchiveStudy} from './local-archive';
+export function portableViewerHtml(study:ArchiveStudy,images:{name:string;path:string}[]){
+ const payload=JSON.stringify({patient:study.patient,images}).replace(/</g,'\\u003c');
+ return `<!doctype html><html lang="az"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>RADAZ DICOM Lite</title><link rel="stylesheet" href="LITE/viewer.css"></head><body><div id="root"></div><script>window.RADAZ_DATA=${payload};</script><script src="LITE/viewer.js"></script></body></html>`;
+}
 
 export function viewerHtml(study: ArchiveStudy, images: Array<{ name: string; path: string; spacing?:[number,number]; hu?:string; rows:number; columns:number }>) {
   const payload=JSON.stringify({patient:study.patient,images}).replace(/</g,'\\u003c');

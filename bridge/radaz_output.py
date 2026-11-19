@@ -10,10 +10,12 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
-from threading import Lock, Thread
+from threading import Lock, RLock, Thread
 from uuid import uuid4
 from zipfile import ZipFile, BadZipFile
+from contextlib import nullcontext
 
 import pydicom
 from pydicom.dataset import Dataset, FileMetaDataset
@@ -27,6 +29,13 @@ SIZES = {'8INX10IN','10INX12IN','11INX14IN','14INX17IN','A4','A3'}
 PRINT_LOCK = Lock()
 BURN_LOCK = Lock()
 CREATE_NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
+
+def replace_status(source,target):
+    for attempt in range(20):
+        try:os.replace(source,target);return
+        except PermissionError:
+            if attempt==19:raise
+            time.sleep(.025)
 
 
 def printer_config(payload, require_host=True):
@@ -153,13 +162,25 @@ def safe_zip(data):
     return archive
 
 
+class MediaFolder:
+    def __init__(self,root):self.root=Path(root);self.files=[item for item in self.root.rglob('*') if item.is_file()]
+    def namelist(self):return [file.relative_to(self.root).as_posix() for file in self.files]
+    def infolist(self):
+        from types import SimpleNamespace
+        return [SimpleNamespace(filename=file.relative_to(self.root).as_posix(),file_size=file.stat().st_size,is_dir=lambda:False) for file in self.files]
+    def read(self,entry):
+        name=entry if isinstance(entry,str) else entry.filename
+        target=(self.root/name).resolve()
+        if self.root.resolve() not in target.parents:raise ValueError('CD fayl yolu düzgün deyil')
+        return target.read_bytes()
+
 class OutputService:
     def __init__(self, root):
         # FileSet resolves paths, including Windows 8.3 aliases such as RUNNER~1.
         # Keep our paths canonical too so DICOMDIR manifest entries stay relative.
         self.root = Path(root).resolve()
         self.media_root = self.root / 'MediaJobs'
-        self.jobs_lock = Lock()
+        self.jobs_lock = RLock()
 
     def settings(self):
         path = self.root / 'printers.json'
@@ -184,23 +205,67 @@ class OutputService:
         return path
 
     def status(self,job):
-        return json.loads((self.job_path(job) / 'status.json').read_text(encoding='utf-8'))
+        path=self.job_path(job)
+        with self.jobs_lock:result=json.loads((path / 'status.json').read_text(encoding='utf-8'))
+        if result.get('state') in {'preparing','writing'} and (path/'progress.json').exists():
+            try: result['progress']=json.loads((path/'progress.json').read_text(encoding='utf-8'))
+            except (ValueError,OSError): pass
+        return result
 
     def update(self,path,**patch):
         with self.jobs_lock:
             file = path / 'status.json'
             current = json.loads(file.read_text(encoding='utf-8')) if file.exists() else {}
             current.update(patch)
-            temporary = path / 'status.tmp'; temporary.write_text(json.dumps(current,ensure_ascii=False),encoding='utf-8'); os.replace(temporary,file)
+            temporary = path / 'status.tmp'; temporary.write_text(json.dumps(current,ensure_ascii=False),encoding='utf-8'); replace_status(temporary,file)
             return current
 
-    def prepare(self,data):
-        job = uuid4().hex; path = self.media_root / job; path.mkdir(parents=True)
+    def prepare_async(self,data):
+        job=uuid4().hex;path=self.media_root/job;path.mkdir(parents=True)
+        initial=self.update(path,id=job,state='preparing',count=0,size=0,message='DICOMDIR hazırlanır…',progress={'label':'DICOMDIR hazırlanır','done':0,'total':0})
+        def run():
+            try: self.prepare(data,job)
+            except Exception as error: self.update(path,state='error',message=str(error))
+        Thread(target=run,daemon=True).start()
+        return initial
+
+    def begin_media(self):
+        job=uuid4().hex;path=self.media_root/job;path.mkdir(parents=True);(path/'staging').mkdir()
+        return self.update(path,id=job,state='receiving',count=0,size=0,received=0,bytes=0,message='CD faylları hazırlanır…')
+
+    def receive_media(self,job,name,data):
+        if not re.fullmatch(r'(DICOM/IMG[0-9]{6}\.dcm|MEASUREMENTS/IMG[0-9]{6}\.dcm|DATA/IMG[M]?[0-9]{6}_F[0-9]{6}\.js|LITE/viewer\.(js|css)|START\.html|README\.txt|MANIFEST\.json|AUTORUN\.INF)',name):raise ValueError('CD fayl yolu düzgün deyil')
+        path=self.job_path(job);root=(path/'staging').resolve();target=(root/name).resolve()
+        if root not in target.parents:raise ValueError('CD fayl yolu düzgün deyil')
+        # Reserve capacity while holding the same lock as status writes.
+        with self.jobs_lock:
+            state=json.loads((path/'status.json').read_text(encoding='utf-8'))
+            if state['state']!='receiving' or state['received']>=10000 or state['bytes']+len(data)>512*1024*1024:raise ValueError('CD işi bağlıdır və ya paket ölçü həddini keçir')
+            target.parent.mkdir(exist_ok=True)
+            with target.open('xb') as stream:stream.write(data)
+            state.update(received=state['received']+1,bytes=state['bytes']+len(data))
+            temporary=path/'status.tmp';temporary.write_text(json.dumps(state),encoding='utf-8');replace_status(temporary,path/'status.json')
+        return {'ok':True}
+
+    def finalize_media(self,job):
+        path=self.job_path(job)
+        with self.jobs_lock:
+            if self.status(job)['state']!='receiving':raise ValueError('CD faylları artıq hazırlanır')
+            initial=self.update(path,state='preparing',message='DICOMDIR hazırlanır…',progress={'label':'DICOMDIR hazırlanır','done':0,'total':0})
+        def run():
+            try:self.prepare(None,job,path/'staging')
+            except Exception as error:self.update(path,state='error',message=str(error))
+        Thread(target=run,daemon=True).start();return initial
+
+    def prepare(self,data,job=None,source_path=None):
+        asynchronous=job is not None
+        job = job or uuid4().hex; path = self.media_root / job; path.mkdir(parents=True,exist_ok=asynchronous)
         try:
             media = path / 'disc'; media.mkdir()
             fileset = FileSet(); fileset.ID = 'RADAZ'
             count = 0; measured = 0; seen = set()
-            with safe_zip(data) as source:
+            with (nullcontext(MediaFolder(source_path)) if source_path else safe_zip(data)) as source:
+                total=sum(1 for entry in source.infolist() if entry.filename.upper().endswith('.DCM') and not entry.is_dir())
                 for entry in source.infolist():
                     if entry.filename.upper().endswith('.DCM') and not entry.is_dir():
                         ds = pydicom.dcmread(io.BytesIO(source.read(entry)),force=True)
@@ -216,7 +281,9 @@ class OutputService:
                         # StudyID is optional in many image IODs but required in
                         # a directory record. Supply catalog IDs in DICOMDIR only;
                         # never rewrite the source's patient or study identifiers.
-                        directory_source = copy.deepcopy(ds)
+                        # Directory records do not use PixelData. Avoid copying hundreds
+                        # of MB of pixel buffers only to read the small header fields.
+                        directory_source = copy.deepcopy(Dataset({tag:element for tag,element in ds.items() if tag != 0x7fe00010}))
                         suffix = hashlib.sha256(str(ds.StudyInstanceUID).encode()).hexdigest()[:10].upper()
                         if not getattr(directory_source,'StudyID',''): directory_source.StudyID = 'RADAZ' + suffix
                         if not getattr(directory_source,'PatientID',''): directory_source.PatientID = 'MEDIA-' + suffix
@@ -229,26 +296,37 @@ class OutputService:
                             if parent is not None: node.parent = parent
                             parent = node
                         fileset.add_custom(ds,parent); count += 1
+                        if asynchronous:self.update(path,state='preparing',message=f'DICOMDIR: {count} / {total}',progress={'label':'DICOMDIR qeydləri','done':count,'total':total})
                         if entry.filename.startswith('MEASUREMENTS/'):
                             if str(ds.SOPClassUID) != '1.2.840.10008.5.1.4.1.1.7': raise ValueError('Ölçülü görüntü Secondary Capture DICOM deyil')
                             measured += 1
                 if not count: raise ValueError('Paketdə DICOM görüntüsü yoxdur')
+                if asynchronous:self.update(path,state='preparing',message='DICOM faylları disk qovluğuna yazılır…',progress={'label':'DICOM faylları disk qovluğuna yazılır','done':0,'total':0})
                 fileset.write(media)
+                def copy_asset(name):
+                    target=media/name;target.parent.mkdir(exist_ok=True)
+                    if source_path:
+                        # Both paths are immutable files inside this temporary job.
+                        # A hard link avoids writing all offline pixels a second time.
+                        try:os.link(Path(source_path)/name,target);return
+                        except OSError:shutil.copyfile(Path(source_path)/name,target);return
+                    target.write_bytes(source.read(name))
                 for name in ('START.html','README.txt','MANIFEST.json'):
-                    if name in source.namelist(): (media / name).write_bytes(source.read(name))
+                    if name in source.namelist():copy_asset(name)
                 for entry in source.infolist():
-                    if re.fullmatch(r'PREVIEWS/IMG[0-9]{6}\.jpg', entry.filename) and entry.file_size <= 5 * 1024 * 1024:
-                        preview = media / entry.filename
-                        preview.parent.mkdir(exist_ok=True)
-                        preview.write_bytes(source.read(entry))
+                    legacy=re.fullmatch(r'(PREVIEWS/IMG[0-9]{6}\.jpg|HU/IMG[0-9]{6}\.js)',entry.filename)
+                    portable=re.fullmatch(r'(LITE/viewer\.(js|css)|DATA/IMG[M]?[0-9]{6}_F[0-9]{6}\.js)',entry.filename)
+                    if (legacy or portable) and entry.file_size <= 64 * 1024 * 1024:
+                        copy_asset(entry.filename)
                 (media / 'AUTORUN.INF').write_text('[AutoRun]\r\nshellexecute=START.html\r\naction=Open RADAZ DICOM Lite\r\nlabel=RADAZ DICOM Media\r\n', encoding='ascii')
                 (media / 'README.txt').write_text('RADAZ DICOM media\nDICOMDIR faylını DICOM viewer-də açın. START.html offline önbaxışı açır.\nDICOM görüntüləri PT qovluqlarındadır. Piksel məlumatları dəyişdirilməyib.\n'+('Ölçülər ayrıca DICOM Secondary Capture seriyasındadır.\n' if measured else '')+'Mənbədə ID boş olduqda yalnız kataloq qeydlərində RADAZ/MEDIA prefiksli texniki ID yaradılır; DICOM görüntüsündəki ID dəyişmir.\n',encoding='utf-8')
                 (media / 'MANIFEST.json').write_text(json.dumps({'profile':'RADAZ-DICOM-MEDIA','files':[str(Path(item.path).relative_to(media)).replace('\\','/') for item in fileset]},ensure_ascii=False),encoding='utf-8')
             size = sum(file.stat().st_size for file in media.rglob('*') if file.is_file())
-            return self.update(path,id=job,state='ready',count=count,size=size,message=f'{count} DICOM · DICOMDIR və offline viewer hazırdır')
+            if source_path and Path(source_path).resolve().parent==path.resolve() and Path(source_path).name=='staging':shutil.rmtree(source_path)
+            return self.update(path,id=job,state='ready',count=count,size=size,message=f'{count} DICOM · DICOMDIR və offline viewer hazırdır',progress={'label':'CD paketi hazırdır','done':count,'total':count})
         except Exception:
             # Only our freshly-created, resolved job directory is removed.
-            if path.resolve().parent == self.media_root.resolve(): shutil.rmtree(path)
+            if not asynchronous and path.resolve().parent == self.media_root.resolve(): shutil.rmtree(path)
             raise
 
     def start(self,job,mode,recorder=''):
@@ -262,24 +340,52 @@ class OutputService:
                 if not drive or not drive['canWrite']: raise ValueError('Seçilmiş qurğu CD/DVD yazmağı dəstəkləmir. CD/DVD writer qoşun.')
                 if not drive.get('blank') or not drive.get('mediaSupported'): raise ValueError('Uyğun boş CD/DVD daxil edin. Mövcud disk silinmir.')
                 if self.status(job)['size'] + 4*1024*1024 > drive['freeBytes']: raise ValueError('Görüntülər diskə sığmır; daha böyük boş disk seçin')
-            self.update(path,state='preparing',message='Disk fayl sistemi hazırlanır…')
+            (path/'progress.json').unlink(missing_ok=True)
+            self.update(path,state='preparing',message='Disk fayl sistemi hazırlanır…',progress={'label':'Disk fayl sistemi hazırlanır','done':0,'total':0})
         except Exception: BURN_LOCK.release(); raise
         def run():
             try:
                 if mode == 'burn': self.update(path,state='writing',message='CD/DVD-yə yazılır. Qurğunu ayırmayın…')
-                result = powershell('-Mode','Burn' if mode == 'burn' else 'Iso','-Source',path / 'disc','-Destination',path / 'RADAZ.iso','-RecorderId',recorder,timeout=1800)
+                result = powershell('-Mode','Burn' if mode == 'burn' else 'Iso','-Source',path / 'disc','-Destination',path / 'RADAZ.iso','-RecorderId',recorder,'-ProgressPath',path/'progress.json',timeout=1800)
                 self.update(path,state='complete',iso=mode == 'iso' or (path / 'RADAZ.iso').exists(),message=result['message'])
             except Exception as error: self.update(path,state='error',message=str(error))
             finally: BURN_LOCK.release()
         Thread(target=run,daemon=True).start()
         return self.status(job)
 
-    def zip_package(self,job):
-        path = self.job_path(job); output = io.BytesIO()
-        with ZipFile(output,'w') as archive:
-            for file in (path / 'disc').rglob('*'):
-                if file.is_file(): archive.write(file,file.relative_to(path / 'disc').as_posix())
-        return output.getvalue()
+    def build_zip(self,job):
+        path=self.job_path(job);files=[file for file in (path/'disc').rglob('*') if file.is_file()]
+        temporary=path/'RADAZ-CD.zip.part'
+        with ZipFile(temporary,'w') as archive:
+            for index,file in enumerate(files):
+                archive.write(file,file.relative_to(path/'disc').as_posix())
+                self.update(path,state='packaging',message=f'ZIP: {index+1} / {len(files)}',progress={'label':'ZIP paketi yaradılır','done':index+1,'total':len(files),'unit':'fayl'})
+        replace_status(temporary,path/'RADAZ-CD.zip')
+        return self.update(path,state='ready',zip=True,message='CD ZIP paketi hazırdır',progress={'label':'ZIP paketi hazırdır','done':len(files),'total':len(files),'unit':'fayl'})
+
+    def package_media(self,job):
+        path=self.job_path(job)
+        with self.jobs_lock:
+            state=self.status(job)
+            if state.get('zip') and (path/'RADAZ-CD.zip').is_file():return state
+            if state['state'] not in {'ready','complete'}:raise ValueError('CD paketi hələ hazır deyil')
+            initial=self.update(path,state='packaging',message='ZIP paketi yaradılır…',progress={'label':'ZIP paketi yaradılır','done':0,'total':0})
+        def run():
+            try:self.build_zip(job)
+            except Exception as error:self.update(path,state='error',message=str(error))
+        Thread(target=run,daemon=True).start();return initial
+
+    def zip_file(self,job):
+        path=self.job_path(job)
+        create=False
+        with self.jobs_lock:
+            if not (path/'RADAZ-CD.zip').is_file():
+                if self.status(job)['state'] not in {'ready','complete'}:raise ValueError('CD paketi hələ hazır deyil')
+                self.update(path,state='packaging',message='ZIP paketi yaradılır…');create=True
+        if create:self.build_zip(job)
+        return path/'RADAZ-CD.zip'
+
+    def zip_package(self,job):return self.zip_file(job).read_bytes()
 
     def video(self,data):
         ffmpeg = shutil.which('ffmpeg')

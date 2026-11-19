@@ -11,6 +11,7 @@ import { Activity, ExternalLink, Network, Plus, Search, Settings2, Trash2, Wifi,
 import { queryRemoteSeries, queryRemoteStudies, retrieveRemoteStudy, type RemoteSeries, type RemoteStudy } from '@/lib/dicomweb';
 import { echoDimse, getDimseBridgeVersion, queryDimseSeries, queryDimseStudies, retrieveDimseStudy } from '@/lib/pacs-bridge';
 import { preparePacsTransferTab } from '@/lib/pacs-transfer-tab';
+import {shareMediaFiles} from '@/lib/media-handoff';
 import { deleteLocalStudies, listArchiveStudies, recordStudyOpened, saveArchiveFiles } from '@/lib/local-archive';
 import { RadazBridgeRowSend, RadazBridgeSettings, useRadazBridgeTransfers } from '@/components/radaz-bridge-send';
 import { AppHelpMenu } from '@/components/app-product';
@@ -209,7 +210,7 @@ export default function PacsPage({embedded=false}:{embedded?:boolean}={}) {
     const updateTab = preparePacsTransferTab(mediaTab);
     const report = (message: string) => { setStatus(message); updateTab(message); };
     notifyViewerProgress(destination === 'viewer' ? viewer : null, {label:'PACS yüklənir',done:0,total:0});
-    const progress = (done:number,total:number,label='PACS yüklənir') => { report(`${label}: ${done} / ${total}`); if(destination === 'viewer')notifyViewerProgress(viewer,{label,done,total}); };
+    const progress = (done:number,total:number,label='PACS yüklənir') => { report(`${label}: ${done} / ${total}`);updateTab(`${label}: ${done} / ${total}`,false,done,total); if(destination === 'viewer')notifyViewerProgress(viewer,{label,done,total}); };
     setBusy(true);
     try {
       if (!location.dicomwebUrl) {
@@ -221,20 +222,22 @@ export default function PacsPage({embedded=false}:{embedded?:boolean}={}) {
       if (!chosen.length) throw new Error('Müayinədə açılacaq seriya tapılmadı');
       if (!location.dicomwebUrl && chosen.length > 30) throw new Error('Bir köçürmədə ən çox 30 seriya seçin.');
       const expected = chosen.reduce((total, item) => total + item.instanceCount, 0);
-      let count=0,opened=false;
+      let count=0,opened=false;const mediaFiles:File[]=[];
       for(const item of chosen){
         const files=location.dicomwebUrl
           ? await retrieveRemoteStudy(location.dicomwebUrl,token,selectedStudy.uid,[item],(done)=>progress(count+done,expected))
           : await retrieveDimseStudy(location,aeTitle,listenerPort,selectedStudy.uid,[item.uid],(done)=>progress(count+done,expected));
         if(!await saveArchiveFiles(files,(done,total)=>progress(count+done,expected,'PACS arxivə yazılır')))throw new Error('PACS fayllarında oxuna bilən DICOM görüntüsü tapılmadı');
         count+=files.length;
+        if(destination==='media')mediaFiles.push(...files);
         if(destination==='viewer'){
           if(!opened){await openStudyInViewer(selectedStudy.uid,viewer);opened=true;}
           else refreshStudyInViewer(selectedStudy.uid,viewer);
         }
       }
       await recordStudyOpened(selectedStudy.uid);
-      const target = destination === 'media' ? `/media?study=${encodeURIComponent(selectedStudy.uid)}` : `/#archive-study=${encodeURIComponent(selectedStudy.uid)}`;
+      const handoff=destination==='media'&&mediaTab?shareMediaFiles(selectedStudy.uid,mediaFiles):null;
+      const target = destination === 'media' ? `/media?study=${encodeURIComponent(selectedStudy.uid)}${handoff?'&handoff='+handoff:''}` : `/#archive-study=${encodeURIComponent(selectedStudy.uid)}`;
       if (destination === 'viewer') notifyViewerProgress(viewer,null);
       else if (mediaTab) mediaTab.location.href = target;
       setStatus(`${count} görüntü local arxivə saxlanıldı${viewer || destination === 'viewer' ? ' və seçilmiş modul açıldı' : '. Arxiv vərəqəsindən açın'}`);

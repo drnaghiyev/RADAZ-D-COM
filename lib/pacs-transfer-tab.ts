@@ -1,5 +1,5 @@
 /** Keep the pending PACS tab useful while a long DIMSE transfer finishes or fails. */
-export function preparePacsTransferTab(tab: Window | null): (message: string, failed?: boolean) => void {
+export function preparePacsTransferTab(tab: Window | null): (message: string, failed?: boolean,done?:number,total?:number) => void {
   if (!tab) return () => {};
   const doc = tab.document;
   doc.title = 'RADAZ · PACS görüntüləri';
@@ -19,19 +19,21 @@ export function preparePacsTransferTab(tab: Window | null): (message: string, fa
   progress.setAttribute('aria-live', 'polite');
   progress.style.cssText = 'line-height:1.55;color:#bed8e5;overflow-wrap:anywhere';
   const download = doc.createElement('a');
+  const bar=doc.createElement('progress');bar.style.cssText='width:100%;height:10px;accent-color:#57d7e5';bar.setAttribute('aria-label','PACS görüntülərinin yüklənməsi');
   download.href = `${window.location.origin}/radaz-pacs-bridge-v4.zip`;
   download.textContent = 'Yeni PACS körpüsünü endir';
   download.style.cssText = 'display:none;margin-top:17px;color:#85dafa';
   const alternative = doc.createElement('p');
   alternative.textContent = 'Server ayarı dəyişdirilənədək ClearCanvas-dan DICOM fayllarını ixrac etmək mümkündürsə, RADAZ-da İmport → Qovluq və ya ZIP ilə açın.';
   alternative.style.cssText = 'display:none;margin:18px 0 0;line-height:1.55;color:#bed8e5';
-  for (const element of [brand, title, progress, download, alternative]) panel.appendChild(element);
+  for (const element of [brand, title, progress,bar, download, alternative]) panel.appendChild(element);
   doc.body.replaceChildren(panel);
 
-  return (message: string, failed = false) => {
+  return (message: string, failed = false,done=0,total=0) => {
     if (tab.closed) return;
     title.textContent = failed ? 'Görüntü açıla bilmədi' : 'PACS görüntüləri gətirilir';
     progress.textContent = message;
+    if(total>0){bar.max=total;bar.value=done;}else bar.removeAttribute('value');bar.hidden=failed;
     progress.setAttribute('role', failed ? 'alert' : 'status');
     progress.style.color = failed ? '#ffcca6' : '#bed8e5';
     download.style.display = failed && message.includes('körpü') ? 'inline-block' : 'none';

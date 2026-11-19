@@ -6,6 +6,7 @@ import { sourceHash, writeBuildIdentity } from './build-identity.mjs';
 const [command, ...args] = process.argv.slice(2);
 if (!["dev", "build"].includes(command)) throw new Error("Expected dev or build.");
 await import('./prepare-dicom-codecs.mjs');
+if(command==='build')await import('./build-dicom-lite.mjs');
 const managedLinux = readExecutionProfile() === "managed-linux";
 
 if (managedLinux && command === "build") {

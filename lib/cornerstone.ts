@@ -15,6 +15,25 @@ import type {AnatomyVolumeGeometry} from './anatomy-volume';
 type DataSet = ReturnType<typeof dicomParser.parseDicom>;
 type RecordItem = { dataSet: DataSet; pixels: Int16Array | Float32Array | Uint8Array; color?:boolean; frameIndex?:number; rows: number; columns: number; bits: number; min: number; max: number };
 const records = new Map<string, RecordItem>();
+/** Offline media uses the same calibrated scalar pixels and loader as the main Viewer. */
+export function registerPortableDicom(packet:import('./portable-dicom').PortableDicom,bytes:Uint8Array,imageId?:string):string{
+ const tags=packet.tags,ds={string:(tag:string)=>tags[tag],uint16:(tag:string)=>Number(tags[tag])||0,elements:{}} as unknown as DataSet;
+ const buffer=bytes.slice().buffer,pixels=packet.kind==='rgb'?new Uint8Array(buffer):packet.kind==='int16'?new Int16Array(buffer):new Float32Array(buffer);
+ if(pixels.length!==packet.rows*packet.columns*(packet.kind==='rgb'?3:1))throw Error('Offline DICOM piksel ölçüsü düzgün deyil');
+ let min=Infinity,max=-Infinity;for(const value of pixels){min=Math.min(min,value);max=Math.max(max,value);}
+ const id=imageId||`localdicom:${serial++}`;records.set(id,{dataSet:ds,rows:packet.rows,columns:packet.columns,pixels,bits:packet.kind==='int16'?16:packet.kind==='rgb'?8:32,color:packet.kind==='rgb',min,max});return id;
+}
+export async function preparePortableDicom(bytes:Uint8Array,onFrame:(packet:Omit<import('./portable-dicom').PortableDicom,'data'>,pixels:Uint8Array,progress:{done:number;total:number})=>Promise<void>){
+ const ds=parseDicomFile(bytes),frames=Number(ds.string('x00280008')||1);
+ if(!Number.isSafeInteger(frames)||frames<1||frames>10000)throw Error('DICOM kadr sayı düzgün deyil');
+ const tags:Record<string,string>={};for(const tag of ['x00100010','x00100020','x00100030','x00080020','x00080060','x00080016','x00080018','x0008103e','x0020000d','x0020000e','x00200013','x00200052','x00200032','x00200037','x00280030','x00181164','x00180050','x00280004','x00281050','x00281051','x00281055']){const value=ds.string(tag);if(value)tags[tag]=value;}
+ if(!tags.x00280030&&tags.x00181164)tags.x00280030=tags.x00181164;
+ for(let frame=0;frame<frames;frame++){
+  const id=registerLocalDicom(bytes,ds,frame);try{await decodeRegisteredDicom(id);const record=records.get(id)!;const integral=!record.color&&record.pixels.every(value=>Number.isInteger(value)&&value>=-32768&&value<=32767),pixels=record.color?new Uint8Array(record.pixels):integral?Int16Array.from(record.pixels):Float32Array.from(record.pixels);
+   const {wl,ww}=defaultWindow(record);await onFrame({rows:record.rows,columns:record.columns,kind:record.color?'rgb':integral?'int16':'float32',tags:{...tags,x00080018:(tags.x00080018||id)+(frames>1?'.'+(frame+1):''),x00281050:String(wl),x00281051:String(ww)}},new Uint8Array(pixels.buffer),{done:frame+1,total:frames});
+  }finally{releaseLocalDicoms([id]);}
+ }
+}
 /** Decoded, rescaled pixels, independent of viewer WW/WL, flips and annotations.
  * Only allow original monochrome projection images; send no identifying tags.
  */

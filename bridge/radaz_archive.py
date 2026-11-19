@@ -12,6 +12,7 @@ import io
 import json
 import os
 import re
+import shutil
 import socket
 import sqlite3
 import time
@@ -340,6 +341,11 @@ def handler_for(archive, removable=None):
             self.send_header('Content-Length',str(len(body))); self.send_header('Cache-Control','no-store')
             self.send_header('X-Content-Type-Options','nosniff'); self.end_headers(); self.wfile.write(body)
 
+        def media_file(self,path,content_type,filename):
+            with path.open('rb') as stream:
+                self.send_response(200);self.send_header('Content-Type',content_type);self.send_header('Content-Disposition',f'attachment; filename="{filename}"');self.send_header('Content-Length',str(path.stat().st_size));self.send_header('X-Content-Type-Options','nosniff');self.end_headers()
+                shutil.copyfileobj(stream,self.wfile,1024*1024)
+
         def do_GET(self):
             if not self.permitted():
                 self.respond({'error': 'Origin icazəli deyil'}, 403); return
@@ -393,11 +399,11 @@ def handler_for(archive, removable=None):
                 elif parsed.path in ('/media/iso','/media/zip'):
                     job = parse_qs(parsed.query).get('job',[''])[0]
                     if parsed.path == '/media/zip':
-                        self.binary(output.zip_package(job),'application/zip','RADAZ-CD.zip')
+                        self.media_file(output.zip_file(job),'application/zip','RADAZ-CD.zip')
                     else:
                         file = output.job_path(job) / 'RADAZ.iso'
                         if not output.status(job).get('iso') or not file.is_file(): raise ValueError('ISO hələ hazır deyil')
-                        self.binary(file.read_bytes(),'application/x-iso9660-image','RADAZ.iso')
+                        self.media_file(file,'application/x-iso9660-image','RADAZ.iso')
                 elif parsed.path == '/instances':
                     self.respond(archive.instances(parse_qs(parsed.query).get('study', [''])[0]))
                 elif parsed.path.startswith('/file/'):
@@ -460,7 +466,7 @@ def handler_for(archive, removable=None):
             try:
                 parsed = urlsplit(self.path)
                 length = int(self.headers.get('Content-Length','0'))
-                limit = MAX_FILE if self.path in ('/import','/media/prepare','/video') or parsed.path == '/bridge/file' else 192 * 1024 * 1024 if self.path == '/print' else 29 * 1024 * 1024 if self.path == '/ai/transcribe' else 6 * 1024 * 1024 + 1024 if self.path == '/ai/template' else 17 * 1024 * 1024 if self.path == '/ai/report' else 65536 if self.path == '/studies/delete' else 8192
+                limit = MAX_FILE if self.path in ('/import','/media/prepare','/video') or parsed.path in ('/bridge/file','/media/file') else 192 * 1024 * 1024 if self.path == '/print' else 29 * 1024 * 1024 if self.path == '/ai/transcribe' else 6 * 1024 * 1024 + 1024 if self.path == '/ai/template' else 17 * 1024 * 1024 if self.path == '/ai/report' else 65536 if self.path == '/studies/delete' else 8192
                 if not 0 < length <= limit:
                     self.respond({'error':'Sorğu ölçüsü düzgün deyil'},413); return
                 data = self.rfile.read(length)
@@ -559,10 +565,15 @@ def handler_for(archive, removable=None):
                     elif self.path == '/printer-test': self.respond(test_printer(payload))
                     elif self.path == '/print': self.respond(print_film(payload))
                     else: self.respond(output.start(payload['job'],payload['mode'],payload.get('recorder','')))
+                elif parsed.path == '/media/session':self.respond(output.begin_media())
+                elif parsed.path == '/media/file':
+                    query=parse_qs(parsed.query);self.respond(output.receive_media(query.get('job',[''])[0],query.get('path',[''])[0],data))
+                elif parsed.path == '/media/finalize':self.respond(output.finalize_media(json.loads(data)['job']))
+                elif parsed.path == '/media/package':self.respond(output.package_media(json.loads(data)['job']))
                 elif self.path in ('/media/prepare','/video'):
                     if self.headers.get_content_type() != 'application/zip':
                         self.respond({'error':'ZIP tələb olunur'},415); return
-                    if self.path == '/media/prepare': self.respond(output.prepare(data))
+                    if self.path == '/media/prepare': self.respond(output.prepare_async(data) if self.headers.get('X-RADAZ-Async')=='1' else output.prepare(data))
                     else:
                         video, mime = output.video(data)
                         self.binary(video,mime,'RADAZ.mp4' if mime == 'video/mp4' else 'RADAZ.wmv')
