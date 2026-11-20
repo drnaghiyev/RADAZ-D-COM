@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
+import {unlockTestSettings} from './private-network-password-flow.mjs';
 
 // Used with the browser fixture and the authenticated Windows desktop test.
-export async function exerciseMemberChanges(page) {
+export async function exerciseMemberChanges(page, password) {
   const button = (name) => page.getByRole('button', {name, exact: true});
   const label = (name) => page.getByLabel(name, {exact: true});
   const row = (name) => page.getByRole('row').filter({has: button('Düzəliş et: '+name)});
@@ -37,6 +38,7 @@ export async function exerciseMemberChanges(page) {
   await row('Test radioloq Əli').waitFor();
 
   await page.reload();
+  await unlockTestSettings(page, password);
   await openMembers();
   await row('Test radioloq Əli').getByRole('button', {name: /Düzəliş et/}).click();
   assert.equal(await label('Arxivə endirmə').isChecked(), false);
@@ -54,6 +56,7 @@ export async function exerciseMemberChanges(page) {
   await row('Test radioloq Əli').waitFor({state: 'hidden'});
 
   await page.reload();
+  await unlockTestSettings(page, password);
   await openMembers();
   await row('Test operator').waitFor();
   assert.equal(await row('Test radioloq Əli').count(), 0);

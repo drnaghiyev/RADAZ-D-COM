@@ -1,6 +1,7 @@
 """Synthetic two-workstation delivery through the real coordinator and archive APIs."""
 import hashlib
 import json
+import secrets
 import sys
 import tempfile
 import threading
@@ -35,16 +36,17 @@ class DeliveryTests(unittest.TestCase):
                 admin=enroll('owner',hub.bootstrap('owner','Test network owner')['invite'])
                 clinic=admin.rpc('create_clinic',{'name':'Clinical QA','admin':'manager'})['id']
                 manager=enroll('manager',admin.rpc('invite',{'clinic':clinic,'user':'manager'})['invite'])
+                session=manager.action('settings_set',{'password':secrets.token_urlsafe(24)})['session']
                 person={'clinic':clinic,'user':'test-staff','name':'Test Staff','role':'operator','permissions':['send']}
-                manager.action('member',dict(person,mode='create'))
+                manager.action('member',dict(person,mode='create'),session)
                 with self.assertRaises(RemoteError):
-                    manager.action('member',dict(person,mode='create'))
-                manager.action('member',dict(person,mode='edit',name='Updated Staff'))
+                    manager.action('member',dict(person,mode='create'),session)
+                manager.action('member',dict(person,mode='edit',name='Updated Staff'),session)
                 self.assertIn('Updated Staff',[m['name'] for m in manager.state({'clinic':clinic})['members']])
-                manager.action('remove_member',{'clinic':clinic,'user':'test-staff'})
+                manager.action('remove_member',{'clinic':clinic,'user':'test-staff'},session)
                 with patch.object(manager,'rpc',side_effect=RemoteError(404,'Əməliyyat tapılmadı')) as old_server:
                     with self.assertRaisesRegex(ValueError,'0.2.92'):
-                        manager.action('member',dict(person,mode='edit'))
+                        manager.action('member',dict(person,mode='edit'),session)
                     self.assertEqual(old_server.call_args.args[0],'edit_member')
                 def add(user,role,perm):
                     manager.rpc('member',{'clinic':clinic,'role':role,'user':user,'permissions':perm})

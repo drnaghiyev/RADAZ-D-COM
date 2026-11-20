@@ -34,7 +34,7 @@ explicit.extend([
  'bridge/private_network_client.py', 'bridge/private_network_crypto.mjs',
  'bridge/private_network_authority.py', 'bridge/private_network_dimse.py',
  'bridge/private_network_local.py', 'bridge/private_network_peer.py',
- 'bridge/private_network_preview.py', 'bridge/private_network_routing.py',
+ 'bridge/private_network_preview.py', 'bridge/private_network_routing.py', 'bridge/private_network_settings.py',
  'bridge/private_network_sync.py', 'ops/private-network.md',
 ])
 files={p:ROOT/p for p in explicit}

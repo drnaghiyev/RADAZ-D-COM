@@ -1,4 +1,4 @@
-import {useEffect,useState} from 'react';
+import {useSyncExternalStore} from 'react';
 
 export type Member={id:string;name:string;role:string;active:boolean;permissions:string[]};
 export type Device={id:string;name:string;user:string;active:boolean};
@@ -16,10 +16,17 @@ export type NetworkState={
   queue?:{id:string;clinic:string;study:string;state:string;error?:string;remote?:string}[];statuses?:{id:string;sender:string;recipient:string;state:string}[];localCoordinator?:boolean;syncClinic?:string;acceptMode?:string;clinicModes?:Record<string,string>;
 };
 export function isPrivateDesktop(){return typeof window!=='undefined'&&['localhost','127.0.0.1','[::1]'].includes(window.location.hostname)&&/Windows NT/i.test(navigator.userAgent)&&/Electron\//i.test(navigator.userAgent);}
-export function usePrivateDesktop(){const [allowed,setAllowed]=useState(false);useEffect(()=>{setAllowed(isPrivateDesktop());},[]);return allowed;}
-export async function networkCall<T>(action:string,body:Record<string,unknown>={}):Promise<T>{
+const subscribeDesktop=()=>()=>{};
+export function usePrivateDesktop(){return useSyncExternalStore(subscribeDesktop,isPrivateDesktop,()=>false);}
+export type NetworkRequest=<T>(action:string,body?:Record<string,unknown>)=>Promise<T>;
+export class NetworkRequestError extends Error{
+  constructor(message:string,readonly code?:string){super(message);}
+}
+export async function networkCall<T>(action:string,body:Record<string,unknown>={},session?:string):Promise<T>{
   if(!isPrivateDesktop())throw Error('Bu modul Windows RADAZ Desktop üçün nəzərdə tutulub.');
-  const response=await fetch('/local-archive-api/private-network/'+encodeURIComponent(action),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),cache:'no-store'});
+  const headers:Record<string,string>={'Content-Type':'application/json'};
+  if(session)headers['X-RADAZ-Settings-Session']=session;
+  const response=await fetch('/local-archive-api/private-network/'+encodeURIComponent(action),{method:'POST',headers,body:JSON.stringify(body),cache:'no-store',keepalive:action==='settings_lock'});
   const data=await response.json().catch(()=>null) as {error?:string;code?:string}|null;
   if(response.status===403&&(data?.code==='NETWORK_DESKTOP_REQUIRED'||data?.code==='NETWORK_DESKTOP_IDENTITY'||data?.error==='Bu əməliyyat yalnız Windows RADAZ Desktop üçün açıqdır.')){
     const recovery=data?.code==='NETWORK_DESKTOP_IDENTITY'
@@ -27,7 +34,7 @@ export async function networkCall<T>(action:string,body:Record<string,unknown>={
       : 'Saatın yanındakı RADAZ işarəsindən “Çıxış” seçin və Windows Başlat menyusundan RADAZ-ı yenidən açın.';
     throw Error('RADAZ bu pəncərənin Desktop bağlantısını təsdiqləyə bilmədi. İşinizi saxlayın. '+recovery+' Xəta təkrarlanarsa, Windows üçün RADAZ Setup ilə quraşdırmanı yeniləyin.');
   }
-  if(!response.ok||!data||data.error&&action!=='state')throw Error(String(data?.error||'DICOM Network xidməti cavab vermir.'));
+  if(!response.ok||!data||data.error&&!['state','settings_state'].includes(action))throw new NetworkRequestError(String(data?.error||'DICOM Network xidməti cavab vermir.'),data?.code);
   return data as T;
 }
 export const can=(state:NetworkState,permission:string)=>!!state.membership?.active&&state.membership.permissions.includes(permission);

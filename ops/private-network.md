@@ -12,6 +12,8 @@ Yenilənmədən sonra Desktop bağlantısını təsdiqləmək barədə bildiriş
 
 ## Əməkdaş siyahısının idarə edilməsi
 
+DICOM Network ayarlarını ilk dəfə açanda bu Windows istifadəçisi üçün şifrə təyin edin. Sonrakı açılışlarda şifrəni daxil edin. Ayarların kilidini açandan sonra onları yenidən kilidləyə və şifrəni dəyişə bilərsiniz. Klinikadakı rolunuz hansı əməliyyatlara icazəniz olduğunu müəyyən edir.
+
 **Klinikalar və radioloqlar** bölməsində klinikanı seçin. Klinika administratoru **Yeni əməkdaş** düyməsi ilə şəxsə ayrıca hesab ID-si verir. Mövcud şəxsin sətrində **Düzəliş et** onun bu klinikadakı adını, rolunu və icazələrini dəyişməyə imkan verir. **Siyahıdan sil** düyməsi ilə adı yoxlayıb təsdiqlədikdə həmin şəxs klinikadan çıxarılır. Əvvəlki müayinələr və göndəriş tarixçəsi saxlanılır. Şəbəkə administratoru eyni bölmədə klinika administratorlarını idarə edir.
 
 Ayrıca HTTPS koordinatorundan istifadə edirsinizsə, cihazlarla birlikdə həmin xidməti də 0.2.92-yə yeniləyin. Serverdə mövcud verilənlər bazası, sertifikat və xidmət ayarları ilə yenilənmiş koordinatoru başladın.

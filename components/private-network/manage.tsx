@@ -1,10 +1,10 @@
 'use client';
 import {useState} from 'react';
-import {type Act,type NetworkState} from './api';
+import {type Act,type NetworkRequest,type NetworkState} from './api';
 import {MemberDirectory} from './members';
-export function NetworkMembers({state,act}:{state:NetworkState;act:Act}){
+export function NetworkMembers({state,act,request}:{state:NetworkState;act:Act;request:NetworkRequest}){
  const members=state.members||[],admin=state.membership?.role==='admin'||state.superAdmin;
- return <><MemberDirectory state={state} act={act}/>
+ return <><MemberDirectory state={state} act={act} request={request}/>
  {admin&&state.clinic&&<article><h3>Klinikanın cihazları</h3>{(state.devices||[]).map(d=><div className="dn-item" key={d.id}><div><strong>{d.name||d.id}</strong><small>{members.find(m=>m.id===d.user)?.name||d.user} · {d.active?'Aktiv':'Deaktiv'}</small></div><button onClick={()=>act('device-set',{clinic:state.clinic,device:d.id,active:!d.active})}>{d.active?'Blokla':'Aktivləşdir'}</button></div>)}</article>}
  {state.superAdmin&&<article><h3>Şəbəkə üzrə bloklama</h3><form onSubmit={e=>{e.preventDefault();const f=new FormData(e.currentTarget),kind=String(f.get('kind'));void act('block_'+kind,{[kind]:f.get('id'),active:f.get('active')==='yes'});}}>
  <label>Obyekt<select name="kind"><option value="user">Hesab</option><option value="device">Cihaz</option></select></label><label>İdentifikator<input name="id" required/></label>

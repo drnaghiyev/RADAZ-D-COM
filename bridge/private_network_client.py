@@ -19,6 +19,7 @@ import uuid
 from pathlib import Path
 
 import pydicom
+from private_network_settings import SettingsLock
 from radaz_trial import protect
 
 MAX_DICOM = 512 * 1024 * 1024
@@ -73,6 +74,7 @@ class NetworkClient:
         self.archive = archive
         archive_id = hashlib.sha256(str(archive.root).encode()).hexdigest()[:16]
         self.root = Path(root) if root else Path(os.environ.get('LOCALAPPDATA', Path.home())) / 'RADAZ/PrivateNetwork' / archive_id
+        self.settings_lock = SettingsLock(self.root/'settings-password.sqlite3') if root else SettingsLock.for_install()
         self.lock = threading.RLock()
         self.worker_lock = threading.Lock()
         self.wake = threading.Event()
@@ -291,11 +293,43 @@ class NetworkClient:
                         queue.append(dict(row))
         return {**remote,**public,'clinic':remote.get('clinic',data.get('clinic','')),'queue':queue}
 
-    def action(self, action, data):
+    def operational_state(self, data):
+        state = self.state(data)
+        # Send, inbox and history need clinic and recipient labels even while settings
+        # are locked. Device enrollment, staff permissions, routing and audit of
+        # administration stay in the password-protected settings response.
+        public = {key:state[key] for key in (
+            'enabled','configured','online','error','user','clinic','clinics',
+            'membership','deliveries','sent','queue','statuses'
+        ) if key in state}
+        membership = state.get('membership') or {}
+        selectable = bool(set(membership.get('permissions',())).intersection({'send','forward'}))
+        transfers = [*state.get('sent',()), *state.get('deliveries',()), *state.get('statuses',())]
+        peers = {delivery.get(field) for delivery in transfers for field in ('sender','recipient')}
+        public['members'] = []
+        for member in state.get('members',()):
+            recipient = selectable and member['active'] and 'receive' in member['permissions']
+            if recipient or member['id'] in peers:
+                public['members'].append({'id':member['id'],'name':member['name'],
+                                          'active':bool(member['active']),'permissions':['receive'] if recipient else []})
+        public['history'] = [row for row in state.get('history',()) if row['action'] in (
+            'send','forward','accept','ack','control','transfer','reassign','preview_read','relay_read','relay_write'
+        )]
+        return public
+
+    def action(self, action, data, settings_session=''):
+        if action in ('settings_set','settings_status','settings_unlock','settings_change','settings_lock'):
+            return self.settings_lock.action(action,data,settings_session)
+        if action == 'state':
+            return self.operational_state(data)
+        if action not in ('send','stage_dimse','accept','control','preview','reassign'):
+            self.settings_lock.require(settings_session)
+        if action == 'settings_state':
+            return self.state(data)
         if action=='local_setup':
             from private_network_local import setup
             return setup(self,data)
-        if action in ('device','configure','register','state'):
+        if action in ('device','configure','register'):
             if action=='device':
                 return self.device()
             return getattr(self,action)(data)

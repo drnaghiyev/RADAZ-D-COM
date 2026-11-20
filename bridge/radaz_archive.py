@@ -353,6 +353,7 @@ def handler_for(archive, removable=None):
     ai = AiService(product.root)
     sender = Sender(archive)
     from private_network_client import NetworkClient
+    from private_network_settings import SettingsError
     network = NetworkClient(archive)
     archive.private_network = network
     try:
@@ -527,7 +528,13 @@ def handler_for(archive, removable=None):
                         self.respond({'error':'Sorğu ölçüsü düzgün deyil'},413); return
                     payload = json.loads(self.rfile.read(size))
                     if not isinstance(payload,dict): raise ValueError('Sorğu düzgün deyil')
-                    self.respond(network.action(parsed.path.removeprefix('/private-network/'), payload)); return
+                    try:
+                        result = network.action(parsed.path.removeprefix('/private-network/'), payload,
+                                                self.headers.get('X-RADAZ-Settings-Session',''))
+                    except SettingsError as error:
+                        self.respond({'error':str(error),'code':error.code}, error.status)
+                        return
+                    self.respond(result); return
                 length = int(self.headers.get('Content-Length','0'))
                 limit = MAX_FILE if self.path in ('/import','/media/prepare','/video') or parsed.path in ('/bridge/file','/media/file') else 192 * 1024 * 1024 if self.path == '/print' else 29 * 1024 * 1024 if self.path == '/ai/transcribe' else 6 * 1024 * 1024 + 1024 if self.path == '/ai/template' else 17 * 1024 * 1024 if self.path == '/ai/report' else 65536 if self.path == '/studies/delete' else 8192
                 if not 0 < length <= limit:

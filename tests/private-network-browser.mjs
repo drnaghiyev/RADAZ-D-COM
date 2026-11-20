@@ -2,11 +2,40 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {exerciseMemberChanges} from './private-network-members-flow.mjs';
+import {checkPasswordChanges,setTestPassword,testPassword,unlockTestSettings} from './private-network-password-flow.mjs';
 const {chromium}=createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE||'playwright');
 const base=process.env.RADAZ_TEST_URL||'http://localhost:5488/';
 const doctor={id:'dr1',name:'QA doctor',role:'radiologist',active:true,permissions:['receive','download']};
 const admin={id:'admin',name:'QA coordinator',role:'coordinator',active:true,permissions:['send','receive','download','forward','manage_schedule','view_status']};
 const mock={enabled:true,configured:true,online:true,user:admin,membership:admin,members:[admin,doctor],clinics:[{id:'alpha',name:'Klinika A'}],clinic:'alpha',queue:[],deliveries:[],sent:[],history:[],policy:{}};
+async function mockSettingsGate(context,fullState,initialPassword){
+ let password=initialPassword;
+ const sessions=new Set();
+ await context.route('**/local-archive-api/private-network/settings_*',async route=>{
+  const action=new URL(route.request().url()).pathname.split('/').at(-1);
+  const body=route.request().postDataJSON()||{};
+  const session=route.request().headers()['x-radaz-settings-session'];
+  const valid=sessions.has(session);
+  const reply=(json,status=200)=>route.fulfill({status,json});
+  if(action==='settings_status')return reply({passwordSet:!!password,unlocked:valid});
+  if(action==='settings_set'&&!password)password=body.password;
+  else if(action==='settings_unlock'){
+   if(!password||body.password!==password)return reply({code:'SETTINGS_PASSWORD_INVALID',error:'Şifrə düzgün deyil.'},403);
+  }else{
+   if(!valid)return reply({code:'SETTINGS_LOCKED',error:'Şifrəni daxil edin.'},401);
+   if(action==='settings_state')return fullState(route);
+   if(action==='settings_lock'){sessions.delete(session);return reply({passwordSet:true,unlocked:false});}
+   assert.equal(action,'settings_change');
+   assert.equal(body.currentPassword,password);
+   password=body.newPassword;
+   sessions.clear();
+  }
+  const fresh=testPassword();
+  sessions.add(fresh);
+  return reply({passwordSet:true,unlocked:true,session:fresh,expiresIn:900});
+ });
+ return request=>sessions.has(request.headers()['x-radaz-settings-session']);
+}
 test('Clinic member changes survive reopening and respect the settings user and service version',async()=>{
  const browser=await chromium.launch({headless:true,executablePath:process.env.RADAZ_CHROME||'C:/Program Files/Google/Chrome/Application/chrome.exe'});
  try{
@@ -14,10 +43,12 @@ test('Clinic member changes survive reopening and respect the settings user and 
   const manager={id:'manager',name:'QA administrator',role:'admin',active:true,permissions:['manage_schedule','view_status']};
   let state={...mock,user:manager,membership:manager,members:[manager],memberManagementVersion:2};
   const mutations=[];
+  let authorized;
   await context.route('**/local-archive-api/**',async route=>{
    const action=new URL(route.request().url()).pathname.split('/').at(-1);
    if(action==='state')return route.fulfill({json:state});
    if(action==='license')return route.fulfill({json:{valid:true,required:true,kind:'owner'}});
+   assert.ok(authorized(route.request()),'member mutations require a live settings session');
    const body=route.request().postDataJSON();
    mutations.push({action,body});
    if(action==='member'){
@@ -27,10 +58,13 @@ test('Clinic member changes survive reopening and respect the settings user and 
    if(action==='remove_member')state={...state,members:state.members.filter(m=>m.id!==body.user)};
    return route.fulfill({json:{ok:true}});
   });
+  const password=testPassword();
+  authorized=await mockSettingsGate(context,route=>route.fulfill({json:state}),password);
   const page=await context.newPage();
   page.setDefaultTimeout(7000);
   await page.goto(new URL('private-network/settings',base).href);
-  await exerciseMemberChanges(page);
+  await unlockTestSettings(page,password);
+  await exerciseMemberChanges(page,password);
   assert.deepEqual(mutations.map(({action,body})=>[action,body.mode,body.user,body.clinic]),[
    ['member','create','qa-reader','alpha'],['member','create','qa-operator','alpha'],
    ['member','edit','qa-reader','alpha'],['remove_member',undefined,'qa-reader','alpha'],
@@ -39,6 +73,7 @@ test('Clinic member changes survive reopening and respect the settings user and 
   const editOperator=()=>page.getByRole('row').filter({hasText:'Test operator'}).getByRole('button',{name:/Düzəliş et/});
   async function reopen(){
    await page.reload();
+   await unlockTestSettings(page,password);
    await available('Klinikalar və radioloqlar').click();
    await page.getByRole('cell',{name:/^QA administrator/}).waitFor();
   }
@@ -69,13 +104,19 @@ test('Viewer settings opens the desktop network settings window and reuses it',a
    if(action==='state'&&denied)return route.fulfill({status:403,json:denied});
    return route.fulfill({json:action==='state'?state:action==='license'?{valid:true,kind:'owner',required:true}:{}});
   });
+  let password=testPassword();
+  await mockSettingsGate(context,route=>denied?route.fulfill({status:403,json:denied}):route.fulfill({json:state}));
   const viewer=await context.newPage();
   await viewer.goto(base);
   await viewer.getByRole('button',{name:'Yardım və lisenziya',exact:true}).click();
   await viewer.getByRole('menuitem',{name:'Ayarlar',exact:true}).click();
   const link=viewer.getByRole('dialog',{name:'Ayarlar',exact:true}).getByRole('link',{name:'DICOM Network ayarları'});
   const [settings]=await Promise.all([viewer.waitForEvent('popup'),link.click()]);
+  await settings.getByRole('button',{name:'Şifrəni yarat',exact:true}).waitFor();
+  assert.equal(await settings.getByRole('heading',{name:'Cihaz və bağlantı'}).count(),0);
+  await setTestPassword(settings,password);
   await settings.getByRole('heading',{name:'Cihaz və bağlantı'}).waitFor();
+  password=await checkPasswordChanges(settings,password);
   const nav=settings.getByRole('navigation',{name:'DICOM Network ayarları'});
   assert.deepEqual(await nav.getByRole('button').allTextContents(),['Bağlantı və qəbul ayarları','Klinikalar və radioloqlar','Növbə cədvəli','Avtomatik göndərmə']);
   await nav.getByRole('button',{name:'Klinikalar və radioloqlar'}).click();
@@ -86,6 +127,7 @@ test('Viewer settings opens the desktop network settings window and reuses it',a
   await nav.getByRole('button',{name:'Avtomatik göndərmə'}).click();
   await settings.getByRole('heading',{name:'Avtomatik göndərmə'}).waitFor();
   await link.click();
+  await unlockTestSettings(settings,password);
   await settings.getByRole('heading',{name:'Cihaz və bağlantı'}).waitFor();
   assert.equal(context.pages().length,2);
   state={enabled:false,configured:false,online:false};
@@ -118,6 +160,8 @@ test('Desktop network checks only selected archive studies and keeps web access 
  const studies=['2.25.1','2.25.2'].map((uid,i)=>({uid,patient:'TEST '+i,patientId:'qa',date:today,time:'120000',modality:'CT',description:'QA',series:[],imageCount:1,addedAt:1,size:1,storage:'disk'}));
  const calls=[];let dropOnce=false;
  await context.route('**/local-archive-api/**',route=>{const action=new URL(route.request().url()).pathname.split('/').at(-1);const payload=route.request().postDataJSON();calls.push({action,payload});if(action==='send'&&payload.study==='2.25.2'&&dropOnce){dropOnce=false;return route.abort('failed');}return route.fulfill({json:action==='state'?mock:action==='studies'?studies:action==='license'?{valid:true,required:true,kind:'owner'}:{ok:true}});});
+ const password=testPassword();
+ await mockSettingsGate(context,route=>route.fulfill({json:mock}),password);
  const page=await context.newPage();page.setDefaultTimeout(6500);await page.goto(new URL('archive',base).href);
  const sendButton=page.getByRole('button',{name:'RADAZ-a göndər',exact:true});await sendButton.waitFor();assert.equal(await sendButton.isDisabled(),true);
  await page.getByLabel('TEST 1 müayinəsini seç',{exact:true}).check();await sendButton.click();const dialog=page.getByRole('dialog');await dialog.getByRole('combobox').nth(2).selectOption('dr1');assert.deepEqual(await dialog.locator('li').allTextContents(),['TEST 1 · CT']);await dialog.getByRole('button',{name:'Göndər',exact:true}).click();await dialog.getByText('Göndərişlər növbəyə əlavə edildi.').waitFor();
@@ -135,7 +179,11 @@ test('Desktop network checks only selected archive studies and keeps web access 
  const batch=calls.filter(c=>c.action==='send').slice(1);
  assert.deepEqual(batch.map(c=>c.payload.study),['2.25.1','2.25.2','2.25.2']);
  assert.ok(batch[1].payload.requestId);assert.equal(batch[1].payload.requestId,batch[2].payload.requestId);
- await page.goto(new URL('private-network',base).href);await page.getByRole('button',{name:'Növbə cədvəli',exact:true}).click();await page.getByRole('button',{name:'Növbə əlavə et'}).click();await page.getByLabel('QA doctor',{exact:true}).first().check();await page.getByRole('button',{name:'Saxla',exact:true}).click();await page.getByText('Saxlanıldı.',{exact:true}).waitFor();assert.deepEqual(calls.find(c=>c.action==='policy').payload.policy.shifts[0].recipients,['dr1']);
+ await page.goto(new URL('private-network',base).href);await page.getByRole('button',{name:'Növbə cədvəli',exact:true}).click();
+ await page.getByLabel('Şifrə',{exact:true}).waitFor();
+ assert.equal(await page.getByRole('button',{name:'Növbə əlavə et'}).count(),0);
+ await unlockTestSettings(page,password);
+ await page.getByRole('button',{name:'Növbə əlavə et'}).click();await page.getByLabel('QA doctor',{exact:true}).first().check();await page.getByRole('button',{name:'Saxla',exact:true}).click();await page.getByText('Saxlanıldı.',{exact:true}).waitFor();assert.deepEqual(calls.find(c=>c.action==='policy').payload.policy.shifts[0].recipients,['dr1']);
  const web=await browser.newPage();web.setDefaultTimeout(6500);await web.route('**/local-archive-api/license',r=>r.fulfill({json:{valid:true,required:true,kind:'owner'}}));await web.goto(new URL('private-network',base).href);await web.getByText('Windows RADAZ Desktop proqramında açın.').waitFor();assert.equal(await web.getByRole('navigation',{name:'DICOM Network'}).count(),0);
  }finally{await browser.close();}
 });

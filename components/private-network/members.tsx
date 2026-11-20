@@ -1,7 +1,7 @@
 'use client';
 import {useEffect,useRef,useState} from 'react';
 import {KeyRound,Pencil,Trash2,UserPlus} from 'lucide-react';
-import {networkCall,permissions,roles,type Act,type Member,type NetworkState} from './api';
+import {permissions,roles,type Act,type Member,type NetworkRequest,type NetworkState} from './api';
 
 const rolePermissions:Record<string,string[]>={
   admin:['manage_schedule','view_status'],
@@ -76,7 +76,7 @@ function RemoveMemberDialog({member,clinicName,close,confirm}:{
   </dialog>;
 }
 
-export function MemberDirectory({state,act}:{state:NetworkState;act:Act}){
+export function MemberDirectory({state,act,request}:{state:NetworkState;act:Act;request:NetworkRequest}){
   // Empty ID opens a new record. Existing IDs identify a row across background refreshes.
   const [editor,setEditor]=useState<string|null>(null);
   const [removing,setRemoving]=useState<string|null>(null);
@@ -98,7 +98,7 @@ export function MemberDirectory({state,act}:{state:NetworkState;act:Act}){
   async function createInvite(member:Member){
     setInviting(true);setInvite(null);setInviteError('');
     try{
-      const result=await networkCall<{invite:string}>('invite',{clinic:state.clinic,user:member.id});
+      const result=await request<{invite:string}>('invite',{clinic:state.clinic,user:member.id});
       setInvite({user:member.id,code:result.invite});
     }catch(error){setInviteError(error instanceof Error?error.message:String(error));}
     finally{setInviting(false);}
