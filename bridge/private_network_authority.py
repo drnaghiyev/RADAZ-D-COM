@@ -64,6 +64,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,name TEXT NOT NULL,super INTEGER NOT NULL DEFAULT 0,active INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS clinics(id TEXT PRIMARY KEY,name TEXT NOT NULL,policy TEXT NOT NULL DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS members(clinic TEXT NOT NULL,user TEXT NOT NULL,role TEXT NOT NULL,permissions TEXT NOT NULL,active INTEGER NOT NULL,PRIMARY KEY(clinic,user));
+CREATE TABLE IF NOT EXISTS member_names(clinic TEXT NOT NULL,user TEXT NOT NULL,name TEXT NOT NULL,PRIMARY KEY(clinic,user));
 CREATE TABLE IF NOT EXISTS devices(id TEXT PRIMARY KEY,user TEXT NOT NULL,name TEXT NOT NULL,token TEXT UNIQUE NOT NULL,publicKey TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS approvals(clinic TEXT NOT NULL,device TEXT NOT NULL,active INTEGER NOT NULL,PRIMARY KEY(clinic,device));
 CREATE TABLE IF NOT EXISTS invites(hash TEXT PRIMARY KEY,user TEXT NOT NULL,clinic TEXT NOT NULL,expires INTEGER NOT NULL);
@@ -136,7 +137,7 @@ class Authority:
         return row
 
     def member(self,db,c,user):
-        row=db.execute('SELECT m.user AS id,u.name,m.role,m.permissions,m.active FROM members m JOIN users u ON u.id=m.user WHERE m.clinic=? AND m.user=? AND m.active=1 AND u.active=1 AND u.super=0',(c,user)).fetchone()
+        row=db.execute('SELECT m.user AS id,COALESCE(n.name,u.name) AS name,m.role,m.permissions,m.active FROM members m JOIN users u ON u.id=m.user LEFT JOIN member_names n ON n.clinic=m.clinic AND n.user=m.user WHERE m.clinic=? AND m.user=? AND m.active=1 AND u.active=1 AND u.super=0',(c,user)).fetchone()
         if row:
             return dict(dict(row),permissions=json.loads(row['permissions']))
 
@@ -159,6 +160,9 @@ class Authority:
         with self.transaction() as db:
             if action=='register':
                 return self.register(db,p)
+            if action in ('create_member','edit_member','remove_member','member'):
+                # Check the target and its administrator in the same write transaction.
+                db.execute('BEGIN IMMEDIATE')
             a=self.auth(db,token)
             c=p.get('clinic','')
             if action=='link_clinic':
@@ -208,12 +212,14 @@ class Authority:
                 require(a['super'])
                 c=new_id()
                 admin=identifier(p.get('admin'))
-                self.ensure_user(db,admin,string(p.get('adminName') or admin))
+                name=string(p.get('adminName') or admin)
+                self.ensure_user(db,admin,name)
                 db.execute('INSERT INTO clinics(id,name) VALUES(?,?)',(c,string(p.get('name'))))
                 db.execute('INSERT INTO members VALUES(?,?,?,?,1)',(c,admin,'admin',json.dumps(['manage_schedule','view_status'])))
+                db.execute('INSERT INTO member_names VALUES(?,?,?)',(c,admin,name))
                 self.audit(db,c,a['id'],action,admin)
                 return {'id':c}
-            if action in {'member','device','invite','policy','block_user','block_device'}:
+            if action in {'create_member','edit_member','remove_member','member','device','invite','policy','block_user','block_device'}:
                 return self.manage(db,a,c,action,p)
             if action=='send':
                 return self.send(db,a,c,p)
@@ -238,6 +244,40 @@ class Authority:
     def ensure_user(self,db,user,name):
         db.execute('INSERT OR IGNORE INTO users(id,name) VALUES(?,?)',(user,name))
         require(not db.execute('SELECT super FROM users WHERE id=?',(user,)).fetchone()[0])
+
+    def change_member(self,db,c,a,action,p):
+        target=identifier(p.get('user'))
+        old=db.execute('SELECT role,active FROM members WHERE clinic=? AND user=?',(c,target)).fetchone()
+        mode={'create_member':'create','edit_member':'edit','remove_member':'remove'}.get(action,p.get('mode','upsert'))
+        require(mode in ('create','edit','remove','upsert') and (mode!='remove' or action=='remove_member'),400)
+        if mode=='create':
+            require(not old,409,'Bu hesab ID-si klinikada artıq mövcuddur.')
+        if mode in ('edit','remove'):
+            require(old,404,'Əməkdaş artıq bu klinikanın siyahısında yoxdur.')
+        role=old['role'] if mode=='remove' else p.get('role')
+        require(role in ROLES,400,'Yanlış rol')
+        require((role=='admin')==bool(a['super']) and (not old or (old['role']=='admin')==bool(a['super'])))
+        active=False if mode=='remove' else p.get('active',True)
+        require(type(active) is bool,400)
+        if old and old['role']=='admin' and old['active'] and not active:
+            another=db.execute("SELECT 1 FROM members m JOIN users u ON m.user=u.id WHERE m.clinic=? AND m.role='admin' AND m.active=1 AND u.active=1 AND m.user<>?",(c,target)).fetchone()
+            require(another,409,'Klinikada ən azı bir aktiv administrator qalmalıdır.')
+        if mode=='remove':
+            db.execute('DELETE FROM approvals WHERE clinic=? AND device IN (SELECT id FROM devices WHERE user=?)',(c,target))
+            db.execute("UPDATE deliveries SET state='cancelled' WHERE state NOT IN ('complete','cancelled') AND transferId IN (SELECT id FROM transfers WHERE clinic=? AND (sender=? OR deliveries.recipient=?))",(c,target,target))
+            db.execute('DELETE FROM member_names WHERE clinic=? AND user=?',(c,target))
+            db.execute('DELETE FROM members WHERE clinic=? AND user=?',(c,target))
+        else:
+            name=string(p.get('name') or target)
+            perms=p.get('permissions',[])
+            require(isinstance(perms,list) and all(isinstance(x,str) and x in ROLE_RIGHTS[role] for x in perms),400,'Yanlış icazələr')
+            self.ensure_user(db,target,name)
+            db.execute('INSERT OR REPLACE INTO members VALUES(?,?,?,?,?)',(c,target,role,json.dumps(perms),active))
+            db.execute('INSERT OR REPLACE INTO member_names VALUES(?,?,?)',(c,target,name))
+        if not active:
+            db.execute('DELETE FROM invites WHERE clinic=? AND user=?',(c,target))
+        self.audit(db,c,a['id'],action,target)
+        return {'ok':True}
 
     def manage(self,db,a,c,action,p):
         if action in ('block_user','block_device'):
@@ -272,19 +312,8 @@ class Authority:
             target=''
         else:
             require(a['super'] or m['role']=='admin')
-            if action=='member':
-                role=p.get('role')
-                target=identifier(p.get('user'))
-                old=db.execute('SELECT role FROM members WHERE clinic=? AND user=?',(c,target)).fetchone()
-                require(role in ROLES,400)
-                require((a['super'] and role=='admin') or (not a['super'] and role!='admin' and (not old or old[0]!='admin')))
-                self.ensure_user(db,target,string(p.get('name') or target))
-                perms=p.get('permissions',[])
-                require(isinstance(perms,list) and all(isinstance(x,str) and x in ROLE_RIGHTS[role] for x in perms),400,'Yanlış icazələr')
-                active=p.get('active',True)
-                require(type(active) is bool,400)
-                db.execute('INSERT OR REPLACE INTO members VALUES(?,?,?,?,?)',(c,target,role,json.dumps(perms),active))
-                if not active:db.execute('DELETE FROM invites WHERE clinic=? AND user=?',(c,target))
+            if action in ('create_member','edit_member','remove_member','member'):
+                return self.change_member(db,c,a,action,p)
             elif action=='invite':
                 target=identifier(p.get('user'))
                 member=self.member(db,c,target)
@@ -303,7 +332,7 @@ class Authority:
         return {'ok':True}
 
     def members(self,db,c):
-        return [dict(dict(r),permissions=json.loads(r['permissions'])) for r in db.execute('SELECT m.user AS id,u.name,m.role,m.permissions,(m.active AND u.active) AS active FROM members m JOIN users u ON u.id=m.user WHERE clinic=? AND u.super=0',(c,))]
+        return [dict(dict(r),permissions=json.loads(r['permissions'])) for r in db.execute('SELECT m.user AS id,COALESCE(n.name,u.name) AS name,m.role,m.permissions,(m.active AND u.active) AS active FROM members m JOIN users u ON u.id=m.user LEFT JOIN member_names n ON n.clinic=m.clinic AND n.user=m.user WHERE m.clinic=? AND u.super=0',(c,))]
 
     def send(self,db,a,c,p):
         forwarded=p.get('forwardOf')
@@ -381,9 +410,12 @@ class Authority:
         allowed={r['id'] for r in clinics}
         if c:require(c in allowed)
         out={'user':{'id':a['id'],'name':a['name']},'device':{'id':a['device']},'superAdmin':bool(a['super']),'clinics':clinics,'clinic':c,'members':[],'devices':[],'membership':None,'sent':[],'deliveries':[],'history':[],'policy':{},'statuses':[]}
+        out['memberManagementVersion']=2
         if c:
             m=None if a['super'] else self.access(db,c,a)
             out['membership']=m
+            if m:
+                out['user']['name']=m['name']
             members=self.members(db,c)
             if a['super'] or m['role']=='admin' or set(m['permissions']).intersection({'send','forward','manage_schedule'}):
                 out['members']=members

@@ -35,6 +35,17 @@ class DeliveryTests(unittest.TestCase):
                 admin=enroll('owner',hub.bootstrap('owner','Test network owner')['invite'])
                 clinic=admin.rpc('create_clinic',{'name':'Clinical QA','admin':'manager'})['id']
                 manager=enroll('manager',admin.rpc('invite',{'clinic':clinic,'user':'manager'})['invite'])
+                person={'clinic':clinic,'user':'test-staff','name':'Test Staff','role':'operator','permissions':['send']}
+                manager.action('member',dict(person,mode='create'))
+                with self.assertRaises(RemoteError):
+                    manager.action('member',dict(person,mode='create'))
+                manager.action('member',dict(person,mode='edit',name='Updated Staff'))
+                self.assertIn('Updated Staff',[m['name'] for m in manager.state({'clinic':clinic})['members']])
+                manager.action('remove_member',{'clinic':clinic,'user':'test-staff'})
+                with patch.object(manager,'rpc',side_effect=RemoteError(404,'Əməliyyat tapılmadı')) as old_server:
+                    with self.assertRaisesRegex(ValueError,'0.2.92'):
+                        manager.action('member',dict(person,mode='edit'))
+                    self.assertEqual(old_server.call_args.args[0],'edit_member')
                 def add(user,role,perm):
                     manager.rpc('member',{'clinic':clinic,'role':role,'user':user,'permissions':perm})
                     return enroll(user,manager.rpc('invite',{'clinic':clinic,'user':user})['invite'])

@@ -66,6 +66,65 @@ class PrivateNetworkAuthorityTest(unittest.TestCase):
         self.assertFalse(self.call(self.reader,'state')['deliveries'])
         with self.assertRaises(Fault):self.net.blob(self.operator,d,self.file['sha256'],b'fake')
 
+    def test_member_edits_have_distinct_identity_and_clinic_local_names(self):
+        # Start with a pre-0.2.92 roster and its original user names.
+        with self.net.transaction() as db:
+            db.execute('DROP TABLE member_names')
+        self.net=Authority(self.path)
+        state=self.call(self.reader,'state',clinic=self.c)
+        self.assertEqual(state['memberManagementVersion'],2)
+        self.assertEqual(state['membership']['name'],'reader')
+
+        other=self.call(self.root,'create_clinic',name='Clinic B',admin='bob')['id']
+        bob=self.register(self.call(self.root,'invite',clinic=other,user='bob')['invite'])
+        detail=dict(user='reader',role='radiologist',permissions=['receive','download'])
+        self.call(bob,'create_member',clinic=other,name='Clinic B Doctor',**detail)
+        self.call(self.reader,'link_clinic',invite=self.call(bob,'invite',clinic=other,user='reader')['invite'])
+        with self.assertRaises(Fault) as duplicate:
+            self.call(self.admin,'create_member',clinic=self.c,name='Duplicate',**detail)
+        self.assertEqual(duplicate.exception.code,409)
+        with self.assertRaises(Fault) as missing:
+            self.call(self.admin,'edit_member',clinic=self.c,user='missing',name='New',role='operator')
+        self.assertEqual(missing.exception.code,404)
+        self.call(self.admin,'edit_member',clinic=self.c,name='Renamed',**detail)
+        self.assertEqual(self.call(self.reader,'state',clinic=self.c)['user']['name'],'Renamed')
+        roster=self.call(self.operator,'state',clinic=self.c)['members']
+        self.assertEqual(next(m['name'] for m in roster if m['id']=='reader'),'Renamed')
+        self.assertEqual(self.call(self.reader,'state',clinic=other)['membership']['name'],'Clinic B Doctor')
+
+        delivery=self.start()
+        invite=self.call(self.admin,'invite',clinic=self.c,user='reader')['invite']
+        completed=self.call(self.operator,'send',**dict(self.payload,requestId='completed'))['deliveries'][0]['id']
+        self.call(self.reader,'accept',delivery=completed)
+        self.call(self.reader,'ack',delivery=completed,sha256=self.file['sha256'])
+        self.call(self.admin,'remove_member',clinic=self.c,user='reader')
+        state=self.call(self.admin,'state',clinic=self.c)
+        self.assertFalse(any(m['id']=='reader' for m in state['members']))
+        self.assertFalse(any(d['user']=='reader' for d in state['devices']))
+        self.assertIn(('remove_member','reader'),[(e['action'],e['detail']) for e in state['history']])
+        self.assertEqual({d['id']:d['state'] for d in state['statuses']},{delivery:'cancelled',completed:'complete'})
+        self.call(self.admin,'create_member',clinic=self.c,name='Restored member',**detail)
+        with self.assertRaises(Fault):self.register(invite)
+        with self.assertRaises(Fault):self.call(self.reader,'state',clinic=self.c)
+        self.assertEqual(self.call(self.reader,'state',clinic=other)['user']['name'],'Clinic B Doctor')
+
+    def test_member_management_authorization_and_final_administrator(self):
+        admin=dict(clinic=self.c,user='alice',role='admin',name='Alice',permissions=['manage_schedule'])
+        for token,target in ((self.admin,'alice'),(self.root,'reader'),(self.operator,'reader'),(self.reader,'other')):
+            with self.assertRaises(Fault) as denied:
+                self.call(token,'remove_member',clinic=self.c,user=target)
+            self.assertEqual(denied.exception.code,403)
+        with self.assertRaises(Fault) as last:
+            self.call(self.root,'remove_member',clinic=self.c,user='alice')
+        self.assertEqual(last.exception.code,409)
+        with self.assertRaises(Fault) as disabled:
+            self.call(self.root,'edit_member',active=False,**admin)
+        self.assertEqual(disabled.exception.code,409)
+        self.call(self.root,'create_member',**dict(admin,user='second-admin',name='Second Admin'))
+        self.call(self.root,'remove_member',clinic=self.c,user='alice')
+        with self.assertRaises(Fault):
+            self.call(self.admin,'remove_member',clinic=self.c,user='reader')
+
     def test_delegated_schedule_preserves_admin_routing_policy(self):
         coord=self.user('coordinator','coordinator',['manage_schedule'])
         rules=[{'enabled':True,'recipients':['reader']}]

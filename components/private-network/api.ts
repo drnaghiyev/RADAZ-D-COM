@@ -11,7 +11,7 @@ export const initialPolicy:Policy={timezone:'Asia/Baku',shifts:[],exceptions:[],
 export type NetworkState={
   enabled:boolean;configured:boolean;online:boolean;error?:string;url?:string;deviceId?:string;
   user?:{id:string;name:string};superAdmin?:boolean;clinic?:string;clinics?:{id:string;name:string}[];
-  membership?:Member;members?:Member[];devices?:Device[];policy?:Partial<Policy>;
+  membership?:Member;members?:Member[];devices?:Device[];policy?:Partial<Policy>;memberManagementVersion?:number;
   deliveries?:Delivery[];sent?:Delivery[];history?:{time:number|string;actor:string;action:string;detail?:unknown}[];
   queue?:{id:string;clinic:string;study:string;state:string;error?:string;remote?:string}[];statuses?:{id:string;sender:string;recipient:string;state:string}[];localCoordinator?:boolean;syncClinic?:string;acceptMode?:string;clinicModes?:Record<string,string>;
 };

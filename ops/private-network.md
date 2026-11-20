@@ -10,6 +10,12 @@
 
 Yenilənmədən sonra Desktop bağlantısını təsdiqləmək barədə bildiriş görsəniz, əvvəlcə açıq işinizi saxlayın. Windows-da saatın yanındakı RADAZ işarəsindən **Çıxış** seçin, sonra Başlat menyusundan **RADAZ** proqramını yenidən açın.
 
+## Əməkdaş siyahısının idarə edilməsi
+
+**Klinikalar və radioloqlar** bölməsində klinikanı seçin. Klinika administratoru **Yeni əməkdaş** düyməsi ilə şəxsə ayrıca hesab ID-si verir. Mövcud şəxsin sətrində **Düzəliş et** onun bu klinikadakı adını, rolunu və icazələrini dəyişməyə imkan verir. **Siyahıdan sil** düyməsi ilə adı yoxlayıb təsdiqlədikdə həmin şəxs klinikadan çıxarılır. Əvvəlki müayinələr və göndəriş tarixçəsi saxlanılır. Şəbəkə administratoru eyni bölmədə klinika administratorlarını idarə edir.
+
+Ayrıca HTTPS koordinatorundan istifadə edirsinizsə, cihazlarla birlikdə həmin xidməti də 0.2.92-yə yeniləyin. Serverdə mövcud verilənlər bazası, sertifikat və xidmət ayarları ilə yenilənmiş koordinatoru başladın.
+
 ## Göndəriş, qəbul və növbə
 
 Local Arxiv və ya PACS siyahısında müayinəni işarələyib **RADAZ-a göndər** seçin. Klinikanı və göndəriş rejimini yoxlayın. Fərdi çatdırılmalar **Göndərilənlər** bölməsində görünür. Qəbul edən **Mənə göndərilənlər** bölməsində göndərişi təsdiqləyir. Endirmə hüququ olduqda yoxlanmış orijinal DICOM faylları onun lokal arxivinə əlavə edilir. Yalnız baxış rejimində tələb olunan kadrın önbaxışı açılır.

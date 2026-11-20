@@ -1,11 +1,63 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
+import {exerciseMemberChanges} from './private-network-members-flow.mjs';
 const {chromium}=createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE||'playwright');
 const base=process.env.RADAZ_TEST_URL||'http://localhost:5488/';
 const doctor={id:'dr1',name:'QA doctor',role:'radiologist',active:true,permissions:['receive','download']};
 const admin={id:'admin',name:'QA coordinator',role:'coordinator',active:true,permissions:['send','receive','download','forward','manage_schedule','view_status']};
 const mock={enabled:true,configured:true,online:true,user:admin,membership:admin,members:[admin,doctor],clinics:[{id:'alpha',name:'Klinika A'}],clinic:'alpha',queue:[],deliveries:[],sent:[],history:[],policy:{}};
+test('Clinic member changes survive reopening and respect the settings user and service version',async()=>{
+ const browser=await chromium.launch({headless:true,executablePath:process.env.RADAZ_CHROME||'C:/Program Files/Google/Chrome/Application/chrome.exe'});
+ try{
+  const context=await browser.newContext({userAgent:'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Electron/39.0.0'});
+  const manager={id:'manager',name:'QA administrator',role:'admin',active:true,permissions:['manage_schedule','view_status']};
+  let state={...mock,user:manager,membership:manager,members:[manager],memberManagementVersion:2};
+  const mutations=[];
+  await context.route('**/local-archive-api/**',async route=>{
+   const action=new URL(route.request().url()).pathname.split('/').at(-1);
+   if(action==='state')return route.fulfill({json:state});
+   if(action==='license')return route.fulfill({json:{valid:true,required:true,kind:'owner'}});
+   const body=route.request().postDataJSON();
+   mutations.push({action,body});
+   if(action==='member'){
+    const member={id:body.user,name:body.name,role:body.role,active:body.active,permissions:body.permissions};
+    state={...state,members:[...state.members.filter(m=>m.id!==body.user),member]};
+   }
+   if(action==='remove_member')state={...state,members:state.members.filter(m=>m.id!==body.user)};
+   return route.fulfill({json:{ok:true}});
+  });
+  const page=await context.newPage();
+  page.setDefaultTimeout(7000);
+  await page.goto(new URL('private-network/settings',base).href);
+  await exerciseMemberChanges(page);
+  assert.deepEqual(mutations.map(({action,body})=>[action,body.mode,body.user,body.clinic]),[
+   ['member','create','qa-reader','alpha'],['member','create','qa-operator','alpha'],
+   ['member','edit','qa-reader','alpha'],['remove_member',undefined,'qa-reader','alpha'],
+  ]);
+  const available=(name)=>page.getByRole('button',{name,exact:true});
+  const editOperator=()=>page.getByRole('row').filter({hasText:'Test operator'}).getByRole('button',{name:/Düzəliş et/});
+  async function reopen(){
+   await page.reload();
+   await available('Klinikalar və radioloqlar').click();
+   await page.getByRole('cell',{name:/^QA administrator/}).waitFor();
+  }
+  state={...state,user:doctor,membership:doctor};
+  await reopen();
+  assert.equal(await editOperator().count(),0);
+  assert.equal(await available('Yeni əməkdaş').count(),0);
+  state={...state,user:{id:'super',name:'QA super'},membership:null,superAdmin:true};
+  await reopen();
+  assert.equal(await editOperator().count(),0);
+  await page.getByRole('row').filter({hasText:'QA administrator'}).getByRole('button',{name:/Düzəliş et/}).click();
+  assert.deepEqual(await page.getByRole('combobox',{name:/^Rol/}).locator('option').evaluateAll(opts=>opts.map(o=>o.value)),['admin']);
+  state={...state,user:manager,membership:manager,superAdmin:false,memberManagementVersion:undefined};
+  await reopen();
+  assert.equal(await editOperator().count(),0);
+  await page.getByRole('alert').filter({hasText:'0.2.92'}).waitFor();
+  assert.equal(mutations.length,4);
+ }finally{await browser.close();}
+});
 test('Viewer settings opens the desktop network settings window and reuses it',async()=>{
  const browser=await chromium.launch({headless:true,executablePath:process.env.RADAZ_CHROME||'C:/Program Files/Google/Chrome/Application/chrome.exe'});
  try{

@@ -324,7 +324,19 @@ class NetworkClient:
         # Only expose coordinator actions, never arbitrary URLs or plaintext blobs.
         if action not in AUTHORITY_ACTIONS:
             raise ValueError('Naməlum DICOM Network əməliyyatı.')
-        result = self.rpc('device' if action == 'device-set' else action,data)
+        remote_action = 'device' if action == 'device-set' else action
+        if action == 'member' and 'mode' in data:
+            if data['mode'] not in ('create','edit'):
+                raise ValueError('Yanlış üzvlük əməliyyatı.')
+            # Older coordinators accept "member" as an unconditional upsert.
+            # Distinct operations keep stale create/edit requests from overwriting memberships.
+            remote_action = data['mode'] + '_member'
+        try:
+            result = self.rpc(remote_action,data)
+        except RemoteError as error:
+            if remote_action in ('create_member','edit_member','remove_member') and error.status == 404 and str(error) == 'Əməliyyat tapılmadı':
+                raise ValueError('DICOM Network xidmətini 0.2.92 və ya daha yeni versiyaya yeniləyin.') from error
+            raise
         self.wake.set()
         return result
 
@@ -508,6 +520,6 @@ class NetworkClient:
 
 
 AUTHORITY_ACTIONS = {
-    'accept', 'control', 'create_clinic', 'member', 'invite', 'policy',
+    'accept', 'control', 'create_clinic', 'member', 'remove_member', 'invite', 'policy',
     'device-set', 'block_user', 'block_device', 'link_clinic', 'reassign',
 }

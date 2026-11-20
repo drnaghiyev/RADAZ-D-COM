@@ -3,3 +3,7 @@
 .dn [hidden]{display:none!important}.dn-preview{width:min(900px,94vw)}.dn-preview img{display:block;max-width:100%;max-height:65vh;object-fit:contain;margin:auto;background:#000}
 
 .dn-notice{position:fixed;bottom:42px;right:80px;z-index:24;display:flex;border:1px solid #3b646c;border-radius:6px;padding:3px;box-shadow:0 4px 15px #0007}
+.dn-member-table{max-width:100%;overflow-x:auto}
+.dn-member-table .dn-row{gap:5px}
+.dn-member-editor{margin:12px 0;padding:12px;border:1px solid #355364;border-radius:5px}
+.dn button.dn-member-delete{color:#ffd6ce;background:#572b2b;border-color:#9d5a53}
