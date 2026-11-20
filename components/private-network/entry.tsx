@@ -2,6 +2,7 @@
 import {useEffect,useRef,useState} from 'react';
 import {createPortal} from 'react-dom';
 import {Send,X} from 'lucide-react';
+import {NetworkSettingsLink} from './settings-link';
 import {networkCall,usePrivateDesktop,can,type NetworkState} from './api';
 import './network.css';
 
@@ -23,7 +24,7 @@ function SendDialog({studies,prepare,source,aeTitle,close}:{studies:StudyForNetw
  const working=useRef(false),requestIds=useRef(new Map<string,string>());
  useEffect(()=>{ref.current?.showModal();},[]);
  useEffect(()=>{let active=true;setState(null);setIds([]);setSecond('');
-  networkCall<NetworkState>('state',{clinic}).then(result=>{if(!active)return;if(!clinic&&result.clinics?.length){setClinic(result.clinic||result.clinics[0].id);return;}setState(result);setMessage(result.error||'');}).catch(e=>active&&setMessage(String(e)));return()=>{active=false;};
+  networkCall<NetworkState>('state',{clinic}).then(result=>{if(!active)return;if(!clinic&&result.clinics?.length){setClinic(result.clinic||result.clinics[0].id);return;}setState(result);setMessage(result.error||'');}).catch(e=>active&&setMessage(e instanceof Error?e.message:String(e)));return()=>{active=false;};
  },[clinic]);
  const members=(state?.members||[]).filter(m=>m.active&&m.permissions.includes('receive'));
  const ready=!!state?.online&&can(state,'send')&&!!clinic&&(!['one','many','consult'].includes(mode)||ids.length>0)&&(mode!=='consult'||!!second&&second!==ids[0]);
@@ -40,6 +41,6 @@ function SendDialog({studies,prepare,source,aeTitle,close}:{studies:StudyForNetw
  <label>Göndərmə üsulu<select value={mode} disabled={pending||locked} onChange={e=>{setMode(e.target.value);setIds([]);setSecond('');}}>{Object.entries(modes).map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
  {mode==='many'?<fieldset disabled={pending||locked}><legend>Radioloqlar</legend>{members.map(m=><label className="dn-check" key={m.id}><input type="checkbox" checked={ids.includes(m.id)} onChange={e=>setIds(e.target.checked?[...ids,m.id]:ids.filter(v=>v!==m.id))}/>{m.name}</label>)}</fieldset>:['one','consult'].includes(mode)&&<label>{mode==='consult'?'Əsas radioloq':'Radioloq'}<select disabled={pending||locked} value={ids[0]||''} onChange={e=>setIds(e.target.value?[e.target.value]:[])}><option value="">Seçin</option>{members.map(m=><option value={m.id} key={m.id}>{m.name}</option>)}</select></label>}
  {mode==='consult'&&<label>İkinci rəy<select value={second} disabled={pending||locked} onChange={e=>setSecond(e.target.value)}><option value="">Seçin</option>{members.filter(m=>m.id!==ids[0]).map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select></label>}
- {state&&!state.configured&&<p>Cihazı <a href="/private-network" target="radaz-private-network">DICOM Network ayarlarında</a> qoşun.</p>}
+ {state&&!state.configured&&<p><NetworkSettingsLink/></p>}
  <footer><span role="status">{message}</span><button disabled={!ready||pending||sent.length===studies.length} onClick={()=>void send()}><Send size={16}/> Göndər</button></footer></dialog>;
 }

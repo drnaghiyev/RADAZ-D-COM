@@ -78,17 +78,30 @@ async function boot(){
  // Translate only requests from our own sandboxed local windows to the two
  // fixed loopback services. Their authentication and endpoint checks remain.
  const bridge='http://127.0.0.1:8765';
- const owned=d=>{const wc=webContents.fromId(d.webContentsId);return !!wc&&local(wc.getURL());};
+ const owned=d=>{const wc=Number.isInteger(d.webContentsId)&&webContents.fromId(d.webContentsId);return !!wc&&local(wc.getURL());};
  session.defaultSession.webRequest.onBeforeSendHeaders({urls:[origin+'/local-archive-api/*',bridge+'/*']},(details,callback)=>{
   const headers={...details.requestHeaders};
   if(details.url.startsWith(origin+'/local-archive-api/private-network/')){
    for(const key of Object.keys(headers))if(key.toLowerCase()==='x-radaz-network')delete headers[key];
-   const trusted=details.method==='POST' && owned(details) && details.frame && local(details.frame.url) &&
-     (headers.Origin===origin || headers.origin===origin);
-   if(trusted)try{
-    const token=readFileSync(path.join(installRoot,'control-token'),'utf8').trim();
-    if(token)headers['X-RADAZ-Network']=require('node:crypto').createHmac('sha256',token).update('private-network-v1').digest('hex');
-   }catch{}
+   try{
+    const wc=Number.isInteger(details.webContentsId)&&webContents.fromId(details.webContentsId);
+    const win=wc&&BrowserWindow.fromWebContents(wc),frame=details.frame;
+    const originKey=Object.keys(headers).find(key=>key.toLowerCase()==='origin');
+    // A sandboxed frame can have an opaque origin even in a local window.
+    // Only the application's own top-level local document may use this proof.
+    if(details.method==='POST'&&win&&windows.has(win)&&!cloudWindows.has(wc.id)&&local(wc.getURL())&&
+       frame&&frame.processId===wc.mainFrame.processId&&frame.routingId===wc.mainFrame.routingId&&local(frame.url)&&
+       (!originKey||headers[originKey]===origin)){
+     const token=readFileSync(path.join(installRoot,'control-token'),'utf8').trim();
+     if(token){
+      headers['X-RADAZ-Network']=require('node:crypto').createHmac('sha256',token).update('private-network-v1').digest('hex');
+      // Chromium may omit Origin for a local same-origin request. Both the
+      // gateway and the receiver use the verified RADAZ document's origin.
+      if(originKey)delete headers[originKey];
+      headers.Origin=origin;
+     }
+    }
+   }catch{} // Frame navigated/closed, or the installation identity is unavailable.
   }
   if(owned(details)&&(!headers.Origin||headers.Origin===origin)){
    headers.Origin='http://localhost:5173';

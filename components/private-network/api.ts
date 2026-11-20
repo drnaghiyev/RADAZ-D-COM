@@ -20,7 +20,13 @@ export function usePrivateDesktop(){const [allowed,setAllowed]=useState(false);u
 export async function networkCall<T>(action:string,body:Record<string,unknown>={}):Promise<T>{
   if(!isPrivateDesktop())throw Error('Bu modul Windows RADAZ Desktop üçün nəzərdə tutulub.');
   const response=await fetch('/local-archive-api/private-network/'+encodeURIComponent(action),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),cache:'no-store'});
-  const data=await response.json().catch(()=>null) as {error?:string}|null;
+  const data=await response.json().catch(()=>null) as {error?:string;code?:string}|null;
+  if(response.status===403&&(data?.code==='NETWORK_DESKTOP_REQUIRED'||data?.code==='NETWORK_DESKTOP_IDENTITY'||data?.error==='Bu əməliyyat yalnız Windows RADAZ Desktop üçün açıqdır.')){
+    const recovery=data?.code==='NETWORK_DESKTOP_IDENTITY'
+      ? 'Aktiv DICOM göndərişləri tamamlandıqdan sonra Windows-u yenidən başladın və Windows Başlat menyusundan RADAZ-ı açın.'
+      : 'Saatın yanındakı RADAZ işarəsindən “Çıxış” seçin və Windows Başlat menyusundan RADAZ-ı yenidən açın.';
+    throw Error('RADAZ bu pəncərənin Desktop bağlantısını təsdiqləyə bilmədi. İşinizi saxlayın. '+recovery+' Xəta təkrarlanarsa, Windows üçün RADAZ Setup ilə quraşdırmanı yeniləyin.');
+  }
   if(!response.ok||!data||data.error&&action!=='state')throw Error(String(data?.error||'DICOM Network xidməti cavab vermir.'));
   return data as T;
 }

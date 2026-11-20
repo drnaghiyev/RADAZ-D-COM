@@ -36,6 +36,32 @@ MAX_FILE = 512 * 1024 * 1024
 APP_VERSION = json.loads((Path(__file__).resolve().parent.parent / 'public/product.json').read_text(encoding='utf-8-sig'))['version']
 
 
+def private_network_token():
+    token = os.environ.get('RADAZ_DESKTOP_TOKEN', '').strip().lstrip('\ufeff').strip()
+    if token:
+        return token
+    # The installed receiver may start before the desktop controller. Only its
+    # own active installation can supply the missing Network credential.
+    root = os.environ.get('RADAZ_INSTALL_ROOT')
+    if not root:
+        local_data = os.environ.get('LOCALAPPDATA')
+        if not local_data:
+            return ''
+        root = Path(local_data) / 'Programs' / 'RADAZ'
+    try:
+        root = Path(root).resolve()
+        runtime = Path(__file__).resolve().parent.parent
+        if runtime != root / 'versions' / APP_VERSION:
+            return ''
+        active = json.loads((root / 'active.json').read_text(encoding='utf-8-sig'))
+        if not isinstance(active, dict) or active.get('version') != APP_VERSION:
+            return ''
+        token = (root / 'control-token').read_text(encoding='utf-8-sig').strip()
+        return token if re.fullmatch(r'[a-f0-9]{64}', token) else ''
+    except (OSError, ValueError):
+        return ''
+
+
 def addresses():
     return sorted({entry[4][0] for entry in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)
                    if not entry[4][0].startswith('127.')})
@@ -484,13 +510,16 @@ def handler_for(archive, removable=None):
             try:
                 parsed = urlsplit(self.path)
                 if parsed.path.startswith('/private-network/'):
-                    token = os.environ.get('RADAZ_DESKTOP_TOKEN', '')
-                    expected = hmac.new(token.encode(), b'private-network-v1', hashlib.sha256).hexdigest()
+                    proof = self.headers.get('X-RADAZ-Network', '')
                     origin = self.headers.get('Origin', '')
-                    if (os.name != 'nt' or not token or self.client_address[0] not in ('127.0.0.1', '::1')
+                    if (os.name != 'nt' or not proof or self.client_address[0] not in ('127.0.0.1', '::1')
                             or origin not in ('http://localhost:5173','http://127.0.0.1:5173','http://[::1]:5173')
-                            or not hmac.compare_digest(expected, self.headers.get('X-RADAZ-Network',''))):
-                        self.respond({'error':'Bu əməliyyat yalnız Windows RADAZ Desktop üçün açıqdır.'},403); return
+                    ):
+                        self.respond({'code':'NETWORK_DESKTOP_REQUIRED','error':'DICOM Network üçün RADAZ Desktop pəncərəsini açın.'},403); return
+                    token = private_network_token()
+                    expected = hmac.new(token.encode(), b'private-network-v1', hashlib.sha256).hexdigest()
+                    if not token or not re.fullmatch(r'[a-f0-9]{64}',proof) or not hmac.compare_digest(expected, proof):
+                        self.respond({'code':'NETWORK_DESKTOP_IDENTITY','error':'Lokal arxiv RADAZ Desktop bağlantısını təsdiqləyə bilmədi.'},403); return
                     if self.headers.get_content_type() != 'application/json':
                         self.respond({'error':'JSON tələb olunur'},415); return
                     size = int(self.headers.get('Content-Length', '0'))

@@ -17,6 +17,8 @@ import {LanguageSettings} from './language-settings';
 import {SmartVolumeSettings} from './smart-volume-settings';
 import {useTranslation} from '@/lib/i18n';
 import { AiSettings } from './ai-settings';
+import {NetworkSettingsLink} from './private-network/settings-link';
+import {usePrivateDesktop} from './private-network/api';
 
 type Product = { name:string;version:string;channel:string;owner:string;email:string;telegram:string;repository:string;updateRepository?:string;salesUrl:string;licenseRequired:boolean;currency:string;monthly:number|null;billingUrl?:string };
 type License = { modules?:Record<string,{valid:boolean;expiresAt:number}>;valid:boolean;required:boolean;deviceId:string;message:string;kind?:'owner'|'paid'|'trial'|'expired';trial?:{valid:boolean;startedAt?:number;expiresAt?:number;daysRemaining:number};claims?:{customer:string;plan:string;seats:number;expiresAt:number;licenseId:string;entitlement?:'owner'} };
@@ -55,6 +57,7 @@ async function releaseUpdate(force = false): Promise<Update> {
 async function api<T>(path:string,body?:unknown):Promise<T> { const r=await fetch(`/local-archive-api/${path}`,body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{cache:'no-store'}); const d=await r.json() as T & {error?:string};if(!r.ok)throw new Error(d.error||'Lokal xidmətə qoşulmaq mümkün olmadı');return d; }
 export function AppHelpMenu({initial=''}:{initial?:Panel}) {
   useUiTranslation();
+  const desktop=usePrivateDesktop();
   const {t}=useTranslation();
   const [panel,setPanel]=useState<Panel>(initial),[product,setProduct]=useState<Product|null>(null),[license,setLicense]=useState<License|null>(null),[update,setUpdate]=useState<Update|null>(null);
   const [key,setKey]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),[issue,setIssue]=useState('');
@@ -81,7 +84,7 @@ export function AppHelpMenu({initial=''}:{initial?:Panel}) {
   {panel && typeof document!=='undefined' && createPortal(<dialog ref={dialog} className="product-dialog" onCancel={()=>setPanel('')} onClick={e=>{if(e.target===dialog.current)setPanel('');}} aria-label={title}>
     <header><RadazLogo size={42}/><div><small>RADAZ · {product?.version||'…'}</small><h2>{title}</h2></div><button type="button" onClick={()=>setPanel('')} aria-label={tr('ui.close_c1cf9')}><X size={20}/></button></header>
     <div className="product-dialog-body">
-    {panel==='settings'&&<><LanguageSettings/><SmartVolumeSettings/></>}
+    {panel==='settings'&&<><LanguageSettings/>{desktop&&<fieldset className="language-settings"><legend>DICOM Network</legend><p>Cihaz bağlantısı, klinikalar, əməkdaşlar, növbələr və avtomatik göndərmə.</p><div className="product-actions"><NetworkSettingsLink/></div></fieldset>}<SmartVolumeSettings/></>}
     {panel==='ai'&&<AiSettings/>}
     {panel==='help'&&<><p>{tr('ui.load_a_dicom_file_or_folder_or_open_a_study_f_a9700')}</p><div className="help-cards"><article><b>{tr('ui.scroll_through_images_08ed8')}</b><p><strong>S</strong> {tr('ui.or_the_scroll_tool_drag_up_or_down_on_the_ima_4f08e')}</p></article><article><b>{tr('ui.printing_and_export_1ae88')}</b><p>{tr('ui.use_image_selection_to_build_a_print_list_cho_1a615')}</p></article><article><b>{tr('ui.ai_assistant_and_report_fd718')}</b><p>{tr('ui.all_series_from_the_active_study_open_in_the_e8828')}</p></article><article><b>{tr('ui.receive_dicom_from_a_device_7b268')}</b><p>{tr('ui.the_local_archive_shows_its_ae_title_ip_and_p_9c768')}</p></article></div><button onClick={()=>open('support')}>{tr('ui.contact_support_9352c')}</button></>}
     {panel==='keys'&&<dl className="shortcut-list">{[['N','Neqativ / pozitiv'],['O','Ox'],['Q','Qələm'],['K','3D kursor'],['S','Listələ / barmaqla sürüşdür'],['W','Pəncərələmə'],['Orta düymə + sürüklə','Görüntünü daşı'],['Sağ düymə + sürüklə','Zoom'],['Sağ klik','Ölçmə üçün silmə menyusu'],['Ctrl+D','Cari kəsitdə bütün ölçüləri sil'],['Delete','Seçilmiş ölçünü sil'],['P','Görüntünü sürüşdür'],['Z','Yaxınlaşdır'],['Ctrl + siçan çarxı','Görüntünü böyüt / kiçilt'],['Siçan çarxı','Əvvəlki / növbəti kəsit'],['Ctrl+[ / Ctrl+]','90° sola / sağa fırlat'],['Ctrl+Shift+[ / ]','Üfüqi / şaquli çevir'],['F1','Ağciyər pəncərəsi'],['F2','Qarın pəncərəsi'],['F3','Sümük pəncərəsi'],['F4','Beyin pəncərəsi'],['1–4','Görüntü panellərinin sayı'],['F11','Siçan görüntü üzərindədirsə tam ekran'],['F10','Yardım'],['Ctrl+F10','Proqram haqqında']].map(([k,v])=><div key={k}><dt><kbd>{k}</kbd></dt><dd>{v}</dd></div>)}</dl>}

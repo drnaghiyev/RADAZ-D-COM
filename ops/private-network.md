@@ -2,11 +2,13 @@
 
 ## Noutbukda ilk açılış
 
-1. RADAZ Desktop-da **Local Arxiv** düyməsinin yanındakı oxu basıb **DICOM Network** seçin.
+1. Windows-da RADAZ-ı açın. Əsas pəncərədə **Ayarlar → DICOM Network ayarları** seçin. Bu pəncərədə bağlantını, cihazları, klinikaları, əməkdaşları, növbələri və avtomatik göndərməni idarə edə bilərsiniz. Gələn və gedən müayinələr üçün **Local Arxiv** düyməsinin yanındakı oxdan **DICOM Network** seçin.
 2. **Bağlantı və qəbul ayarları** bölməsində **Bu noutbukda şəxsi şəbəkə yarat** formasına administratorun hesab ID-sini və adını yazın. **Yerli xidməti qur** düyməsini basın. Bu seçim yalnız həmin kompüterin özündə işləyən koordinator yaradır.
 3. **Klinikalar və radioloqlar** bölməsində klinikanı yaradın və ayrıca klinika administratorunun hesab ID-sini göstərin. Super administrator klinika və cihazları idarə edir. Klinik görüntülərə baxış üçün ayrıca radioloq və ya baxış hesabı, təsdiqlənmiş cihaz və konkret göndəriş tələb olunur.
 4. Administrator üçün birdəfəlik dəvət yaradın və onu birbaşa həmin şəxsə çatdırın. Dəvət 15 dəqiqə etibarlıdır. İstifadəçi öz Windows profilində koordinator ünvanını, dəvəti və cihaz adını daxil edir. Klinikalararası internet bağlantısı üçün aşağıdakı xarici xidmət tələb olunur.
 5. Klinika administratoru siyahıya işçiləri əlavə edir və hər birinə bu klinikadakı işi üçün lazım olan icazələri verir. Arxivə endirəcək radioloqa **qəbul** və **endirmə**, operatora **göndərmə** icazəsi verin. Bir cihazı əlavə klinikaya bağlamaq üçün həmin hesab ID-sinə ikinci klinikanın dəvətindən istifadə edin.
+
+Yenilənmədən sonra Desktop bağlantısını təsdiqləmək barədə bildiriş görsəniz, əvvəlcə açıq işinizi saxlayın. Windows-da saatın yanındakı RADAZ işarəsindən **Çıxış** seçin, sonra Başlat menyusundan **RADAZ** proqramını yenidən açın.
 
 ## Göndəriş, qəbul və növbə
 

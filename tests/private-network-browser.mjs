@@ -6,6 +6,58 @@ const base=process.env.RADAZ_TEST_URL||'http://localhost:5488/';
 const doctor={id:'dr1',name:'QA doctor',role:'radiologist',active:true,permissions:['receive','download']};
 const admin={id:'admin',name:'QA coordinator',role:'coordinator',active:true,permissions:['send','receive','download','forward','manage_schedule','view_status']};
 const mock={enabled:true,configured:true,online:true,user:admin,membership:admin,members:[admin,doctor],clinics:[{id:'alpha',name:'Klinika A'}],clinic:'alpha',queue:[],deliveries:[],sent:[],history:[],policy:{}};
+test('Viewer settings opens the desktop network settings window and reuses it',async()=>{
+ const browser=await chromium.launch({headless:true,executablePath:process.env.RADAZ_CHROME||'C:/Program Files/Google/Chrome/Application/chrome.exe'});
+ try{
+  const context=await browser.newContext({viewport:{width:2560,height:1440},userAgent:'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0.0.0 Electron/39.0.0 Safari/537.36'});
+  let state={...mock,membership:{...admin,role:'admin'},superAdmin:true};
+  let denied=null;
+  await context.route('**/local-archive-api/**',route=>{
+   const action=new URL(route.request().url()).pathname.split('/').at(-1);
+   if(action==='state'&&denied)return route.fulfill({status:403,json:denied});
+   return route.fulfill({json:action==='state'?state:action==='license'?{valid:true,kind:'owner',required:true}:{}});
+  });
+  const viewer=await context.newPage();
+  await viewer.goto(base);
+  await viewer.getByRole('button',{name:'Yardım və lisenziya',exact:true}).click();
+  await viewer.getByRole('menuitem',{name:'Ayarlar',exact:true}).click();
+  const link=viewer.getByRole('dialog',{name:'Ayarlar',exact:true}).getByRole('link',{name:'DICOM Network ayarları'});
+  const [settings]=await Promise.all([viewer.waitForEvent('popup'),link.click()]);
+  await settings.getByRole('heading',{name:'Cihaz və bağlantı'}).waitFor();
+  const nav=settings.getByRole('navigation',{name:'DICOM Network ayarları'});
+  assert.deepEqual(await nav.getByRole('button').allTextContents(),['Bağlantı və qəbul ayarları','Klinikalar və radioloqlar','Növbə cədvəli','Avtomatik göndərmə']);
+  await nav.getByRole('button',{name:'Klinikalar və radioloqlar'}).click();
+  await settings.getByRole('heading',{name:'Klinika yarat'}).waitFor();
+  await settings.getByRole('heading',{name:'Klinikanın cihazları'}).waitFor();
+  await nav.getByRole('button',{name:'Növbə cədvəli'}).click();
+  await settings.getByRole('button',{name:'Növbə əlavə et'}).waitFor();
+  await nav.getByRole('button',{name:'Avtomatik göndərmə'}).click();
+  await settings.getByRole('heading',{name:'Avtomatik göndərmə'}).waitFor();
+  await link.click();
+  await settings.getByRole('heading',{name:'Cihaz və bağlantı'}).waitFor();
+  assert.equal(context.pages().length,2);
+  state={enabled:false,configured:false,online:false};
+  const retry=settings.getByRole('button',{name:'Yenilə',exact:true});
+  await retry.click();
+  await settings.getByRole('button',{name:'Qeydiyyata al'}).waitFor();
+  assert.equal(await nav.getByRole('button',{name:'Klinikalar və radioloqlar'}).isDisabled(),true);
+  for(const error of [{code:'NETWORK_DESKTOP_REQUIRED'},{code:'NETWORK_DESKTOP_IDENTITY'},{error:'Bu əməliyyat yalnız Windows RADAZ Desktop üçün açıqdır.'}]){
+   denied=error;await retry.click();
+   await settings.getByRole('alert').filter({hasText:/Windows Başlat menyusundan/}).waitFor();
+   denied=null;await retry.click();
+   await settings.getByRole('button',{name:'Qeydiyyata al'}).waitFor();
+   assert.equal(await settings.getByRole('alert').count(),0);
+  }
+  const web=await browser.newPage();
+  let networkRequests=0;
+  await web.route('**/local-archive-api/license',route=>route.fulfill({json:{valid:true,kind:'owner',required:true}}));
+  await web.route('**/local-archive-api/private-network/**',async route=>{networkRequests++;await route.abort();});
+  await web.goto(new URL('private-network/settings',base).href);
+  await web.getByText('Windows RADAZ Desktop proqramında açın.').waitFor();
+  assert.equal(await web.getByRole('navigation',{name:'DICOM Network ayarları'}).count(),0);
+  assert.equal(networkRequests,0);
+ }finally{await browser.close();}
+});
 test('Desktop network checks only selected archive studies and keeps web access disabled',async()=>{
  const browser=await chromium.launch({headless:true,executablePath:process.env.RADAZ_CHROME||'C:/Program Files/Google/Chrome/Application/chrome.exe'});
  try{
