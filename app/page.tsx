@@ -23,6 +23,8 @@ import {MeasurementSettings,useMeasurementUnit} from '@/components/measurement-s
 import { measurementVariables } from '@/lib/measurement-theme';
 import { RadazLogo, RadazTagline } from '@/components/radaz-logo';
 import { AppHelpMenu, useViewerLicense } from '@/components/app-product';
+import {PrivateNetworkNotice} from '@/components/private-network/notification';
+import {usePrivateDesktop} from '@/components/private-network/api';
 import { openRecordsWindow, registerRecordsWindow, registerViewer, requestedStudies } from '@/lib/viewer-session';
 import {publishDetachedSource,readDetachedSource} from '@/lib/detached-viewer';
 import {ViewportMouseControls} from '@/components/viewport-mouse-controls';
@@ -465,6 +467,7 @@ export function ViewportPane({ onHover, projectionViews, anatomyControl, anatomy
 
 export default function Home({ detachedMode, initialFiles }: { detachedMode?: DetachedMode; initialFiles?:File[] }) {
   useUiTranslation();
+  const privateDesktop=usePrivateDesktop();
   const {limited,label:licenseStatus}=useViewerLicense();
   const [ready, setReady] = useState(false);
   const anatomyVolume=useAnatomyVolume();
@@ -1436,6 +1439,7 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
       event.preventDefault(); event.stopPropagation();
       if (!limited) void dropSources(event.dataTransfer.items, event.dataTransfer.files);
     }}>
+    {privateDesktop&&!detachedMode&&<PrivateNetworkNotice/>}
     <WorkProgress className="import-job-progress floating-job-progress" progress={floatingProgress?jobProgress:null}/><header className={`topbar ${toolbarMore?'toolbar-more-open':''}`}>
       <ToolbarOverflow/>
       {!detachedMode && <div className="brand"><RadazLogo size={34}/><span><strong>RADAZ</strong><RadazTagline/></span></div>}
@@ -1464,7 +1468,7 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
 </DropdownMenuContent></DropdownMenu></div>
         <button type="button" disabled={limited} title={tr('ui.ai_assistant_eb79d')} aria-label={tr('ui.ai_assistant_eb79d')} onClick={openReport}><Sparkles size={18}/><span>{tr('ui.ai_assistant_eb79d')}</span></button>
         <button type="button" title="RADAZ Voice" aria-label="RADAZ Voice" onClick={()=>{const win=window.open("https://radaz.space/voice/","radaz-cloud-voice","popup");if(win)win.focus();else setStatus("RADAZ Voice pəncərəsi açıla bilmədi");}}><Mic size={18}/><span>RADAZ Voice</span></button>
-        <div className="workspace-split" key="archive"><button type="button" title={tr('ui.local_archive_c13fe')} aria-label={tr('ui.local_archive_c13fe')} onClick={async () => { if (!await openRecordsWindow('archive')) setStatus('Local arxiv vərəqəsi açıla bilmədi'); }}><Database size={18}/><span>{tr('ui.local_archive_c13fe')}</span></button><DropdownMenu><DropdownMenuTrigger asChild><button className="workspace-options" aria-label="archive açılış seçimləri"><ChevronDown/></button></DropdownMenuTrigger><DropdownMenuContent><DropdownMenuItem toolbarId="archive-main" onSelect={()=>setRecordsPage('archive')}>Əsas viewer-də aç</DropdownMenuItem><DropdownMenuItem toolbarId="archive-window" onSelect={()=>void openRecordsWindow('archive')}>Ayrı pəncərədə aç</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>
+        <div className="workspace-split" key="archive"><button type="button" title={tr('ui.local_archive_c13fe')} aria-label={tr('ui.local_archive_c13fe')} onClick={async () => { if (!await openRecordsWindow('archive')) setStatus('Local arxiv vərəqəsi açıla bilmədi'); }}><Database size={18}/><span>{tr('ui.local_archive_c13fe')}</span></button><DropdownMenu><DropdownMenuTrigger asChild><button className="workspace-options" aria-label="archive açılış seçimləri"><ChevronDown/></button></DropdownMenuTrigger><DropdownMenuContent><DropdownMenuItem toolbarId="archive-main" onSelect={()=>setRecordsPage('archive')}>Əsas viewer-də aç</DropdownMenuItem><DropdownMenuItem toolbarId="archive-window" onSelect={()=>void openRecordsWindow('archive')}>Ayrı pəncərədə aç</DropdownMenuItem>{privateDesktop&&<DropdownMenuItem toolbarId="private-network-window" onSelect={()=>window.open('/private-network','radaz-private-network','popup')?.focus()}>DICOM Network</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu></div>
         <div className="workspace-split" key="pacs"><button type="button" title={tr('ui.pacs_studies_d77a3')} aria-label={tr('ui.pacs_studies_d77a3')} onClick={async () => { if (!await openRecordsWindow('pacs')) setStatus('PACS vərəqəsi açıla bilmədi'); }}><ServerCog size={18}/><span>PACS</span></button><DropdownMenu><DropdownMenuTrigger asChild><button className="workspace-options" aria-label="pacs açılış seçimləri"><ChevronDown/></button></DropdownMenuTrigger><DropdownMenuContent><DropdownMenuItem toolbarId="pacs-main" onSelect={()=>setRecordsPage('pacs')}>Əsas viewer-də aç</DropdownMenuItem><DropdownMenuItem toolbarId="pacs-window" onSelect={()=>void openRecordsWindow('pacs')}>Ayrı pəncərədə aç</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>
       </ToolbarGroup>}
         {!limited && detachedMode !== '3d' && <ViewerOutputControls panes={Object.entries(currentImages).map(([panel, imageId]) => ({ panel, imageId, series: [...seriesList, ...(mprData?.planes || [])].find(item => item.imageIds.includes(imageId)) }))} panel={workspace === 'mpr' ? mprActive : active} imageId={currentImages[workspace === 'mpr' ? mprActive : active]} series={workspace === 'mpr' ? mprData?.planes.find(item => item.imageIds.includes(currentImages[mprActive])) : currentSeries} allSeries={seriesList} datasetVersion={datasetVersion} onStatus={setStatus}/>}

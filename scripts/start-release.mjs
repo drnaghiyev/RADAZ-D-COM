@@ -48,6 +48,10 @@ void (async()=>{
 })();
 const server=http.createServer((req,res)=>{
  const pathname=new URL(req.url,'http://localhost').pathname;
+ if(pathname.startsWith('/local-archive-api/private-network/') &&
+    (!installRoot || req.method !== 'POST' || !localAiRequest(req))) {
+  res.writeHead(403,{'Content-Type':'application/json'});res.end('{"error":"Windows Desktop tələb olunur"}');return;
+ }
  if(pathname.startsWith('/smart-volume-api/')){void smartVolume.handle(req,res);return;}
  if(pathname.startsWith('/anatomy-volume/')){void anatomyVolume.handle(req,res);return;}
  if(pathname.startsWith('/local-archive-api/bridge/')&&!localAiRequest(req,['application/json','application/dicom'])){res.writeHead(403,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'RADAZBRIDGE göndərişini bu kompüterdəki RADAZ-da açın.'}));return;}

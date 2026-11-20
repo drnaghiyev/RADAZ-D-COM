@@ -209,6 +209,23 @@ class ReceiverTests(unittest.TestCase):
         stream = io.BytesIO(); ds.save_as(stream, enforce_file_format=True)
         self.archive.store(stream.getvalue(), ds)
 
+    def test_manual_network_staging_does_not_also_trigger_automatic_routing(self):
+        with patch('private_network_sync.observe') as observe:
+            for source in ('private-network-stage', 'pacs'):
+                stream = io.BytesIO()
+                image().save_as(stream, enforce_file_format=True)
+                req = Request(self.url + '/import', stream.getvalue(), headers={
+                    'Content-Type': 'application/dicom', 'X-RADAZ-Import-Source': source,
+                    'X-RADAZ-Import-AE': 'QA_PACS'})
+                with urlopen(req) as response:
+                    self.assertEqual(response.status, 200)
+                if source == 'private-network-stage':
+                    observe.assert_not_called()
+        self.assertEqual(self.archive.status()['instanceCount'], 2)
+        observe.assert_called_once()
+        self.assertIn('pacs', observe.call_args.args)
+        self.assertIn('QA_PACS', observe.call_args.args)
+
     def test_bulk_delete_removes_only_selected_files_and_survives_restart(self):
         other = image()
         self.save_image(self.ds); self.save_image(other)

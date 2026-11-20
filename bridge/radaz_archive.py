@@ -176,7 +176,7 @@ class Archive:
                 self.start()
                 raise
 
-    def store(self, data: bytes, ds):
+    def store(self, data: bytes, ds, network_source=None, source_ae=""):
         if len(data) > MAX_FILE:
             raise ValueError('DICOM faylı 512 MB limitini keçir')
         item = metadata(ds)
@@ -207,6 +207,16 @@ class Archive:
                 db.commit()
             finally:
                 temporary.unlink(missing_ok=True)
+        network = getattr(self, 'private_network', None)
+        if network_source and network is not None:
+            try:
+                from private_network_sync import observe
+                observe(network, item['uid'], item['sopUID'], item['modality'], network_source,
+                        source_ae, str(getattr(ds,'StationName','')))
+            except Exception:
+                # An optional transfer queue must never fail a committed archive write.
+                import logging
+                logging.getLogger(__name__).warning('Private network observation unavailable')
         return True
 
     def receive(self, event):
@@ -214,7 +224,7 @@ class Archive:
             ds = event.dataset
             if str(ds.SOPInstanceUID) != str(event.request.AffectedSOPInstanceUID) or str(ds.SOPClassUID) != str(event.request.AffectedSOPClassUID):
                 return 0xA900
-            self.store(event.encoded_dataset(), ds)
+            self.store(event.encoded_dataset(), ds, 'archive', str(event.assoc.requestor.ae_title).strip())
             return 0x0000
         except ValueError as error:
             self.error = str(error)
@@ -316,6 +326,14 @@ def handler_for(archive, removable=None):
     product = ProductService(archive.root)
     ai = AiService(product.root)
     sender = Sender(archive)
+    from private_network_client import NetworkClient
+    network = NetworkClient(archive)
+    archive.private_network = network
+    try:
+        network.start()
+    except (OSError, ValueError, TypeError):
+        # A damaged or unavailable Windows device profile must not prevent C-STORE.
+        network.last_error = 'DICOM Network cihaz profili oxunmadı.'
     lifecycle = {'posts': 0, 'stopping': False}
     lifecycle_lock = RLock()
     class Handler(BaseHTTPRequestHandler):
@@ -465,6 +483,22 @@ def handler_for(archive, removable=None):
                 self.respond({'error':'Origin icazəli deyil'},403); return
             try:
                 parsed = urlsplit(self.path)
+                if parsed.path.startswith('/private-network/'):
+                    token = os.environ.get('RADAZ_DESKTOP_TOKEN', '')
+                    expected = hmac.new(token.encode(), b'private-network-v1', hashlib.sha256).hexdigest()
+                    origin = self.headers.get('Origin', '')
+                    if (os.name != 'nt' or not token or self.client_address[0] not in ('127.0.0.1', '::1')
+                            or origin not in ('http://localhost:5173','http://127.0.0.1:5173','http://[::1]:5173')
+                            or not hmac.compare_digest(expected, self.headers.get('X-RADAZ-Network',''))):
+                        self.respond({'error':'Bu əməliyyat yalnız Windows RADAZ Desktop üçün açıqdır.'},403); return
+                    if self.headers.get_content_type() != 'application/json':
+                        self.respond({'error':'JSON tələb olunur'},415); return
+                    size = int(self.headers.get('Content-Length', '0'))
+                    if not 0 < size <= 1024 * 1024:
+                        self.respond({'error':'Sorğu ölçüsü düzgün deyil'},413); return
+                    payload = json.loads(self.rfile.read(size))
+                    if not isinstance(payload,dict): raise ValueError('Sorğu düzgün deyil')
+                    self.respond(network.action(parsed.path.removeprefix('/private-network/'), payload)); return
                 length = int(self.headers.get('Content-Length','0'))
                 limit = MAX_FILE if self.path in ('/import','/media/prepare','/video') or parsed.path in ('/bridge/file','/media/file') else 192 * 1024 * 1024 if self.path == '/print' else 29 * 1024 * 1024 if self.path == '/ai/transcribe' else 6 * 1024 * 1024 + 1024 if self.path == '/ai/template' else 17 * 1024 * 1024 if self.path == '/ai/report' else 65536 if self.path == '/studies/delete' else 8192
                 if not 0 < length <= limit:
@@ -547,7 +581,12 @@ def handler_for(archive, removable=None):
                     if self.headers.get_content_type() != 'application/dicom':
                         self.respond({'error':'DICOM content type tələb olunur'},415); return
                     ds = pydicom.dcmread(io.BytesIO(data), force=True)
-                    archive.store(data, ds)
+                    source = self.headers.get('X-RADAZ-Import-Source')
+                    # The explicit network composer dispatches only once the whole
+                    # remote study has been retrieved and its identifiers checked.
+                    observation_source = {'pacs': 'pacs', 'private-network-stage': None}.get(source, 'archive')
+                    archive.store(data, ds, observation_source,
+                                  self.headers.get('X-RADAZ-Import-AE','')[:16])
                     self.respond({'ok':True})
                 elif self.path == '/studies/delete':
                     if self.headers.get_content_type() != 'application/json':

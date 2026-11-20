@@ -110,7 +110,7 @@ export async function retrieveRemoteStudy(endpoint: string, token: string, study
 }
 
 /** Full-study export: paginated metadata, then one original instance at a time. */
-export async function* streamRemoteStudy(endpoint: string, token: string, studyUID: string, expected: number): AsyncGenerator<File> {
+export async function* streamRemoteStudy(endpoint: string, token: string, studyUID: string, expected: number, verify?: (file: File, item: Readonly<{sop:string;series:string}>) => Promise<void>): AsyncGenerator<File> {
   const base = `${baseURL(endpoint)}/studies/${encodeURIComponent(studyUID)}`;
   const catalog: { sop: string; series: string }[] = [], seen = new Set<string>();
   for (let offset = 0; ; offset += 200) {
@@ -132,6 +132,8 @@ export async function* streamRemoteStudy(endpoint: string, token: string, studyU
   for (const item of catalog) {
     const response = await request(`${base}/series/${encodeURIComponent(item.series)}/instances/${encodeURIComponent(item.sop)}`, token, 'multipart/related; type="application/dicom"; transfer-syntax=*');
     const bytes = dicomPart(await response.arrayBuffer(), response.headers.get('content-type') || '');
-    yield new File([Uint8Array.from(bytes)], `${item.sop}.dcm`, { type: 'application/dicom' });
+    const file = new File([Uint8Array.from(bytes)], `${item.sop}.dcm`, { type: 'application/dicom' });
+    if (verify) await verify(file,item);
+    yield file;
   }
 }

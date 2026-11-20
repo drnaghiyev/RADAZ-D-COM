@@ -1,0 +1,139 @@
+"""Synthetic two-workstation delivery through the real coordinator and archive APIs."""
+import hashlib
+import json
+import sys
+import tempfile
+import threading
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'bridge'))
+from removable_media_test import write_image
+from radaz_archive import Archive
+from private_network_authority import Authority, make_server
+from private_network_client import NetworkClient, RemoteError, crypto, endpoint
+
+
+class DeliveryTests(unittest.TestCase):
+    def test_outbox_resume_receipts_and_encrypted_archive_import(self):
+        with tempfile.TemporaryDirectory(prefix='radaz-private-network-') as folder:
+            root = Path(folder)
+            hub = Authority(root/'hub.sqlite')
+            server = make_server(hub,'127.0.0.1',0)
+            thread = threading.Thread(target=server.serve_forever,daemon=True)
+            thread.start()
+            self.addCleanup(server.server_close)
+            self.addCleanup(server.shutdown)
+            url='http://127.0.0.1:'+str(server.server_address[1])
+            # Poll deterministically; asynchronous workers run the same methods.
+            with patch.object(NetworkClient,'start'):
+                def enroll(name, invite):
+                    client=NetworkClient(Archive(root/name/'archive',http_only=True),root/name/'network')
+                    client.register({'url':url,'invite':invite,'name':name})
+                    return client
+                admin=enroll('owner',hub.bootstrap('owner','Test network owner')['invite'])
+                clinic=admin.rpc('create_clinic',{'name':'Clinical QA','admin':'manager'})['id']
+                manager=enroll('manager',admin.rpc('invite',{'clinic':clinic,'user':'manager'})['invite'])
+                def add(user,role,perm):
+                    manager.rpc('member',{'clinic':clinic,'role':role,'user':user,'permissions':perm})
+                    return enroll(user,manager.rpc('invite',{'clinic':clinic,'user':user})['invite'])
+                sender=add('sender','operator',['send'])
+                receiver=add('reader','radiologist',['receive','download'])
+                viewer=add('view-only','viewer',['receive'])
+                originals={}
+                for i in (1,2):
+                    file=root/f'fixture-{i}.dcm'
+                    ds=write_image(file,i)
+                    raw=file.read_bytes()
+                    originals[hashlib.sha256(raw).hexdigest()]=raw
+                    sender.archive.store(raw,ds)
+                study=str(ds.StudyInstanceUID)
+                submission=sender.send({'clinic':clinic,'study':study,'mode':'direct','recipients':['reader']})
+                viewjob=sender.send({'clinic':clinic,'study':study,'mode':'direct','recipients':['view-only']})
+                # Restart before dispatch. No duplicate local payload after the archive entry is removed.
+                sender=NetworkClient(sender.archive,sender.root)
+                self.assertIn(submission['id'],[job['id'] for job in sender.state({'clinic':clinic})['queue']])
+                self.assertEqual(sender.archive.delete_studies([study])['deleted'],1)
+                sender.dispatch()
+                inbox=receiver.rpc('state',{})['deliveries']
+                self.assertEqual(len(inbox),1)
+                self.assertEqual(inbox[0]['state'],'queued')
+                received=receiver.rpc('accept',{'delivery':inbox[0]['id']})
+                deliveries=sender.rpc('state',{})['sent']
+                delivery=next(d for d in deliveries if d['recipient']=='reader')
+                sender.transfer(delivery,True)
+                self.assertEqual(len(hub.blobs),2)
+                for packet in hub.blobs.values():
+                    self.assertNotIn(b'RADAZ^MEDIA^TEST',packet[1])
+                self.assertFalse(receiver.archive.studies())
+                first,second=received['files']
+                sha=first['sha256']
+                incoming=receiver.rpc('state',{})['deliveries'][0]
+                receiver.transfer({**incoming,'files':[first]},False)
+                self.assertTrue(receiver.received(study))
+                self.assertEqual(len(receiver.archive.instances(study)),1)
+                # Resume after coordinator loses temporary relay cache. Only missing SHA is uploaded.
+                hub.blobs.clear()
+                sender.transfer(next(d for d in sender.rpc('state',{})['sent'] if d['recipient']=='reader'),True)
+                self.assertEqual(set(hub.blobs),{(delivery['id'],second['sha256'])})
+                receiver=NetworkClient(receiver.archive,receiver.root)
+                receiver.transfer(receiver.rpc('state',{})['deliveries'][0],False)
+                sent=sender.rpc('state',{})['sent']
+                self.assertTrue(any(d['recipient']=='reader' and d['state']=='complete' for d in sent))
+                sender.finish_outbox(sent)
+                self.assertFalse((sender.root/'outbox'/submission['id']).exists())
+                self.assertEqual({hashlib.sha256(p.read_bytes()).hexdigest() for p in
+                                  (receiver.archive.root/'instances').rglob('*.dcm')},set(originals))
+                with self.assertRaises(RemoteError):
+                    admin.rpc('accept',{'delivery':delivery['id']})
+                view=viewer.rpc('state',{})['deliveries'][0]
+                vd=view['id']
+                with self.assertRaises(RemoteError):
+                    viewer.rpc('accept',{'delivery':vd})
+                viewer.rpc('accept',{'delivery':vd,'viewOnly':True})
+                params={'delivery':vd,'sha256':view['files'][0]['sha256'],'frame':0}
+                self.assertTrue(viewer.preview(params)['pending'])
+                current=next(d for d in sender.rpc('state',{})['sent'] if d['id']==vd)
+                sender.transfer(current,True)
+                raster=viewer.preview(params)
+                self.assertEqual(raster['frames'],1)
+                self.assertTrue(raster['image'].startswith('data:image/jpeg;base64,/9j/'))
+                viewer.transfer(viewer.rpc('state',{})['deliveries'][0],False)
+                self.assertEqual(viewer.archive.studies(),[])
+                # The normal device ticks prefer a reachable authenticated peer.
+                # An already archived object has the same digest after the second delivery.
+                p=root/'fixture-1.dcm'
+                ds=write_image(p,1)
+                sender.archive.store(p.read_bytes(),ds)
+                peerjob=sender.send({'clinic':clinic,'study':study,'mode':'direct','recipients':['reader']})
+                receiver.configure({'clinicModes':{clinic:'auto'}})
+                try:
+                    sender.tick()
+                    receiver.tick()
+                    sender.tick()
+                    self.assertEqual(len(receiver.peer.pending),1)
+                    receiver.tick()
+                    sender.tick()
+                    jobs=sender.state({'clinic':clinic})['queue']
+                    self.assertEqual(next(j['state'] for j in jobs if j['id']==peerjob['id']),'complete')
+                    self.assertEqual(len(receiver.archive.instances(study)),2)
+                finally:
+                    receiver.configure({'enabled':False})
+                    sender.configure({'enabled':False})
+                with self.assertRaises(ValueError):
+                    sender.send({'study':study,'clinic':clinic})
+                self.assertFalse(NetworkClient(sender.archive,sender.root).settings()['enabled'])
+
+    def test_crypto_rejects_different_context_and_bad_ciphertext(self):
+        keys=json.loads(crypto('keygen'))
+        raw=b'012345'
+        packet=crypto('seal',key=keys['publicKey'],context='clinic/device/instance',data=raw)
+        self.assertEqual(crypto('open',key=keys['privateKey'],context='clinic/device/instance',data=packet),raw)
+        for context,data in [('foreign',packet),('clinic/device/instance',packet[:-1]+bytes([packet[-1]^1]))]:
+            with self.assertRaises(ValueError):
+                crypto('open',key=keys['privateKey'],context=context,data=data)
+        for bad in ('http://other.test','https://user:pass@clinic.example','https://clinic.example#fragment'):
+            with self.assertRaises(ValueError):endpoint(bad)
+
+if __name__=='__main__':unittest.main()

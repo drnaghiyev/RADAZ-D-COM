@@ -53,10 +53,10 @@ export async function diskFiles(study: string, onProgress?: (done: number, total
   await flush();
   return files;
 }
-export async function saveDiskFiles(files: File[], onProgress?: (done: number, total: number) => void) {
+export async function saveDiskFiles(files: File[], onProgress?: (done: number, total: number) => void, pacsAE?: string, networkStage = false) {
   let completed=0;
   for await (const _ of prefetchOrdered(files, async file => {
-    await request('/import', { method: 'POST', headers: { 'Content-Type': 'application/dicom' }, body: file }, 60000);
+    await request('/import', { method: 'POST', headers: { 'Content-Type': 'application/dicom', ...(networkStage || pacsAE !== undefined ? {'X-RADAZ-Import-Source':networkStage ? 'private-network-stage' : 'pacs','X-RADAZ-Import-AE':pacsAE || ''} : {}) }, body: file }, 60000);
   },4,file=>file.size,32*1024*1024)) onProgress?.(++completed,files.length);
 }
 export const diskStudyOpened = async (study: string) => request('/opened', {

@@ -1,4 +1,7 @@
 'use client';
+import {stageNetworkPacs} from '@/components/private-network/prepare-pacs';
+import {NetworkSend} from '@/components/private-network/entry';
+import {usePrivateDesktop} from '@/components/private-network/api';
 import {ToolbarWorkspace, ToolbarGroup, ToolbarOverflow} from '@/components/toolbar-workspace';
 import {useTranslation as useUiTranslation,translate as tr} from '@/lib/i18n';
 
@@ -25,6 +28,7 @@ const validAeTitle = (title: string) => /^[\x20-\x7E]{1,16}$/.test(title) && !ti
 const modalityOptions = ['CR','DX','CT','MR','XA','MG','US','PT','NM','RF','RG','PX','ES','XC','GM','SC','OT','SR'];
 
 export default function PacsPage({embedded=false}:{embedded?:boolean}={}) {
+  const privateDesktop=usePrivateDesktop();
   useUiTranslation();
   const [locations, setLocations] = useState<PacsLocation[]>([]);
   const [selected, setSelected] = useState('');
@@ -227,7 +231,7 @@ export default function PacsPage({embedded=false}:{embedded?:boolean}={}) {
         const files=location.dicomwebUrl
           ? await retrieveRemoteStudy(location.dicomwebUrl,token,selectedStudy.uid,[item],(done)=>progress(count+done,expected))
           : await retrieveDimseStudy(location,aeTitle,listenerPort,selectedStudy.uid,[item.uid],(done)=>progress(count+done,expected));
-        if(!await saveArchiveFiles(files,(done,total)=>progress(count+done,expected,'PACS arxivə yazılır')))throw new Error('PACS fayllarında oxuna bilən DICOM görüntüsü tapılmadı');
+        if(!await saveArchiveFiles(files,(done,total)=>progress(count+done,expected,'PACS arxivə yazılır'),location.aeTitle))throw new Error('PACS fayllarında oxuna bilən DICOM görüntüsü tapılmadı');
         count+=files.length;
         if(destination==='media')mediaFiles.push(...files);
         if(destination==='viewer'){
@@ -284,7 +288,7 @@ export default function PacsPage({embedded=false}:{embedded?:boolean}={}) {
         for(const [seriesIndex,entry] of entries.entries()){
           const files=location.dicomwebUrl?await retrieveRemoteStudy(location.dicomwebUrl,token,item.uid,[entry],n=>progress(done+n,total)):
             await retrieveDimseStudy(location,aeTitle,listenerPort,item.uid,[entry.uid],n=>progress(done+n,total));
-          if(!await saveArchiveFiles(files,n=>progress(done+n,total)))throw Error(`${index+1}-ci müayinədə oxuna bilən DICOM tapılmadı`);
+          if(!await saveArchiveFiles(files,n=>progress(done+n,total),location.aeTitle))throw Error(`${index+1}-ci müayinədə oxuna bilən DICOM tapılmadı`);
           done+=files.length;
           if(index===0&&seriesIndex===0)await openStudyInViewer(item.uid,viewer);
           else refreshStudyInViewer(item.uid,viewer);
@@ -321,7 +325,7 @@ export default function PacsPage({embedded=false}:{embedded?:boolean}={}) {
       </div>
         <ToolbarGroup groupId="pacs-query" order={20} aria-label="PACS axtarış"><button className="records-primary pacs-search-button" title={tr('ui.search_e036c')} aria-label={tr('ui.search_e036c')} disabled={busy || !canSearch} onClick={() => { void search(); }}><Search size={16}/> {tr('ui.search_e036c')}</button>
         <button className="pacs-check-button" title={tr('ui.test_connection_f3128')} aria-label={tr('ui.test_pacs_connection_6608c')} disabled={busy || !canSearch} onClick={() => { void test(); }}><RefreshCw size={16}/></button></ToolbarGroup>
-      <ToolbarGroup className="pacs-action-toolbar" groupId="pacs-actions" order={30}><button title={`Seçilmişləri aç (${selection.checked.length})`} aria-label={`Seçilmişləri aç (${selection.checked.length})`} disabled={busy || !selection.checked.length} onClick={() => void openSelectedStudies()}><ExternalLink size={18}/><span>{tr('ui.open_selected_d1078')}{selection.checked.length})</span></button><button disabled={busy || (!selection.checked.length && !activeStudy)} onClick={() => void removeCopies()} title={tr('ui.delete_copies_downloaded_to_this_computer_ef549')} aria-label={tr('ui.delete_local_copies_ec8fe')}><Trash2 size={16}/><span>{tr('ui.delete_local_copies_ec8fe')}{selection.checked.length ? ` (${selection.checked.length})` : ''}</span></button><button type="button" title={tr('ui.pacs_configuration_f5584')} disabled={!!bridgeTransfers.activeKey} onClick={openConfig} aria-label={tr('ui.open_pacs_configuration_327fe')}><Settings2 size={18}/><span>{tr('ui.pacs_settings_3f4c4')}</span></button><RadazBridgeSettings disabled={busy}/><AppHelpMenu/></ToolbarGroup>
+      <ToolbarGroup className="pacs-action-toolbar" groupId="pacs-actions" order={30}><button title={`Seçilmişləri aç (${selection.checked.length})`} aria-label={`Seçilmişləri aç (${selection.checked.length})`} disabled={busy || !selection.checked.length} onClick={() => void openSelectedStudies()}><ExternalLink size={18}/><span>{tr('ui.open_selected_d1078')}{selection.checked.length})</span></button><button disabled={busy || (!selection.checked.length && !activeStudy)} onClick={() => void removeCopies()} title={tr('ui.delete_copies_downloaded_to_this_computer_ef549')} aria-label={tr('ui.delete_local_copies_ec8fe')}><Trash2 size={16}/><span>{tr('ui.delete_local_copies_ec8fe')}{selection.checked.length ? ` (${selection.checked.length})` : ''}</span></button><button type="button" title={tr('ui.pacs_configuration_f5584')} disabled={!!bridgeTransfers.activeKey} onClick={openConfig} aria-label={tr('ui.open_pacs_configuration_327fe')}><Settings2 size={18}/><span>{tr('ui.pacs_settings_3f4c4')}</span></button><RadazBridgeSettings disabled={busy}/><AppHelpMenu/>{privateDesktop&&<NetworkSend key="private-network-send" source="pacs" aeTitle={location?.aeTitle} busy={busy||!location} studies={visibleStudies.filter(s=>selection.checked.includes(s.uid))} prepare={async(uid,status,clinic)=>{if(!location)throw Error('PACS seçilməyib');const chosen=visibleStudies.find(s=>s.uid===uid);if(!chosen)throw Error('Seçilmiş müayinə tapılmadı.');return stageNetworkPacs(location,token,aeTitle,listenerPort,chosen,clinic,status);}}/>}</ToolbarGroup>
       <ToolbarOverflow/>
     </header>
     <div className="pacs-content">

@@ -30,6 +30,13 @@ explicit.extend(['scripts/release-signature.mjs','public/update-public.pem'])
 explicit.extend(['scripts/local-ai-request.mjs', 'bridge/radaz_ai.py', 'bridge/radaz_voice.py', 'bridge/radiology-profile.json'])
 explicit.extend(['scripts/local-anatomy-volume.mjs','scripts/anatomy-access.mjs','bridge/anatomy-models.json','bridge/anatomy_providers.py','bridge/radaz_anatomy_volume.py'])
 explicit.extend(['scripts/smart-volume-service.mjs','scripts/install-smart-volume.py','bridge/smart_volume_service.py','bridge/smart_volume_medsam.py','bridge/smart_volume_prompts.py'])
+explicit.extend([
+ 'bridge/private_network_client.py', 'bridge/private_network_crypto.mjs',
+ 'bridge/private_network_authority.py', 'bridge/private_network_dimse.py',
+ 'bridge/private_network_local.py', 'bridge/private_network_peer.py',
+ 'bridge/private_network_preview.py', 'bridge/private_network_routing.py',
+ 'bridge/private_network_sync.py', 'ops/private-network.md',
+])
 files={p:ROOT/p for p in explicit}
 for folder in ['dist/client','dist/server','dist/runtime','dist/node_modules','bridge/wheels','vendor/medsam2']:
  for p in (ROOT/folder).rglob('*'):

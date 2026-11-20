@@ -113,7 +113,7 @@ export async function deleteLocalStudies(studies: ArchiveStudy[]) {
 }
 
 /** Browser cache plus, when available, the local PC's permanent disk archive. */
-export async function saveArchiveFiles(files: File[], onProgress?: (done: number, total: number) => void): Promise<number> {
+export async function saveArchiveFiles(files: File[], onProgress?: (done: number, total: number) => void, pacsAE?: string): Promise<number> {
   const groups = new Map<string, { study: ArchiveStudy; instances: StoredInstance[]; series: Map<string, ArchiveSeries> }>();
   const now = Date.now();
   let index=0;
@@ -184,7 +184,7 @@ export async function saveArchiveFiles(files: File[], onProgress?: (done: number
   } finally { db.close(); }
   if (hasLocalArchiveEndpoint() && await receiverStatus().then(() => true).catch(() => false)) {
     const validFiles = [...groups.values()].flatMap(group => group.instances.map(instance => new File([instance.file], instance.filename, { type: 'application/dicom' })));
-    await saveDiskFiles(validFiles);
+    await saveDiskFiles(validFiles, undefined, pacsAE);
   }
   onProgress?.(files.length, files.length);
   return groups.size;

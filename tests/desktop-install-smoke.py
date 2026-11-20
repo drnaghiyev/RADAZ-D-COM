@@ -207,6 +207,14 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
         assert get('/radaz-installation.json')['activeVersion']==VERSION
         folder=install/'versions'/VERSION
         print(f'Actual installed {base_version} controller -> {VERSION} activation passed',flush=True)
+    # The archive starts even with networking disabled. Exercise the optional
+    # imports and bundled Node helper from the actual installed package.
+    run([folder/'runtime/python/python.exe', '-c',
+         'import json, radaz_pacs_bridge, private_network_authority, private_network_dimse, '
+         'private_network_local, private_network_peer, private_network_preview, '
+         'private_network_routing, private_network_sync; from private_network_client import crypto; '
+         'assert json.loads(crypto("keygen"))["publicKey"]'])
+    assert (folder/'ops/private-network.md').is_file()
     # A delayed startup from a superseded controller must fail before it can
     # stop the healthy gateway or switch the archive back to another version.
     before_stale=get('/radaz-runtime.json')['startedAt']
