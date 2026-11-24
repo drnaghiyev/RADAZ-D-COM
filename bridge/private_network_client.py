@@ -249,7 +249,7 @@ class NetworkClient:
         self.start()
         return self.local_state()
 
-    def send(self, data):
+    def snapshot_send(self, data):
         cfg = self.settings()
         if not cfg.get('enabled') or not cfg.get('token'):
             raise ValueError('Əvvəlcə DICOM Network cihazını qoşun.')
@@ -261,11 +261,14 @@ class NetworkClient:
         if ids is not None:
             ids = set(ids)
         with self.lock, self.db() as db:
-            existing = db.execute('SELECT clinic,study,state FROM jobs WHERE id=?',(request_id,)).fetchone()
+            existing = db.execute('SELECT clinic,study,state,error,remote,payload FROM jobs WHERE id=?',(request_id,)).fetchone()
             if existing:
-                if existing['clinic'] != clinic or existing['study'] != study:
+                intent=json.loads(existing['payload'])
+                if (existing['clinic'] != clinic or existing['study'] != study
+                        or intent.get('mode','direct')!=data.get('mode','direct')
+                        or intent.get('recipients',[])!=data.get('recipients',[])):
                     raise ValueError('Növbə identifikatoru başqa göndərişə aiddir.')
-                return {'id':request_id,'state':existing['state']}
+                return {'id':request_id,'state':existing['state'],'remote':existing['remote'],'error':existing['error']}
             out = self.root/'outbox'/request_id
             out.mkdir(parents=True,exist_ok=True)
             try:
@@ -296,8 +299,32 @@ class NetworkClient:
             except Exception:
                 shutil.rmtree(out,ignore_errors=True)
                 raise
-        self.wake.set()
         return {'id':request_id,'state':'queued'}
+
+    def send(self, data):
+        job=self.snapshot_send(data)
+        if job['state']=='error':
+            raise ValueError(job['error'])
+        if job['state']!='queued':
+            return job
+        if data.get('mode','direct') in ('direct','one','many','consult') and data.get('recipients'):
+            try:
+                self.dispatch(job['id'])
+            except (ConnectionError, TimeoutError):
+                # The snapshot and its idempotency key survive a lost reply or an offline relay.
+                pass
+            except RemoteError as error:
+                if error.status<500 and error.status not in (408,425,429):
+                    raise
+            finally:
+                self.start()
+            with self.db() as db:
+                job=db.execute('SELECT id,state,remote,error FROM jobs WHERE id=?',(job['id'],)).fetchone()
+                if job['state']=='error':
+                    raise ValueError(job['error'])
+                return dict(job)
+        self.wake.set()
+        return job
 
     def state(self, data):
         public = self.local_state()
@@ -414,9 +441,10 @@ class NetworkClient:
         if folder.exists():
             shutil.rmtree(folder)
 
-    def dispatch(self):
+    def dispatch(self,request_id=None):
         with self.db() as db:
-            rows=db.execute("SELECT id FROM jobs WHERE state='queued' ORDER BY created").fetchall()
+            rows=(db.execute("SELECT id FROM jobs WHERE state='queued' AND id=?",(request_id,)).fetchall()
+                  if request_id else db.execute("SELECT id FROM jobs WHERE state='queued' ORDER BY created").fetchall())
         for row in rows:
             with self.lock,self.db() as db:
                 job=db.execute("SELECT * FROM jobs WHERE id=? AND state='queued'",(row['id'],)).fetchone()
@@ -431,7 +459,7 @@ class NetworkClient:
                     raise
                 db.execute("UPDATE jobs SET state='submitted',remote=?,error='' WHERE id=?",(result['id'],job['id']))
 
-    def transfer(self, item, sending):
+    def transfer(self, item, sending, limit=None):
         delivery,study=safe_id(item['id']),item['study']
         cfg=self.settings()
         remote_state=item.get('state',item.get('status'))
@@ -443,6 +471,12 @@ class NetworkClient:
         if not sending and item.get('device')!=cfg.get('deviceId'):
             return
         received,uploaded=set(item.get('received',[])),set(item.get('uploaded',[]))
+        count=0
+        if limit is not None:
+            # Keep room on the relay for the recipient's other active studies.
+            limit=min(limit, max(0, 8-len(uploaded-received)))
+            if not limit:
+                return 0
         if sending:
             if not item.get('publicKey'):
                 return
@@ -491,6 +525,10 @@ class NetworkClient:
                     db.execute('INSERT OR IGNORE INTO imports VALUES(?)',(study,))
                 self.archive.store(raw,ds)
                 self.rpc('ack',{'delivery':delivery,'sha256':sha})
+            count+=1
+            if limit is not None and count>=limit:
+                break
+        return count
 
     def preview(self, data):
         delivery=safe_id(data.get('delivery'))
@@ -550,13 +588,21 @@ class NetworkClient:
             except Exception as error:
                 faults.append(str(error))
         sent=state.get('sent',[])
-        for delivery in sent:
+        relay=cfg.get('internet') or not self.peer
+        active=[item for item in sent if item.get('state',item.get('status'))=='accepted']
+        if relay:
+            active.sort(key=lambda item:item['total']-item['done'])
+        progressed=False
+        for delivery in active:
             try:
-                self.transfer(delivery,True)
+                sent_count=self.transfer(delivery,True,4 if relay else None)
+                progressed=bool(sent_count) or progressed
             except Exception as error:
                 faults.append(str(error))
         self.finish_outbox(sent)
         self.last_error='; '.join(dict.fromkeys(faults))[:512]
+        if active and relay and not faults:
+            return 0.25 if progressed else 3
 
     def finish_outbox(self, sent):
         groups={}
@@ -582,11 +628,12 @@ class NetworkClient:
             def loop():
                 while self.settings().get('enabled'):
                     self.wake.clear()
+                    interval=8
                     try:
-                        self.tick()
+                        interval=self.tick() or interval
                     except Exception as error:
                         self.last_error=str(error)[:512]
-                    self.wake.wait(8)
+                    self.wake.wait(interval)
             self.worker=threading.Thread(target=loop,name='RADAZ Private DICOM',daemon=True)
             self.worker.start()
 

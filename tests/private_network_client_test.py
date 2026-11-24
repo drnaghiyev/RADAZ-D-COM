@@ -17,6 +17,39 @@ from private_network_client import NetworkClient, RemoteError, crypto, endpoint
 
 
 class DeliveryTests(unittest.TestCase):
+    def test_online_studies_share_sender_and_relay_capacity(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            client=NetworkClient(Archive(root/'archive',http_only=True),root/'network')
+            client._settings=dict(enabled=True,token='synthetic-only',internet=True)
+            def prepare(identifier,total):
+                out=client.root/'outbox'/identifier
+                out.mkdir(parents=True)
+                files=[]
+                for i in range(total):
+                    raw=f'{identifier}/{i}'.encode()
+                    sha=hashlib.sha256(raw).hexdigest()
+                    (out/sha).write_bytes(raw)
+                    files.append(dict(uid='1.2.'+str(i+1),size=len(raw),sha256=sha))
+                with client.db() as db:
+                    db.execute("INSERT INTO jobs(id,remote,state) VALUES(?,?,'submitted')",(identifier,identifier))
+                return dict(id=identifier,transfer=identifier,state='accepted',publicKey='fixture-key',clinic='test',
+                            study='2.25.1',device='receiver',files=files,total=total,done=0,received=[],uploaded=[])
+            large,small=prepare('large',25),prepare('small',2)
+            uploads=[]
+            def put(method,path,blob,binary):
+                _,delivery,sha=path.split('/')
+                uploads.append(delivery)
+                (large if delivery=='large' else small)['uploaded'].append(sha)
+            with patch.object(client,'rpc',return_value={'sent':[large,small]}),patch.object(client,'request',side_effect=put),patch('private_network_client.crypto',return_value=b'fixture'):
+                client.tick()
+                self.assertEqual(uploads,['small']*2+['large']*4)
+                client.tick();client.tick()
+                self.assertEqual(uploads.count('large'),8)
+                large['received'].append(large['uploaded'].pop(0));large['done']=1
+                client.tick()
+                self.assertEqual(uploads.count('large'),9)
+
     def test_outbox_resume_receipts_and_encrypted_archive_import(self):
         with tempfile.TemporaryDirectory(prefix='radaz-private-network-') as folder:
             root = Path(folder)
@@ -62,9 +95,20 @@ class DeliveryTests(unittest.TestCase):
                     originals[hashlib.sha256(raw).hexdigest()]=raw
                     sender.archive.store(raw,ds)
                 study=str(ds.StudyInstanceUID)
-                submission=sender.send({'clinic':clinic,'study':study,'mode':'direct','recipients':['reader']})
+                selection={'clinic':clinic,'study':study,'mode':'one','recipients':['reader'],'requestId':'selected-reader'}
+                send_rpc=sender.rpc
+                def lose_reply(action,data):
+                    send_rpc(action,data)
+                    raise ConnectionError('Synthetic dropped server reply')
+                with patch.object(sender,'rpc',side_effect=lose_reply):
+                    self.assertEqual(sender.send(selection)['state'],'queued')
+                submission=sender.send(selection)
+                self.assertEqual(submission['state'],'submitted')
+                self.assertEqual(sender.send(selection)['remote'],submission['remote'])
+                with self.assertRaises(ValueError):
+                    sender.send({**selection,'recipients':['view-only']})
                 viewjob=sender.send({'clinic':clinic,'study':study,'mode':'direct','recipients':['view-only']})
-                # Restart before dispatch. No duplicate local payload after the archive entry is removed.
+                # Restart before receipt. The immutable snapshot survives removal of the input.
                 sender=NetworkClient(sender.archive,sender.root)
                 self.assertIn(submission['id'],[job['id'] for job in sender.state({'clinic':clinic})['queue']])
                 self.assertEqual(sender.archive.delete_studies([study])['deleted'],1)

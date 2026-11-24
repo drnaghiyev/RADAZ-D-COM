@@ -58,7 +58,10 @@ class DimseStageTests(unittest.TestCase):
         send=dict(clinic='clinic',study=self.params['study'],mode='direct',recipients=['recipient'],stageId=staged['stageId'])
         with self.assertRaises(ValueError):
             self.client.send({**send,'clinic':'different'})
-        job=self.client.send(send)
+        with patch.object(self.client,'start'), patch.object(self.client,'rpc',return_value={'id':'synthetic-transfer'}) as submit:
+            job=self.client.send(send)
+            self.assertEqual(job['state'],'submitted')
+            self.assertEqual(submit.call_args.args[0],'send')
         with self.client.db() as db:
             record=json.loads(db.execute('SELECT payload FROM jobs WHERE id=?',(job['id'],)).fetchone()[0])
         self.assertEqual({f['uid'] for f in record['files']},{str(ds.SOPInstanceUID) for ds in self.images})

@@ -229,13 +229,25 @@ test('Desktop network checks only selected archive studies and keeps web access 
  const context=await browser.newContext({viewport:{width:2560,height:1440},userAgent:'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0.0.0 Electron/39.0.0 Safari/537.36'});
  const today=new Date().toLocaleDateString('sv').replaceAll('-','');
  const studies=['2.25.1','2.25.2'].map((uid,i)=>({uid,patient:'TEST '+i,patientId:'qa',date:today,time:'120000',modality:'CT',description:'QA',series:[],imageCount:1,addedAt:1,size:1,storage:'disk'}));
- const calls=[];let dropOnce=false;
- await context.route('**/local-archive-api/**',route=>{const action=new URL(route.request().url()).pathname.split('/').at(-1);const payload=route.request().postDataJSON();calls.push({action,payload});if(action==='send'&&payload.study==='2.25.2'&&dropOnce){dropOnce=false;return route.abort('failed');}return route.fulfill({json:action==='state'?mock:action==='studies'?studies:action==='license'?{valid:true,required:true,kind:'owner'}:{ok:true}});});
+ const calls=[],jobs=new Map();let dropOnce=false,phase='queued';
+ await context.route('**/local-archive-api/**',route=>{
+  const action=new URL(route.request().url()).pathname.split('/').at(-1),payload=route.request().postDataJSON();
+  calls.push({action,payload});
+  if(action==='send'){
+   jobs.set(payload.requestId,{id:payload.requestId,remote:'transfer-'+payload.requestId,study:payload.study,state:'submitted'});
+   if(payload.study==='2.25.2'&&dropOnce){dropOnce=false;return route.abort('failed');}
+  }
+  const queue=[...jobs.values()];
+  const sent=queue.map(job=>({transfer:job.remote,recipient:'dr1',state:phase,done:phase==='complete'?2:phase==='accepted'?1:0,total:2}));
+  return route.fulfill({json:action==='state'?{...mock,queue,sent}:action==='studies'?studies:action==='license'?{valid:true,required:true,kind:'owner'}:{ok:true}});
+ });
  const password=testPassword();
  await mockSettingsGate(context,route=>route.fulfill({json:mock}),password);
  const page=await context.newPage();page.setDefaultTimeout(6500);await page.goto(new URL('archive',base).href);
  const sendButton=page.getByRole('button',{name:'RADAZ-a göndər',exact:true});await sendButton.waitFor();assert.equal(await sendButton.isDisabled(),true);
- await page.getByLabel('TEST 1 müayinəsini seç',{exact:true}).check();await sendButton.click();const dialog=page.getByRole('dialog');await dialog.getByRole('combobox',{name:'Radioloq',exact:true}).selectOption('dr1');assert.deepEqual(await dialog.locator('li').allTextContents(),['TEST 1 · CT']);await dialog.getByRole('button',{name:'Göndər',exact:true}).click();await dialog.getByText('Göndərişlər növbəyə əlavə edildi.').waitFor();
+ await page.getByLabel('TEST 1 müayinəsini seç',{exact:true}).check();await sendButton.click();const dialog=page.getByRole('dialog');await dialog.getByRole('combobox',{name:'Radioloq',exact:true}).selectOption('dr1');assert.deepEqual(await dialog.locator('li').allTextContents(),['TEST 1 · CT']);await dialog.getByRole('button',{name:'Göndər',exact:true}).click();await dialog.getByText('QA doctor · Həkimin cihazının qəbulunu gözləyir',{exact:true}).waitFor();
+ phase='accepted';await dialog.getByText('QA doctor · Ötürülür · 1/2 görüntü qəbul edilib',{exact:true}).waitFor();
+ phase='complete';await dialog.getByText('QA doctor · Çatdırıldı ✓',{exact:true}).waitFor();
  assert.deepEqual(calls.filter(c=>c.action==='send').map(c=>[c.payload.study,c.payload.recipients]),[['2.25.2',['dr1']]]);
  await dialog.getByRole('button',{name:'Bağla',exact:true}).click();
  await page.getByLabel('TEST 0 müayinəsini seç',{exact:true}).check();
@@ -246,7 +258,7 @@ test('Desktop network checks only selected archive studies and keeps web access 
  await nextSend.click();
  await dialog.getByRole('status').getByText(/Failed to fetch/).waitFor();
  await nextSend.click();
- await dialog.getByText('Göndərişlər növbəyə əlavə edildi.').waitFor();
+ await dialog.getByText('QA doctor · Çatdırıldı ✓',{exact:true}).nth(1).waitFor();
  const batch=calls.filter(c=>c.action==='send').slice(1);
  assert.deepEqual(batch.map(c=>c.payload.study),['2.25.1','2.25.2','2.25.2']);
  assert.ok(batch[1].payload.requestId);assert.equal(batch[1].payload.requestId,batch[2].payload.requestId);
@@ -272,12 +284,12 @@ test('PACS checks study and series identity before archiving a selected study fo
   const page=await browser.newPage({viewport:{width:2560,height:1440},userAgent:'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0.0.0 Electron/39.0.0 Safari/537.36'});
   page.setDefaultTimeout(7000);
   await page.addInitScript(endpoint=>localStorage.setItem('radaz-pacs-config-v1',JSON.stringify({locations:[{id:'qa',host:'',port:'11112',aeTitle:'QA_PACS',description:'QA',dicomwebUrl:endpoint}],selected:'qa',aeTitle:'RADAZ',listenerPort:'11112'})),endpoint);
-  const events=[];let incomplete=false;
+  const events=[];let incomplete=false,submitted;
   await page.route('**/local-archive-api/**',route=>{
     const request=route.request(),path=new URL(request.url()).pathname.split('/').at(-1);
     if(path==='import')events.push({path,bytes:request.postDataBuffer().length,ae:request.headers()['x-radaz-import-ae'],source:request.headers()['x-radaz-import-source']});
-    if(path==='send')events.push({path,study:request.postDataJSON().study,onlyUids:request.postDataJSON().onlyUids});
-    return route.fulfill({json:path==='state'?mock:path==='license'?{valid:true,required:true,kind:'owner'}:path==='studies'?[]:{ok:true}});
+    if(path==='send'){submitted=request.postDataJSON();events.push({path,study:submitted.study,onlyUids:submitted.onlyUids});}
+    return route.fulfill({json:path==='state'&&submitted?{...mock,queue:[{id:submitted.requestId,remote:'pacs-transfer',state:'submitted'}],sent:[{transfer:'pacs-transfer',recipient:'dr1',state:'queued',done:0,total:1}]}:path==='state'?mock:path==='license'?{valid:true,required:true,kind:'owner'}:path==='studies'?[]:{ok:true}});
   });
   const field=x=>({Value:[x]});
   const today=new Date().toLocaleDateString('sv').replaceAll('-','');
@@ -294,7 +306,7 @@ test('PACS checks study and series identity before archiving a selected study fo
   const first=page.getByLabel('QA_STUDY müayinəsini seç',{exact:true});
   await first.check();
   async function send(){await page.getByRole('button',{name:'RADAZ-a göndər',exact:true}).click();const dialog=page.getByRole('dialog');await dialog.getByRole('combobox',{name:'Radioloq',exact:true}).selectOption('dr1');await dialog.getByRole('button',{name:'Göndər',exact:true}).click();return dialog;}
-  const good=await send();await good.getByText('Göndərişlər növbəyə əlavə edildi.').waitFor();
+  const good=await send();await good.getByText('QA doctor · Həkimin cihazının qəbulunu gözləyir',{exact:true}).waitFor();
   assert.deepEqual(events,[{path:'import',bytes:bytes.length,ae:'QA_PACS',source:'private-network-stage'},{path:'send',study:uid,onlyUids:[sop]}]);
   await good.getByRole('button',{name:'Bağla',exact:true}).click();await first.uncheck();
   await page.getByLabel('QA_MISMATCH müayinəsini seç',{exact:true}).check();

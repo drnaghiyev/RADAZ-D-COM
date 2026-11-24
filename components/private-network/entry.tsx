@@ -8,6 +8,25 @@ import {chooseNetwork,currentNetwork} from './api';
 import {networkCall,usePrivateDesktop,can,type NetworkState} from './api';
 import './network.css';
 
+function deliveryStatus(state:NetworkState|null,requestId:string|undefined){
+ if(!requestId)return '';
+ const job=state?.queue?.find(row=>row.id===requestId);
+ if(!job)return 'Göndəriş başlayır…';
+ if(job.state==='error')return job.error||'Göndəriş alınmadı';
+ if(job.state==='cancelled'||job.state==='closed')return 'Göndəriş bağlandı';
+ if(job.state==='complete')return 'Çatdırıldı ✓';
+ if(!state?.online)return 'Bağlantı gözlənilir · avtomatik davam edəcək';
+ const rows=state.sent?.filter(row=>row.transfer===job.remote)||[];
+ if(!rows.length)return 'Göndəriş xidmətinə qoşulur…';
+ return rows.map(row=>{
+  const name=state.members?.find(m=>m.id===row.recipient)?.name||row.recipient;
+  const status=row.state==='complete'?'Çatdırıldı ✓':row.state==='accepted'?
+   `Ötürülür · ${row.done}/${row.total} görüntü qəbul edilib`:row.state==='paused'?'Dayandırılıb':
+   ['cancelled','declined'].includes(row.state)?'Göndəriş bağlandı':'Həkimin cihazının qəbulunu gözləyir';
+  return name+' · '+status;
+ }).join(' / ');
+}
+
 export type StudyForNetwork={uid:string;patient:string;modality:string};
 type Stage={onlyUids?:string[];stageId?:string};
 type Prepare=(uid:string,status:(message:string)=>void,clinic:string)=>Promise<Stage|void>;
@@ -29,6 +48,16 @@ function SendDialog({studies,prepare,source,aeTitle,close}:{studies:StudyForNetw
  useEffect(()=>{let active=true;setState(null);setIds([]);setSecond('');
   networkCall<NetworkState>('state',{clinic}).then(result=>{if(!active)return;if(!clinic&&result.clinics?.length){setClinic(result.clinic||result.clinics[0].id);return;}setState(result);setMessage(result.error||'');}).catch(e=>active&&setMessage(e instanceof Error?e.message:String(e)));return()=>{active=false;};
  },[clinic,profile]);
+ useEffect(()=>{
+  if(!sent.length)return;
+  let live=true,timer:ReturnType<typeof setTimeout>;
+  async function refresh(){
+   try{const next=await networkCall<NetworkState>('state',{clinic});if(live)setState(next);}
+   catch{if(live)setState(old=>old&&({...old,online:false}));}
+   finally{if(live)timer=setTimeout(refresh,2500);}
+  }
+  void refresh();return()=>{live=false;clearTimeout(timer);};
+ },[clinic,profile,sent]);
  const members=(state?.members||[]).filter(m=>m.active&&m.permissions.includes('receive'));
  const ready=!!state?.online&&can(state,'send')&&!!clinic&&(!['one','many','consult'].includes(mode)||ids.length>0)&&(mode!=='consult'||!!second&&second!==ids[0]);
  async function send(){if(working.current||!ready)return;working.current=true;setPending(true);
@@ -36,10 +65,10 @@ function SendDialog({studies,prepare,source,aeTitle,close}:{studies:StudyForNetw
     const recipients=mode==='consult'?[ids[0],second]:['one','many'].includes(mode)?ids:[];
     const requestId=requestIds.current.get(study.uid)||crypto.randomUUID();requestIds.current.set(study.uid,requestId);setLocked(true);
     await networkCall('send',{...staged,requestId,clinic,mode,recipients,primary:ids[0],consultant:second,study:study.uid,source,aeTitle,modality:study.modality});setSent(prev=>[...prev,study.uid]);
-   }setMessage('Göndərişlər növbəyə əlavə edildi.');}catch(e){setMessage(e instanceof Error?e.message:String(e));}finally{working.current=false;setPending(false);}
+   }setMessage('');}catch(e){setMessage(e instanceof Error?e.message:String(e));}finally{working.current=false;setPending(false);}
  }
  return <dialog ref={ref} className="dn dn-dialog" onCancel={e=>{if(pending)e.preventDefault();else close();}}><header><h2>RADAZ-a göndər</h2><button aria-label="Bağla" onClick={close} disabled={pending}><X size={17}/></button></header>
- <ul className="dn-studies">{studies.map(s=><li key={s.uid}>{s.patient} · {s.modality}{sent.includes(s.uid)?' ✓':''}</li>)}</ul>
+ <ul className="dn-studies" aria-live="polite">{studies.map(s=><li key={s.uid}>{s.patient} · {s.modality}{sent.includes(s.uid)&&<div>{deliveryStatus(state,requestIds.current.get(s.uid))}</div>}</li>)}</ul>
  <NetworkChoice profile={profile} disabled={pending||locked} onChange={next=>{chooseNetwork(next);setState(null);setClinic('');setIds([]);setProfile(next);}}/>
  <label>Klinika<select value={clinic} disabled={pending||locked} onChange={e=>setClinic(e.target.value)}>{(state?.clinics||[]).map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
  <label>Göndərmə üsulu<select value={mode} disabled={pending||locked} onChange={e=>{setMode(e.target.value);setIds([]);setSecond('');}}>{Object.entries(modes).map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
