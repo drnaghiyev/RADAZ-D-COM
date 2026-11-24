@@ -1,0 +1,223 @@
+--- a/app/page.tsx
++++ b/app/page.tsx
+@@ -539,5 +539,5 @@
+   const importPending=useRef(0);
+   const [importQueue, setImportQueue] = useState<ImportSource[]>([]);
+-  const [status, setStatus] = useState('DICOM faylı, CD/DVD və ya arxiv müayinəsi açın');
++  const [status, setStatus] = useState('DICOM faylı, qovluq və ya arxiv müayinəsi açın');
+   const fileRef = useRef<HTMLInputElement>(null);
+   const folderRef = useRef<HTMLInputElement>(null);
+@@ -557,5 +557,5 @@
+   const preferredMediaSeries = useRef<string | undefined>(undefined);
+   // Disc watching belongs to this Viewer; archive/PACS tabs must start with it off.
+-  const [mediaEnabled, setMediaEnabled] = useState(false);
++  const mediaEnabled = false;
+   const [mediaFilter, setMediaFilter] = useState<string[] | undefined>();
+   const [mediaProgress, setMediaProgress] = useState<MediaProgress | null>(null);
+@@ -1450,5 +1450,7 @@
+       {!detachedMode && <div className="brand"><RadazLogo size={34}/><span><strong>RADAZ</strong><RadazTagline/></span></div>}
+       <div className="primary-command-row">
+-        {!detachedMode && <ToolbarGroup className="toolbar-group import-command" role="group" aria-label={tr('ui.dicom_import_48fa8')} groupId="import" order={10}><DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" className="header-control" title={tr('ui.dicom_import_e8ec8')} aria-label={tr('ui.dicom_import_e8ec8')} disabled={importBusy || limited}><FolderOpen size={17}/><span>{tr('ui.dicom_import_e8ec8')}</span><ChevronDown size={14}/></Button></DropdownMenuTrigger>
++        {!detachedMode && <ToolbarGroup className="toolbar-group import-command" role="group" aria-label={tr('ui.dicom_import_48fa8')} groupId="import" order={10}><div className="tablet-folder-command">
++          <Button variant="outline" className="header-control" title={tr('ui.open_folder_55722')} aria-label={tr('ui.open_folder_55722')} disabled={importBusy || limited} onClick={()=>folderRef.current?.click()}><FolderOpen size={17}/></Button>
++          <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" className="header-control tablet-import-options" title={tr('ui.dicom_import_e8ec8')} aria-label={tr('ui.dicom_import_e8ec8')} disabled={importBusy || limited}><ChevronDown size={14}/></Button></DropdownMenuTrigger>
+           <DropdownMenuContent align="start" className="header-menu">
+             <DropdownMenuItem onSelect={() => { setImportOpen(false); folderRef.current?.click(); }}><FolderOpen size={16}/> {tr('ui.open_folder_55722')}</DropdownMenuItem>
+@@ -1457,10 +1459,5 @@
+             <DropdownMenuItem onSelect={() => setImportOpen(true)}><Grid2X2 size={16}/> {tr('ui.select_multiple_sources_e4aae')}</DropdownMenuItem>
+           </DropdownMenuContent>
+-        </DropdownMenu></ToolbarGroup>}
+-        {!detachedMode && <ToolbarGroup groupId="cd" order={15} aria-label="CD / DVD"><Button variant="outline" className={`header-control cd-import-command ${mediaEnabled ? 'active' : ''}`} aria-label={tr('ui.import_cd_dvd_b673d')} aria-pressed={mediaEnabled}
+-          title={mediaEnabled ? 'CD/DVD importunu dayandır; köçürülmüş görüntülər arxivdə qalır' : 'CD/DVD-ni avtomatik aşkar et və aç'} disabled={limited}
+-          onClick={() => { if(!mediaEnabled){dismissedMedia.current.clear();dismissedMediaSeries.current.clear();mediaFiles.current.clear();} setMediaEnabled(enabled => !enabled); setRailHidden(false); }}>
+-          <Disc3 size={18}/><span>{tr('ui.import_cd_dvd_b673d')}</span>{mediaEnabled && <span className="status-led"/>}
+-        </Button></ToolbarGroup>}
++        </DropdownMenu></div></ToolbarGroup>}
+       {!detachedMode && <ToolbarGroup className="workspace-launch toolbar-group" role="group" aria-label={tr('ui.view_mode_a87b2')} groupId="workspace" order={20}>
+         <button type="button" aria-label={tr('ui.2d_viewer_b2533')} onClick={() => {setWorkspace('viewer');setInlinePlanes(null);setRecordsPage(null);}}><ScanLine size={18}/></button>
+--- a/components/app-product.tsx
++++ b/components/app-product.tsx
+@@ -19,5 +19,5 @@
+ import { AiSettings } from './ai-settings';
+ import {NetworkSettingsLink} from './private-network/settings-link';
+-import {usePrivateDesktop} from './private-network/api';
++import {TabletLayoutSettings} from './tablet-layout';
+ 
+ type Product = { name:string;version:string;channel:string;owner:string;email:string;telegram:string;repository:string;updateRepository?:string;salesUrl:string;licenseRequired:boolean;currency:string;monthly:number|null;billingUrl?:string };
+@@ -58,5 +58,4 @@
+ export function AppHelpMenu({initial=''}:{initial?:Panel}) {
+   useUiTranslation();
+-  const desktop=usePrivateDesktop();
+   const {t}=useTranslation();
+   const [panel,setPanel]=useState<Panel>(initial),[product,setProduct]=useState<Product|null>(null),[license,setLicense]=useState<License|null>(null),[update,setUpdate]=useState<Update|null>(null);
+@@ -85,5 +84,5 @@
+     <header><RadazLogo size={42}/><div><small>RADAZ · {product?.version||'…'}</small><h2>{title}</h2></div><button type="button" onClick={()=>setPanel('')} aria-label={tr('ui.close_c1cf9')}><X size={20}/></button></header>
+     <div className="product-dialog-body">
+-    {panel==='settings'&&<><LanguageSettings/>{desktop&&<fieldset className="language-settings"><legend>DICOM Network</legend><p>Cihaz bağlantısı, klinikalar, əməkdaşlar, növbələr və avtomatik göndərmə.</p><div className="product-actions"><NetworkSettingsLink/></div></fieldset>}<SmartVolumeSettings/></>}
++    {panel==='settings'&&<><LanguageSettings/><TabletLayoutSettings/><fieldset className="language-settings"><legend>DICOM Network</legend><p>Klinikaya qoşulun və cihaz dəvətlərini idarə edin.</p><div className="product-actions"><NetworkSettingsLink/></div></fieldset><SmartVolumeSettings/></>}
+     {panel==='ai'&&<AiSettings/>}
+     {panel==='help'&&<><p>{tr('ui.load_a_dicom_file_or_folder_or_open_a_study_f_a9700')}</p><div className="help-cards"><article><b>{tr('ui.scroll_through_images_08ed8')}</b><p><strong>S</strong> {tr('ui.or_the_scroll_tool_drag_up_or_down_on_the_ima_4f08e')}</p></article><article><b>{tr('ui.printing_and_export_1ae88')}</b><p>{tr('ui.use_image_selection_to_build_a_print_list_cho_1a615')}</p></article><article><b>{tr('ui.ai_assistant_and_report_fd718')}</b><p>{tr('ui.all_series_from_the_active_study_open_in_the_e8828')}</p></article><article><b>{tr('ui.receive_dicom_from_a_device_7b268')}</b><p>{tr('ui.the_local_archive_shows_its_ae_title_ip_and_p_9c768')}</p></article></div><button onClick={()=>open('support')}>{tr('ui.contact_support_9352c')}</button></>}
+--- a/components/private-network/api.ts
++++ b/components/private-network/api.ts
+@@ -19,5 +19,7 @@
+   queue?:{id:string;clinic:string;study:string;state:string;error?:string;remote?:string}[];statuses?:{id:string;sender:string;recipient:string;state:string}[];localCoordinator?:boolean;syncClinic?:string;acceptMode?:string;clinicModes?:Record<string,string>;
+ };
+-export function isPrivateDesktop(){return typeof window!=='undefined'&&['localhost','127.0.0.1','[::1]'].includes(window.location.hostname)&&/Windows NT/i.test(navigator.userAgent)&&/Electron\//i.test(navigator.userAgent);}
++declare global { interface Window {radazTabletNetwork?: (action:string,body:Record<string,unknown>,session:string,profile:NetworkProfile)=>Promise<{data?:unknown;error?:string;code?:string}>} }
++function tabletSettings(){return typeof window!=='undefined' && location.origin==='https://appassets.androidplatform.net' && location.pathname.replace(/\/$/,'')==='/private-network/settings';}
++export function isPrivateDesktop(){return tabletSettings() || typeof window!=='undefined'&&['localhost','127.0.0.1','[::1]'].includes(window.location.hostname)&&/Windows NT/i.test(navigator.userAgent)&&/Electron\//i.test(navigator.userAgent);}
+ const subscribeDesktop=()=>()=>{};
+ export function usePrivateDesktop(){return useSyncExternalStore(subscribeDesktop,isPrivateDesktop,()=>false);}
+@@ -29,5 +31,5 @@
+   if(!selectedProfile){
+     const requested=new URLSearchParams(location.search).get('network');
+-    selectedProfile=(requested||localStorage.getItem('radaz-network-profile'))==='internet'?'internet':'private';
++    selectedProfile=(requested||localStorage.getItem('radaz-network-profile')||'internet')==='internet'?'internet':'private';
+   }
+   return selectedProfile;
+@@ -41,4 +43,10 @@
+ }
+ export async function networkCall<T>(action:string,body:Record<string,unknown>={},session?:string):Promise<T>{
++  if(tabletSettings()){
++    if(!window.radazTabletNetwork)throw new NetworkRequestError('Planşetin şəbəkə xidməti hazır deyil.');
++    const reply=await window.radazTabletNetwork(action,body,session||'',currentNetwork());
++    if(reply.error)throw new NetworkRequestError(reply.error,reply.code);
++    return reply.data as T;
++  }
+   if(!isPrivateDesktop())throw Error('Bu modul Windows RADAZ Desktop üçün nəzərdə tutulub.');
+   const headers:Record<string,string>={'Content-Type':'application/json'};
+--- a/components/private-network/manage.tsx
++++ b/components/private-network/manage.tsx
+@@ -14,6 +14,6 @@
+ }
+ export function NetworkConfig({state,act}:{state:NetworkState;act:Act}){
+- const [url,setUrl]=useState(state.url||''),[invite,setInvite]=useState(''),[name,setName]=useState(''),[mode,setMode]=useState(state.acceptMode||'manual'),[perClinic,setPerClinic]=useState(state.clinicModes||{}),[syncClinic,setSyncClinic]=useState(state.syncClinic||'');
+- return <>{!state.configured&&<article><h3>Bu noutbukda şəxsi şəbəkə yarat</h3><form onSubmit={e=>{e.preventDefault();void act('local_setup',Object.fromEntries(new FormData(e.currentTarget)));}}><label>Administrator hesab ID-si<input name="user" required/></label><label>Ad və soyad<input name="name" required/></label><button>Yerli xidməti qur</button></form></article>}
++ const [url,setUrl]=useState(state.url||''),[invite,setInvite]=useState(''),[name,setName]=useState('');
++ return <>
+  <article><h3>Cihaz və bağlantı</h3>{state.configured&&state.url&&<p>Şəbəkə xidmətinin ünvanı · {state.url}</p>}{state.user?.id&&<p>Hesab ID-si · {state.user.id}</p>}{state.deviceId&&<p>Cihaz ID-si · {state.deviceId}</p>}<form hidden={state.configured} onSubmit={async e=>{e.preventDefault();if(await act('register',{url,invite,name})){setInvite('');}}}>
+  <label>Şəbəkə xidmətinin ünvanı<input type="url" required value={url} placeholder="https://…" onChange={e=>setUrl(e.target.value)}/></label><label>Cihazın adı<input value={name} required onChange={e=>setName(e.target.value)}/></label>
+@@ -21,8 +21,4 @@
+  {state.configured&&!state.internet&&!state.superAdmin&&<form onSubmit={async e=>{e.preventDefault();if(await act('link_clinic',{invite}))setInvite('');}}><label>Başqa klinikaya qoşulmaq üçün dəvət kodu<input type="password" required autoComplete="off" value={invite} onChange={e=>setInvite(e.target.value)}/></label><button>Klinikaya qoşul</button></form>}
+  {state.configured&&<button onClick={()=>act('configure',{enabled:!state.enabled})}>{state.enabled?'Bu cihazda modulu dayandır':'Bu cihazda modulu aktivləşdir'}</button>}</article>
+- {state.configured&&<article><h3>Qəbul ayarları</h3><form onSubmit={e=>{e.preventDefault();void act('configure',{enabled:state.enabled,acceptMode:mode,clinicModes:perClinic,syncClinic});}}>
+- <label>Standart qəbul rejimi<select value={mode} onChange={e=>setMode(e.target.value)}><option value="manual">Əl ilə təsdiq</option><option value="auto">Avtomatik qəbul</option></select></label>
+- {(state.clinics||[]).map(c=><label key={c.id}>{c.name}<select value={perClinic[c.id]||''} onChange={e=>{const next={...perClinic};if(e.target.value)next[c.id]=e.target.value;else delete next[c.id];setPerClinic(next);}}><option value="">Standart rejim</option><option value="manual">Əl ilə təsdiq</option><option value="auto">Avtomatik qəbul</option></select></label>)}
+- <label>Bu cihazdan avtomatik göndəriş üçün klinika<select value={syncClinic} onChange={e=>setSyncClinic(e.target.value)}><option value="">Dayandırılıb</option>{(state.clinics||[]).map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+- <button>Saxla</button></form></article>}</>;
++ </>;
+ }
+--- a/components/private-network/internet.tsx
++++ b/components/private-network/internet.tsx
+@@ -14,11 +14,11 @@
+   const id=state.deviceId||'';
+   const code=id?'RD-'+(id.toUpperCase().match(/.{1,4}/g)||[]).join('-'):'';
+-  if(!state.configured)return <article><h3>Bu kompüteri internetlə qoş</h3>
++  if(!state.configured)return <article><h3>Bu planşeti internetlə qoş</h3>
+     <form onSubmit={e=>{e.preventDefault();void act('enroll_pc',Object.fromEntries(new FormData(e.currentTarget)));}}>
+-      <label>Həkimin və ya klinika kompüterinin adı<input name="name" maxLength={128} required/></label>
+-      <button>Qoşul və kompüter ID-si al</button>
++      <label>Həkimin və ya klinika cihazının adı<input name="name" maxLength={128} required/></label>
++      <button>Qoşul və cihaz ID-si al</button>
+     </form></article>;
+   return <>
+-    <article><h3>Bu kompüterin RADAZ ID-si</h3>
++    <article><h3>Bu planşetin RADAZ ID-si</h3>
+       <label>Bu kodu göndərən klinikaya verin<input readOnly value={code} onFocus={e=>e.target.select()}/></label>
+       <button onClick={()=>{void navigator.clipboard.writeText(code).then(()=>setNote('ID kopyalandı.'),()=>setNote('ID-ni sahədən seçib kopyalayın.'));}}>ID-ni kopyala</button>
+@@ -26,15 +26,15 @@
+     </article>
+     {(state.invitations||[]).map(i=><article key={i.id}><h3>{i.clinic} klinikasından dəvət</h3>
+-      <p>{i.sender} sizi {i.doctor} adı ilə bu kompüterdə müayinə qəbul etməyə dəvət edir.</p>
++      <p>{i.sender} sizi {i.doctor} adı ilə bu cihazda müayinə qəbul etməyə dəvət edir.</p>
+       <div className="dn-row"><button onClick={()=>void act('answer_invite',{id:i.id,accept:true})}>Dəvəti qəbul et</button>
+         <button onClick={()=>void act('answer_invite',{id:i.id,accept:false})}>İmtina et</button></div></article>)}
+-    {state.online&&!state.ownsClinic&&<article><h3>Klinikanın göndərən kompüteri</h3><form onSubmit={e=>{
++    {state.online&&!state.ownsClinic&&<article><h3>Klinikanın cihazı</h3><form onSubmit={e=>{
+       e.preventDefault();void act('open_clinic',Object.fromEntries(new FormData(e.currentTarget)));
+-    }}><label>Klinikanın adı<input name="name" maxLength={128} required/></label><button>Bu kompüter üçün klinika yarat</button></form></article>}
+-    {state.membership?.role==='admin'&&state.clinic&&<article><h3>Həkimin kompüterinə dəvət göndər</h3>
++    }}><label>Klinikanın adı<input name="name" maxLength={128} required/></label><button>Bu cihaz üçün klinika yarat</button></form></article>}
++    {state.membership?.role==='admin'&&state.clinic&&<article><h3>Həkimin cihazına dəvət göndər</h3>
+       <form onSubmit={async e=>{e.preventDefault();const form=e.currentTarget;
+         if(await act('invite_pc',{...Object.fromEntries(new FormData(form)),clinic:state.clinic}))form.reset();
+       }}><label>Həkimin adı<input name="name" maxLength={128} required/></label>
+-        <label>Həkimin RADAZ kompüter ID-si və ya qoşulma kodu<input name="target" autoComplete="off" maxLength={80} required/></label>
++        <label>Həkimin RADAZ cihaz ID-si və ya qoşulma kodu<input name="target" autoComplete="off" maxLength={80} required/></label>
+         <button>Dəvəti həkimin RADAZ-ına göndər</button></form>
+       {(state.outgoingInvites||[]).map(i=><div key={i.id} className="dn-item"><span>{i.doctor} · qəbul gözlənilir</span>
+--- a/components/private-network/workspace.tsx
++++ b/components/private-network/workspace.tsx
+@@ -12,5 +12,5 @@
+ import {openStudyInViewer} from '@/lib/viewer-session';
+ import '@/components/private-network/network.css';
+-const connection=['settings','Bağlantı və qəbul ayarları',Settings] as const;
++const connection=['settings','Bağlantı ayarları',Settings] as const;
+ const management=[
+  ['people','Klinikalar və radioloqlar',Users],['schedule','Növbə cədvəli',CalendarDays],['rules','Avtomatik göndərmə',Workflow],
+@@ -76,9 +76,9 @@
+  const [state,setState]=useState<NetworkState|null>(null),[message,setMessage]=useState(''),[busy,setBusy]=useState(false);
+  const [loadError,setLoadError]=useState('');
+- const sequence=useRef({id:0,active:false}),mutating=useRef(false);
+- const refresh=useCallback(async()=>{if(!sequence.current.active)return;const id=++sequence.current.id;try{const data=await request<NetworkState>(stateAction,{clinic});if(sequence.current.id!==id)return;setState(data);setLoadError('');
++ const sequence=useRef({id:0,active:false}),mutating=useRef(false),inFlight=useRef(0);
++ const refresh=useCallback(async()=>{if(!sequence.current.active)return;const id=++sequence.current.id;inFlight.current++;try{const data=await request<NetworkState>(stateAction,{clinic});if(sequence.current.id!==id)return;setState(data);setLoadError('');
+    if(!clinic&&data.clinics?.length)setClinic(data.clinics.find(c=>c.id===target.clinic)?.id||data.clinic||data.clinics[0].id);
+    if(!data.configured&&stateAction==='settings_state')setSection('settings');
+-  }catch(e){if(sequence.current.id===id){setState(null);setLoadError(e instanceof Error?e.message:String(e));}}
++  }catch(e){if(sequence.current.id===id){setState(null);setLoadError(e instanceof Error?e.message:String(e));}}finally{inFlight.current--;}
+  },[clinic,request,setClinic,setSection,stateAction,target.clinic]);
+  useEffect(()=>{
+@@ -86,14 +86,14 @@
+    current.active=true;
+    const initial=window.setTimeout(()=>void refresh(),0);
+-   const timer=window.setInterval(()=>{if(!mutating.current)void refresh();},7000);
++   const timer=window.setInterval(()=>{if(!mutating.current&&!inFlight.current)void refresh();},7000);
+    return ()=>{current.active=false;window.clearTimeout(initial);window.clearInterval(timer);++current.id;};
+  },[refresh]);
+  async function act(action:string,payload:Record<string,unknown>){if(mutating.current)return false;mutating.current=true;setBusy(true);setMessage('');try{await request(action,payload);await refresh();setMessage('Əməliyyat tamamlandı.');return true;}catch(e){setMessage(e instanceof Error?e.message:String(e));return false;}finally{setBusy(false);mutating.current=false;}}
+  return <main className="dn dn-page"><header className="dn-top"><div><Network size={25}/><h1>{title}</h1></div>{state&&<span role="status" className={state.online?'dn-online':''}>{state.online?'Qoşulub':state.enabled?'Əlaqə yoxdur':'Deaktiv'}</span>}{!settings&&<NetworkSettingsLink clinic={clinic} profile={target.profile}/>}{controls}<button onClick={()=>void refresh()} aria-label="Yenilə"><RefreshCw size={17}/></button></header>
+- <div className="dn-layout"><aside><label>Klinika<select value={clinic} disabled={busy} onChange={e=>{++sequence.current.id;setClinic(e.target.value);setState(null);setMessage('');}}>{!clinic&&<option value="">Seçin</option>}{(state?.clinics||[]).map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
++ <div className="dn-layout"><aside><label>Klinika<select aria-label="Klinika" value={clinic} disabled={busy} onChange={e=>{++sequence.current.id;setClinic(e.target.value);setState(null);setMessage('');}}>{!clinic&&<option value="">Seçin</option>}{(state?.clinics||[]).map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+  <NetworkChoice profile={target.profile} onChange={switchNetwork} disabled={busy}/>
+  <nav aria-label={title}>{(settings?configurationSections:sections).map(([id,label,Icon])=><button key={id} disabled={settings&&id!=='settings'&&!state?.configured} aria-current={section===id?'page':undefined} onClick={()=>{setSection(id);setMessage('');}}><Icon size={17}/>{label}</button>)}</nav></aside>
+  <section className="dn-body"><h2>{sections.find(s=>s[0]===section)?.[1]}</h2>{(loadError||state?.error)&&<p role="alert">{loadError||state?.error}</p>}{message&&<p role="status">{message}</p>}
+- {state?<fieldset disabled={busy} key={state.clinic||'-'} className="dn-fields">
++ {state?<fieldset disabled={busy} key={section==='settings'?target.profile:state.clinic||'-'} className="dn-fields">
+  {settings&&target.profile==='private'&&(section==='settings'||section==='people')&&<article><h3>Klinikadan həkimlərin kompüterlərinə göndəriş</h3>
+    <button onClick={()=>{setSection('settings');switchNetwork('internet');}}>RADAZ İnternet · həkim və kompüter qoş</button></article>}
+--- a/components/toolbar-workspace.tsx
++++ b/components/toolbar-workspace.tsx
+@@ -8,4 +8,8 @@
+ type Layout = Record<string, Position>;
+ type Registry = Record<string, number>;
++const tabletDefaultLayout=(scope:string):Layout=>scope==='viewer'?{
++  help:{side:'right',order:0},window:{side:'right',order:1},output:{side:'right',order:2},rotation:{side:'right',order:3},
++}:{};
++
+ const Context=createContext<{
+   secondRow: HTMLDivElement|null; rows:1|2; groupRows:Record<string,1|2>; layout: Layout; drag: string|null; dock: HTMLDivElement|null; overflow: string[]; popup: HTMLDivElement|null;
+@@ -43,8 +47,8 @@
+         if(value&&['top','right'].includes(value.side)&&Number.isFinite(value.order))next[id]=value;
+     } catch {}
+-    setLayout(next);setLoaded(scope);
++    setLayout(Object.keys(next).length?next:tabletDefaultLayout(scope));setLoaded(scope);
+   },[scope]);
+   useEffect(()=>{if(loaded===scope)try{localStorage.setItem(`radaz-toolbar-v1:${scope}`,JSON.stringify(layout));}catch{}},[layout,loaded,scope]);
+-  useEffect(()=>{const reset=(event:Event)=>{if((event as CustomEvent).detail===scope)setLayout({});};window.addEventListener('radaz-toolbar-reset',reset);return()=>window.removeEventListener('radaz-toolbar-reset',reset);},[scope]);
++  useEffect(()=>{const reset=(event:Event)=>{if((event as CustomEvent).detail===scope)setLayout(tabletDefaultLayout(scope));};window.addEventListener('radaz-toolbar-reset',reset);return()=>window.removeEventListener('radaz-toolbar-reset',reset);},[scope]);
+   const register=useRef((id:string,order:number)=>{
+     setRegistry(current=>({...current,[id]:order}));
+--- a/lib/locales/ui.ts
++++ b/lib/locales/ui.ts
+@@ -1802,7 +1802,7 @@
+  },
+  "ui.dicom_file_folder_zip_rar_and_cd_dvd_import_l_1985e": {
+-  "az": "DICOM fayl, qovluq, ZIP/RAR və CD/DVD importu · Local arxiv · PACS və cihazlardan DICOM qəbulu",
+-  "en": "DICOM file, folder, ZIP/RAR and CD/DVD import · Local archive · PACS and DICOM reception",
+-  "ru": "Импорт файлов и папок DICOM, ZIP/RAR и CD/DVD · Локальный архив · PACS и приём DICOM"
++  "az": "DICOM faylları, qovluq və ZIP/RAR idxalı · Lokal arxiv",
++  "en": "DICOM file, folder and ZIP/RAR import · Local archive",
++  "ru": "Импорт файлов и папок DICOM, ZIP/RAR · Локальный архив"
+  },
+  "ui.image_viewing_and_windowing_measurement_tools_e8457": {
