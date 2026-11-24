@@ -1,14 +1,14 @@
 // Compile the tablet UI from the same release as Windows, in an Android-only staging area.
 import {createHash} from 'node:crypto';
-import {spawnSync} from 'node:child_process';
-import {readFileSync, writeFileSync, appendFileSync, copyFileSync, mkdirSync, existsSync, symlinkSync, realpathSync, mkdtempSync} from 'node:fs';
+import {spawnSync,execFileSync} from 'node:child_process';
+import {readFileSync, writeFileSync, appendFileSync, copyFileSync, mkdirSync, existsSync, symlinkSync, realpathSync, mkdtempSync, unlinkSync} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const project = path.dirname(fileURLToPath(import.meta.url));
 const checkout = path.resolve(process.argv[2]);
 const destination = path.resolve(process.argv[3]);
-const commit = '52c87c851b42e08603dacb6493b3de84bed6eb85';
+const commit = execFileSync('git',['rev-parse','--verify','HEAD'],{cwd:checkout,encoding:'utf8'}).trim();
 const components = ['tablet-layout.tsx','tablet-layout.css','tablet-inbox.ts'];
 const inputs = ['viewer.patch','archive-incoming.ts',...components];
 const digest = createHash('sha256').update(commit).update(readFileSync(fileURLToPath(import.meta.url)));
@@ -26,10 +26,12 @@ if (!existsSync(marker)) {
   const sourcePaths = ['.openai','app','components','hooks','lib','offline','scripts','build','db','types','vendor/shadcn-tailwind-4.13.0.css','public','bridge/radiology-profile.json','package.json','pnpm-lock.yaml','vite.config.ts','next.config.ts','postcss.config.mjs','tsconfig.json','components.json'];
   run('git',['archive',commit,'--format=tar','--output',archive,'--',...sourcePaths],checkout);
   run('tar',['-xf',archive],work);
+  unlinkSync(archive);
   run('git',['apply','--no-index','--whitespace=nowarn',path.join(project,'viewer.patch')],work,{GIT_CEILING_DIRECTORIES:cache});
   for (const input of components) copyFileSync(path.join(project,input),path.join(work,'components',input));
   appendFileSync(path.join(work,'lib','local-archive.ts'),'\n'+readFileSync(path.join(project,'archive-incoming.ts'),'utf8'));
   symlinkSync(realpathSync(path.join(checkout,'node_modules')),path.join(work,'node_modules'),'junction');
+  run(process.execPath,['node_modules/typescript/bin/tsc','--noEmit','--incremental','false'],work);
   run(process.execPath,['scripts/run-framework.mjs','build'],work);
   writeFileSync(marker,path.basename(work));
 }

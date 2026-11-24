@@ -39,6 +39,13 @@ public final class ViewerActivity extends Activity {
     private OutputStream saving;
     private DocumentImports imports;
     private TabletAssets assets;
+    private TabletUpdater updater;
+    private final android.os.Handler updateTimer=new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable checkUpdates=new Runnable(){
+        @Override public void run(){if(updater!=null)updater.check(false);updateTimer.postDelayed(this,15*60*1000L);}
+    };
+    @Override protected void onResume(){super.onResume();if(updater!=null)updater.resume();updateTimer.postDelayed(checkUpdates,15*60*1000L);}
+    @Override protected void onPause(){updateTimer.removeCallbacks(checkUpdates);super.onPause();}
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -48,6 +55,7 @@ public final class ViewerActivity extends Activity {
                 .setPositiveButton("Bağla",(d,w)->finish()).setOnCancelListener(d->finish()).show();
             return;
         }
+        updater=new TabletUpdater(this);
         imports=new DocumentImports(getContentResolver());
         receiver=new InboxBridge(this);
         assets=new TabletAssets(this,imports,receiver.inbox);
@@ -138,8 +146,12 @@ public final class ViewerActivity extends Activity {
             String answer="ok";
             try {
                 switch(command.substring("radaz-tablet/".length())) {
+                    case "updates": if(web==active)web.post(()->updater.check(true));else answer="denied";break;
                     case "network": answer=clinics.request(web,url,value);break;
                     case "inbox": answer=web==home?receiver.request(web,url,value):"denied";break;
+                    case "open-studies":
+                        if (web!=active || !openStudies(value)) answer="denied";
+                        break;
                     case "ready": initialized.add(web);if(web==home)web.post(ViewerActivity.this::deliverPending);break;
                     case "pick": if(web!=active || !pick(web,value,null))answer="busy";break;
                     case "release": imports.release(value);break;
@@ -158,6 +170,24 @@ public final class ViewerActivity extends Activity {
             }catch(Exception problem){answer="error";message("Əməliyyat tamamlanmadı.");}
             result.confirm(answer);return true;
         }
+    }
+    private boolean openStudies(String value) throws org.json.JSONException {
+        if(value==null || value.length()>14000)return false;
+        org.json.JSONArray studies=new org.json.JSONArray(value);
+        if(studies.length()==0 || studies.length()>200)return false;
+        java.util.ArrayList<String> ids=new java.util.ArrayList<>();
+        for(int i=0;i<studies.length();i++){
+            String uid=studies.getString(i);
+            if(uid.length()>64 || !uid.matches("[0-9]+(?:[.][0-9]+)*"))return false;
+            ids.add(uid);
+        }
+        String url=TabletAssets.ORIGIN+"/#archive-studies="+android.net.Uri.encode(android.text.TextUtils.join(",",ids));
+        home.post(()->{
+            show(home);
+            String event="!window.dispatchEvent(new CustomEvent('radaz-tablet-open-studies',{cancelable:true,detail:"+studies.toString()+"}))";
+            home.evaluateJavascript(event,handled->{if(!"true".equals(handled))home.loadUrl(url);});
+        });
+        return true;
     }
     private void show(WebView view){
         if(view==null || !windows.contains(view))return;
@@ -255,6 +285,6 @@ public final class ViewerActivity extends Activity {
         if(receiver!=null)receiver.close();
         if(chooser!=null)chooser.onReceiveValue(null);
         for(WebView web:new ArrayList<>(windows)){stage.removeView(web);web.destroy();}
-        windows.clear();super.onDestroy();
+        windows.clear();if(updater!=null)updater.close();super.onDestroy();
     }
 }

@@ -112,6 +112,13 @@ export function registerViewer(load: (studies: string[], append?: boolean) => Pr
   if (window.location.hash.includes('archive-stud') || new URLSearchParams(window.location.search).has('pending')) void maximizeViewerWindow();
   const channel = new BroadcastChannel(CHANNEL);
   let loading = Promise.resolve();
+  const openOnTablet = (event: Event) => {
+    const studies:unknown = (event as CustomEvent).detail;
+    if (!Array.isArray(studies) || !studies.length || studies.length>200 || !studies.every(validStudy)) return;
+    event.preventDefault();
+    loading=load([...new Set<string>(studies)]).catch(error=>progress?.(null,String(error)));
+  };
+  window.addEventListener('radaz-tablet-open-studies',openOnTablet);
   channel.onmessage = event => {
     const data = event.data;
     if(data?.kind==='FIND'){channel.postMessage({kind:'PRESENT',request:data.request,name:window.name});return;}
@@ -126,7 +133,7 @@ export function registerViewer(load: (studies: string[], append?: boolean) => Pr
       void maximizeViewerWindow();loading=load([...new Set<string>(data.studies)]).catch(error=>progress?.(null,String(error)));
     }
   };
-  return () => {window.removeEventListener('focus',register);channel.close();};
+  return () => {window.removeEventListener('focus',register);window.removeEventListener('radaz-tablet-open-studies',openOnTablet);channel.close();};
 }
 /** Publish another fully archived series without stealing the current selection. */
 export function refreshStudyInViewer(study: string, tab: ViewerTarget | null) {
@@ -151,6 +158,7 @@ export function requestedStudies(hash:string):string[] {
 export async function openStudiesInViewer(studies: string[], reserved?: ViewerTarget | null): Promise<'new'|'reused'> {
   if (!studies.length||studies.length>200||studies.some(study=>!validStudy(study))) throw new Error('DICOM Study UID düzgün deyil');
   const unique=[...new Set(studies)];
+  if (location.origin==='https://appassets.androidplatform.net' && window.prompt('radaz-tablet/open-studies',JSON.stringify(unique))==='ok') return 'reused';
   const url = unique.length===1?`/#archive-study=${encodeURIComponent(unique[0])}`:`/#archive-studies=${encodeURIComponent(unique.join(','))}`;
   const tab = reserved === undefined ? await focusViewer() : reserved;
   if (!tab || tab.closed) throw new Error('Yeni Viewer vərəqəsi açıla bilmədi. RADAZ üçün pop-up icazəsini aktiv edin.');

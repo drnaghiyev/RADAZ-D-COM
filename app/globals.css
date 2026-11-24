@@ -105,6 +105,11 @@
 .localizer-line .localizer-glow{stroke-width:2;opacity:.28}
 .localizer-line .localizer-stroke{stroke-width:1.05}
 .localizer-line .localizer-hit{stroke-width:15;cursor:move}
+.mpr-grid .localizer-overlay{z-index:5;touch-action:none}
+@media (any-pointer:coarse){
+ .mpr-grid .localizer-line .localizer-hit{stroke-width:28}
+ .mpr-grid .localizer-center-hit,.mpr-grid .localizer-rotate-hit{r:18px}
+}
 .localizer-line .localizer-rotate-dot{fill:#081923;stroke:#f3faff;stroke-width:1.5;pointer-events:none}
 .localizer-line[data-source="MS"] .localizer-rotate-dot{stroke:#f6338a}
 .localizer-line[data-source="MC"] .localizer-rotate-dot{stroke:#18c3ef}

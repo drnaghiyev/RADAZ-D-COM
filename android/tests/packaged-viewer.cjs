@@ -24,7 +24,7 @@ async function dismissOverflow(page) {
 }
 const types = {html:'text/html',js:'application/javascript',css:'text/css',json:'application/json',svg:'image/svg+xml',wasm:'application/wasm',rsc:'text/x-component',woff2:'font/woff2',png:'image/png'};
 (async () => {
-  const apk = await JSZip.loadAsync(fs.readFileSync(path.join(project,'out','RADAZ-Tablet-0.2.94-4.apk')));
+  const apk = await JSZip.loadAsync(fs.readFileSync(path.join(project,'out',process.env.RADAZ_TEST_APK||'RADAZ-Tablet-0.2.97-1.apk')));
   assert.ok(apk.file('classes.dex'));
   assert.ok(Object.keys(apk.files).some(p => p.startsWith('assets/web/_next/static/chunks/') && p.endsWith('.js')));
   const sample = fs.readFileSync(path.resolve(process.argv[3]));
@@ -54,6 +54,13 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
           else reply=await network.call('Tablet','inbox_'+v.action,{ticket:v.ticket});
           if(!p.isClosed())await p.evaluate(([id,result])=>window.radazInboxResult?.(id,result),[v.id,reply.data||reply]).catch(()=>{});
           return;
+        }
+        if(cmd==='open-studies'){
+          const ids=JSON.parse(d.defaultValue());
+          await d.accept('ok');
+          const home=context.pages().find(web=>new URL(web.url()).pathname==='/');
+          assert.ok(home);await home.bringToFront();
+          assert.ok(await home.evaluate(ids=>!dispatchEvent(new CustomEvent('radaz-tablet-open-studies',{cancelable:true,detail:ids})),ids));return;
         }
         if(cmd==='network'){
           const v=JSON.parse(d.defaultValue());
@@ -220,7 +227,8 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
     await mpr.waitForFunction(()=>!!document.querySelector('[data-panel="MA"] line[data-id*="-endpoint-"],[data-panel="MA"] .dicom-canvas svg text,[data-panel="MA"] [data-kind="length"]'));
     suite.measurement=true;
     await mpr.close();await page.bringToFront();
-    const [volume]=await Promise.all([context.waitForEvent('page'),page.getByRole('button',{name:'3D həcm görüntüləmə',exact:true}).first().click()]);
+    await page.getByRole('button',{name:'3D həcm görüntüləmə',exact:true}).first().click();
+    const volume=page;
     await volume.waitForFunction(()=>!!document.querySelector('.sv-surface-canvas[data-ready="true"] canvas, .cornerstone-volume-stage[data-ready="true"] canvas'),{},{timeout:60000});
     const volumePresets=volume.getByLabel('3D preset',{exact:true});
     if(await volumePresets.count()){
@@ -229,7 +237,7 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
       suite.volumeDimensions=await volume.locator('.sv-surface-canvas').getAttribute('data-context-dimensions');
     }
     suite.volumeCanvas=true;
-    await volume.close();await page.bringToFront();
+    await volume.getByRole('button',{name:'Bağla',exact:true}).last().click();await page.bringToFront();
     assert.equal(await panel.getAttribute('data-has-image'),'true');
     const smartOpen=context.waitForEvent('page');
     await command(page,'Smart Volume');

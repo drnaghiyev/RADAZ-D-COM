@@ -11,7 +11,8 @@ const project = path.dirname(fileURLToPath(import.meta.url));
 const release = path.resolve(process.argv[2]);
 const target = path.resolve(process.argv[3]);
 const manifest = JSON.parse(await readFile(path.join(release, 'dist/server/radaz-build.json'), 'utf8'));
-if (manifest.product.version !== '0.2.94') throw new Error('This tablet edition requires the full RADAZ 0.2.94 build.');
+const product=JSON.parse(await readFile(path.join(release,'public/product.json'),'utf8'));
+if (manifest.product.version!==product.version) throw new Error('Tablet UI version differs from the release.');
 
 const web = path.join(target, 'web');
 await mkdir(web, {recursive:true});

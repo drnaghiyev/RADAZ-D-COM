@@ -1,12 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="space.radaz.viewer.tablet" android:versionCode="29404" android:versionName="0.2.94-tablet.4">
+    package="space.radaz.viewer.tablet" android:versionCode="29701" android:versionName="0.2.97-tablet.1">
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <application android:label="RADAZ Viewer" android:icon="@drawable/radaz"
         android:theme="@android:style/Theme.Material.NoActionBar" android:usesCleartextTraffic="false"
         android:hardwareAccelerated="true" android:allowBackup="false" android:supportsRtl="true">
+        <provider android:name=".UpdateFileProvider" android:authorities="space.radaz.viewer.tablet.updates" android:exported="false" android:grantUriPermissions="true"/>
         <activity android:name=".ViewerActivity" android:exported="true" android:launchMode="singleTop"
             android:configChanges="orientation|screenSize|smallestScreenSize|keyboardHidden|keyboard|screenLayout|density|uiMode"
             android:windowSoftInputMode="adjustResize">

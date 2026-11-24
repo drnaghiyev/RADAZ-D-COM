@@ -1,13 +1,18 @@
 param(
-    [Parameter(Mandatory=$true)][string]$ViewerRoot,
+    [string]$ViewerRoot,
     [string]$AndroidSdk = $(if ($env:ANDROID_SDK_ROOT) {$env:ANDROID_SDK_ROOT} else {Join-Path $env:LOCALAPPDATA 'Android/Sdk'}),
     [string]$Jdk = $env:JAVA_HOME,
-    [string]$ViewerSource = (Join-Path $PSScriptRoot '../outputs/public-network-release')
+    [string]$ViewerSource = (Join-Path $PSScriptRoot '..'),
+    [string]$SigningDirectory = (Join-Path $PSScriptRoot '.local')
 )
 $ErrorActionPreference = 'Stop'
 $project = $PSScriptRoot
-$source = (Resolve-Path -LiteralPath $ViewerRoot).Path
-if (!(Test-Path -LiteralPath (Join-Path $source 'dist/server/radaz-build.json'))) {throw 'A complete RADAZ production build is required.'}
+$product = (Get-Content -Raw -LiteralPath (Join-Path $ViewerSource 'public/product.json') | ConvertFrom-Json).version
+[xml]$manifest = Get-Content -Raw -LiteralPath (Join-Path $project 'AndroidManifest.xml')
+$androidNamespace='http://schemas.android.com/apk/res/android'
+$versionName=$manifest.manifest.GetAttribute('versionName',$androidNamespace)
+if($versionName -notmatch ('^'+[regex]::Escape($product)+'-tablet[.](?<revision>[1-9][0-9]?)$')){throw 'Tablet version must match the viewer release.'}
+$revision=$Matches['revision']
 if (!$Jdk -or !(Test-Path -LiteralPath (Join-Path $Jdk 'bin/javac.exe'))) {throw 'Set JAVA_HOME or pass -Jdk for JDK 17 or 21.'}
 $env:JAVA_HOME = $Jdk
 $bt = Join-Path $AndroidSdk 'build-tools/36.0.0'
@@ -20,10 +25,9 @@ $work = Join-Path $project ('build/' + [Guid]::NewGuid().ToString('N'))
 $assets = Join-Path $work 'assets'
 $classes = Join-Path $work 'classes'
 $dex = Join-Path $work 'dex'
-$keys = Join-Path $project '.local'
+$keys = $SigningDirectory
 $out = Join-Path $project 'out'
 foreach ($dir in @($assets,$classes,$dex,$keys,$out)) {$null=New-Item -ItemType Directory -Path $dir -Force}
-if ((Get-Content -Raw -LiteralPath (Join-Path $source 'dist/server/radaz-build.json') | ConvertFrom-Json).product.version -ne '0.2.94') {throw 'This Android build requires RADAZ 0.2.94.'}
 Run 'node' @((Join-Path $project 'build-tablet-viewer.mjs'),(Resolve-Path -LiteralPath $ViewerSource).Path,$assets)
 $compiled = Join-Path $work 'res.zip'
 $unsigned = Join-Path $work 'unsigned.apk'
@@ -43,6 +47,7 @@ $keystore = Join-Path $keys 'tablet.p12'
 $protected = Join-Path $keys 'signing.dpapi'
 if ((Test-Path -LiteralPath $keystore) -ne (Test-Path -LiteralPath $protected)) {throw 'Private tablet signing files are incomplete.'}
 if (!(Test-Path -LiteralPath $protected)) {
+    if($PSBoundParameters.ContainsKey('SigningDirectory')){throw 'Existing release signing key not found.'}
     $random = [byte[]]::new(32)
     $rng=[Security.Cryptography.RandomNumberGenerator]::Create()
     try {$rng.GetBytes($random)} finally {$rng.Dispose()}
@@ -54,7 +59,7 @@ if (!(Test-Path -LiteralPath $protected)) {
     $secured=ConvertTo-SecureString (Get-Content -LiteralPath $protected -Raw).Trim()
     $env:RADAZ_TABLET_STORE_PASS=[Net.NetworkCredential]::new('tablet',$secured).Password
 }
-$apk=Join-Path $out 'RADAZ-Tablet-0.2.94-4.apk'
+$apk=Join-Path $out ("RADAZ-Tablet-{0}-{1}.apk" -f $product,$revision)
 try {
     Run (Join-Path $Jdk 'bin/java.exe') @('-jar',(Join-Path $bt 'lib/apksigner.jar'),'sign','--ks',$keystore,'--ks-key-alias','tablet','--ks-pass','env:RADAZ_TABLET_STORE_PASS','--key-pass','env:RADAZ_TABLET_STORE_PASS','--v4-signing-enabled','false','--out',$apk,$aligned)
 } finally {Remove-Item Env:RADAZ_TABLET_STORE_PASS -ErrorAction SilentlyContinue}

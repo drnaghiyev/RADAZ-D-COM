@@ -47,7 +47,7 @@ import { LocalizerOverlay } from '@/components/localizer-overlay';
 import { VolumePreview, type VolumeRenderSettings } from '@/components/volume-preview';
 import { volumeStyles, type VolumePreset, type VolumeQuality } from '@/lib/volume-presets';
 import { ArrowUpRight, Pencil, MoveVertical, Eye, EyeOff, Download, PanelLeftClose, Activity, Box, ChevronDown, CircleDot, Crosshair, Database, Disc3, Eraser, FileArchive, FileText, Focus, Grid2X2, Hand, Layers3, MoveDiagonal2, RotateCcw, Ruler, ScanLine, ScanSearch, ServerCog, Settings2, SlidersHorizontal, SunMoon, Trash2, FolderOpen, Triangle, Waypoints } from 'lucide-react';
-import { addLocalDicom, registerDiskDicom, getOriginalDicom, getDiskDicomSource, registerLocalDicom, registerLocalDicomFrames, shareLocalDicoms, borrowLocalDicoms, getSeriesVolume, createMprStacks, createObliqueMprStacks, getDefaultWindow, getLocalizerGeometry, getMprOrientations, getViewer, releaseLocalDicoms, rotateMprOrientation, thumbnailLocalDicom, loadDicomThumbnail, type MprOrientations, type MprMode, type MprSettings } from '@/lib/cornerstone';
+import { addLocalDicom, registerDiskDicom, getOriginalDicom, getDiskDicomSource, registerLocalDicom, registerLocalDicomFrames, shareLocalDicoms, borrowLocalDicoms, getSeriesVolume, createMprStacks, createObliqueMprStacks, getDefaultWindow, getLocalizerGeometry, getMprOrientations, getViewer, releaseLocalDicoms, rotateMprOrientation, representativeThumbnail, type MprOrientations, type MprMode, type MprSettings } from '@/lib/cornerstone';
 import { closestSlice, sameCoordinateSpace, normalOf, planeLabel, intersectPlanes, type Point3 } from '@/lib/localizer';
 import { iterateSources, filesFromDrop } from '@/lib/import-sources';
 import { prefetchOrdered } from '@/lib/import-pipeline';
@@ -451,7 +451,7 @@ export function ViewportPane({ onHover, projectionViews, anatomyControl, anatomy
       marks={paneMarks} selectedMarkId={selectedMarkId} onSelectMark={onSelectMark} cursor={cursor} onCursor={onCursor} onEditArrow={setEditingArrow} onUpdate={onUpdateMark} onAdd={mark=>{addPaneMark(mark);if(mark.kind==='arrow'&&!mark.anatomyId)setEditingArrow(mark.id);}} onRemove={onRemoveMark} onSelect={onSelect} navigate={navigate}/>
     <MeasurementCopies pane={containerRef.current} imageId={imageId} modality={series?.modality} seriesName={series?.name} studyId={series?.studyId} markCount={paneMarks.filter(mark=>mark.imageId===imageId).length}/>
     <ViewportMouseControls tool={tool} container={containerRef} element={elementRef.current} viewport={viewport} imageId={imageId} disabled={limited} marks={paneMarks}
-      onSelect={onSelect} onRemove={onRemoveMark} onClear={clearPaneImage} onEditArrow={setEditingArrow}/>
+      onSelect={onSelect} onRemove={onRemoveMark} onClear={clearPaneImage} onEditArrow={setEditingArrow} navigate={navigate}/>
     {editingArrow&&paneMarks.filter(mark=>mark.id===editingArrow&&mark.imageId===imageId&&mark.kind==='arrow').map(mark=><ArrowCommentEditor key={mark.id} mark={mark} onSave={comment=>onUpdateMark(mark.id,{comment})} onClose={()=>setEditingArrow(null)}/>)}
     {loadingProgress && <WorkProgress className="viewport-work-progress" progress={loadingProgress}/>}
     <div className="pane-badge">{id}</div>
@@ -752,22 +752,32 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
   const thumbnailAttempts = useRef(new Set<string>());
   useEffect(() => {
     if (!ready) return;
+    const pending=thumbnailAttempts.current;
+    const keyFor=(ids:string[])=>ids[Math.floor(ids.length/2)];
+    const available=new Set(seriesList.map(s=>keyFor(s.imageIds)));
+    for(const key of pending)if(!available.has(key))pending.delete(key);
     for (const series of seriesList) {
-      if (thumbnailJobs.current.size >= 2) break;
-      if(series.loading)continue;
-      const image = series.imageIds[Math.floor(series.imageIds.length/2)];
-      if ((series.thumb && series.thumbImageId===image) || !image || thumbnailAttempts.current.has(image)) continue;
-      thumbnailAttempts.current.add(image); thumbnailJobs.current.add(image);
-      void loadDicomThumbnail(image).then(thumb => {
-        if (!thumb || !listRef.current.some(item => item.id === series.id && item.imageIds.includes(image))) return;
-        const media = mediaSeries.current.get(series.id);
-        if (media) mediaSeries.current.set(series.id, {...media, thumb,thumbImageId:image});
-        const next = listRef.current.map(item => item.id === series.id ? {...item, thumb,thumbImageId:image} : item);
-        listRef.current = next; setSeriesList(next);
-      }).catch(() => {}).finally(() => {
-        thumbnailJobs.current.delete(image);
-        // Advance the queue even when a damaged representative image fails.
-        setSeriesList(current => [...current]);
+      if (thumbnailJobs.current.size>=2)break;
+      const key=keyFor(series.imageIds);
+      if(series.loading||!key||pending.has(key))continue;
+      if(series.thumb && series.thumbImageId===key)continue;
+      pending.add(key);thumbnailJobs.current.add(key);
+      const current=()=>listRef.current.some(s=>s.id===series.id&&keyFor(s.imageIds)===key);
+      void (async()=>{
+        let result=await representativeThumbnail(series.imageIds,current);
+        if(!result && current()){
+          await new Promise(resolve=>setTimeout(resolve,750));
+          result=await representativeThumbnail(series.imageIds,current);
+        }
+        if(!result||!current())return;
+        const update={thumb:result.thumb,thumbImageId:result.image};
+        const media=mediaSeries.current.get(series.id);
+        if(media)mediaSeries.current.set(series.id,{...media,...update});
+        const next=listRef.current.map(item=>item.id===series.id?{...item,...update}:item);
+        listRef.current=next;setSeriesList(next);
+      })().catch(()=>{}).finally(()=>{
+        thumbnailJobs.current.delete(key);
+        if(current()||listRef.current.length)setSeriesList(previous=>[...previous]);
       });
     }
   }, [ready, seriesList]);
@@ -1016,6 +1026,7 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
   useEffect(() => {
     if (detachedMode || typeof BroadcastChannel === 'undefined') return;
     const load = async (uids: string[], append=false) => {
+      if(!append && location.origin==='https://appassets.androidplatform.net'){setRecordsPage(null);setWorkspace('viewer');}
       const request = append?importEpoch.current:++importEpoch.current;
       setStatus('Local arxivdən müayinə açılır…');
       try {
@@ -1025,9 +1036,19 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
     return registerViewer(load, (progress,error) => { setTransferProgress(progress); if(error)setStatus(error); });
   }, [detachedMode, loadArchiveStudies]);
 
+  useEffect(()=>{
+    if(location.origin!=='https://appassets.androidplatform.net')return;
+    const back=()=>{if(!history.state?.radazTabletVolume)setWorkspace(view=>view==='3d'?'viewer':view);};
+    window.addEventListener('popstate',back);return ()=>window.removeEventListener('popstate',back);
+  },[]);
+
   const openDetached = (mode: DetachedMode | 'stitch') => {
     const source=listRef.current.find(s=>s.id===selectedIdRef.current);
     if(!source){setStatus('Əvvəlcə seriya seçin');return;}
+    if(mode==='3d' && location.origin==='https://appassets.androidplatform.net'){
+      history.pushState({...history.state,radazTabletVolume:true},'','#volume');
+      setWorkspace('3d');return;
+    }
     const key=`${mode}:${source.id}`;
     const existing=detachedWindows.current.get(key);
     if(existing&&!existing.closed){existing.focus();existing.dispatchEvent(new Event('radaz-maximize-window'));return;}
@@ -1436,7 +1457,7 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
   const jobProgress = importProgress || transferProgress || loadProgress || mediaLoading;
   const floatingProgress = !detachedMode && (railHidden || importOpen);
   const sourceLoading: LoadingProgress | null = volumeSeries?.loading ? {label:'Seriya yüklənir',done:volumeSeries.imageIds.length,total:volumeSeries.discovered||0,indeterminate:!volumeSeries.discovered} : null;
-  if(['3d'].includes(workspace))return <SharedVolumeView series={volumeSeries} anatomy={volumeResultFor(volumeSeries)} onClose={()=>{if(detachedMode)window.close();else setWorkspace('viewer');}}/>;
+  if(['3d'].includes(workspace))return <SharedVolumeView series={volumeSeries} anatomy={volumeResultFor(volumeSeries)} onClose={()=>{if(detachedMode)window.close();else if(history.state?.radazTabletVolume)history.back();else setWorkspace('viewer');}}/>;
   return <ToolbarWorkspace scope={workspace}><main className={`workstation grouped-workstation ${railHidden ? 'rail-hidden' : ''} ${detachedMode ? 'detached' : ''}`} data-mode={detachedMode || 'viewer'} style={measurementVariables as React.CSSProperties}
     onDragOverCapture={event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; } }}
     onDropCapture={event => {

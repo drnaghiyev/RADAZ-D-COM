@@ -69,7 +69,7 @@ final class TabletAssets {
         }
         if ("/local-archive-api/license".equals(path) && "GET".equals(request.getMethod())) return trial();
         if ("/radaz-installation.json".equals(path)) return json(200, "{\"managed\":false}");
-        if ("/local-archive-api/updates".equals(path)) return json(200, "{\"state\":\"current\",\"message\":\"Android sınaq paketi quraşdırılıb.\"}");
+        if ("/local-archive-api/updates".equals(path)) return json(200, "{\"state\":\"current\",\"message\":\"Planşet üçün yenilənməni yoxlayın.\"}");
         if (path.startsWith("/local-archive-api/window/")) return json(200,"{}");
         if (path.startsWith("/local-archive-api/") || path.startsWith("/smart-volume-api/") ||
                 path.startsWith("/anatomy-volume/") || path.startsWith("/api/") || path.equals("/radaz-update")) return unavailable();

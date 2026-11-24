@@ -242,8 +242,29 @@ export function getMeasurementUnit(imageId: string): 'mm' | 'px' {
 }
 
 export async function loadDicomThumbnail(imageId: string): Promise<string | undefined> {
-  await decodeRegisteredDicom(imageId);
+  if(!records.get(imageId)?.pixels.length) {
+    const borrowed=borrowedLoads.get(imageId);
+    if(borrowed)await borrowed();else await decodeRegisteredDicom(imageId);
+  }
   return thumbnailLocalDicom(imageId);
+}
+
+/** Prefer a central visible frame, including when one source frame cannot be decoded. */
+export async function representativeThumbnail(ids:string[], current:()=>boolean) {
+  const middle=Math.floor(ids.length/2);
+  const candidates=new Set([middle,middle-1,middle+1,Math.floor(middle/2),Math.floor((middle+ids.length)/2),0,ids.length-1]);
+  let flat:{thumb:string;image:string}|undefined;
+  for(const index of candidates){
+    const image=ids[index];if(!image)continue;
+    if(!current())return;
+    try {
+      const thumb=await loadDicomThumbnail(image), item=records.get(image);
+      if(!thumb||!item)continue;
+      if(item.color||item.max>item.min)return {thumb,image};
+      flat??={thumb,image};
+    }catch{/* Try another frame from this series. */}
+  }
+  return flat;
 }
 
 /** Decode compressed DICOM for the offline CD preview without retaining a volume. */
@@ -282,7 +303,10 @@ export function thumbnailLocalDicom(imageId: string): string | undefined {
   const context = canvas.getContext('2d');
   if (!context) return;
   const image = context.createImageData(width, height);
-  const { wl, ww } = defaultWindow(item);
+  let { wl, ww } = defaultWindow(item);
+  if(!item.color && item.max>item.min && (wl-ww/2>=item.max || wl+ww/2<=item.min)){
+    ww=item.max-item.min;wl=(item.min+item.max)/2;
+  }
   const lower = wl - ww / 2;
   const invert = dataSet.string('x00280004') === 'MONOCHROME1';
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
@@ -394,7 +418,7 @@ function decodeRegisteredDicom(id:string):Promise<string> {
   })();
   const entry=pendingDicoms.get(id);
   if(!entry)return Promise.resolve(id);
-  return entry.promise ??= decodeLocalDicom(entry.bytes,entry.ds,id).then(value=>{pendingDicoms.delete(id);return value;});
+  return entry.promise ??= decodeLocalDicom(entry.bytes,entry.ds,id).then(value=>{pendingDicoms.delete(id);return value;},error=>{entry.promise=undefined;throw error;});
 }
 export async function addLocalDicom(bytes: Uint8Array, ds: DataSet): Promise<string> {
   return decodeRegisteredDicom(registerLocalDicom(bytes,ds));
@@ -528,6 +552,61 @@ export function seriesGeometry(imageIds:string[]) {
     return {...g,id,frameIndex:record?.frameIndex,sopUID:derived.has(id)||geometryOverrides.has(id)?undefined:ds.string('x00080018')?.trim(),sliceThickness:asNumber(ds,'x00180050',0),spacingBetweenSlices:asNumber(ds,'x00180088',0)};
   }));
 }
+async function readDisplayPlane(id:string,signal:AbortSignal):Promise<RecordItem> {
+  const record=records.get(id);
+  if(!record)throw Error('Seriya bağlanıb.');
+  if(record.pixels.length)return record;
+  const pending=pendingDicoms.get(id), disk=diskDicoms.get(id);
+  if(!pending&&!disk){
+    await borrowedLoads.get(id)?.();
+    const resolved=records.get(id);
+    if(!resolved?.pixels.length)throw Error('Kəsik oxunmadı.');
+    return resolved;
+  }
+  let bytes:Uint8Array, ds:DataSet;
+  if(pending){bytes=pending.bytes;ds=pending.ds;}
+  else{
+    const response=await fetch(disk!.url,{signal:AbortSignal.any([signal,disk!.signal])});
+    if(!response.ok)throw Error('Kəsik oxunmadı.');
+    bytes=new Uint8Array(await response.arrayBuffer());ds=parseDicomFile(bytes);
+  }
+  signal.throwIfAborted();
+  const temporary=`localdicom:${serial++}`;
+  records.set(temporary,record);
+  try{await decodeLocalDicom(bytes,ds,temporary);return records.get(temporary)!;}
+  finally{records.delete(temporary);}
+}
+
+/** Bounded display texture. Its voxel centres and physical extent match the acquisition. */
+export async function tabletDisplayVolume(imageIds:string[], maxDimension:number,budgetBytes:number,signal:AbortSignal,progress:(percent:number)=>void) {
+  const source=seriesGeometry(imageIds);
+  const dimensions=volumeDimensions(source.dimensions,maxDimension,budgetBytes,4);
+  const scale=source.dimensions.map((n,i)=>n/dimensions[i]);
+  const spacing=source.spacing.map((value,i)=>value*scale[i]) as Point3;
+  const origin=source.origin.map((value,axis)=>value+scale.reduce((sum,ratio,i)=>sum+source.direction[i*3+axis]*source.spacing[i]*(ratio-1)/2,0)) as Point3;
+  const weights=source.dimensions.map((size,i)=>areaWeights(size,dimensions[i]));
+  const planeSize=dimensions[0]*dimensions[1];
+  const values=new Float32Array(planeSize*dimensions[2]);
+  let last=-1,plane:Float32Array<ArrayBufferLike>=new Float32Array(0),minimum=Infinity,maximum=-Infinity;
+  let lastYield=performance.now();
+  for(let z=0;z<dimensions[2];z++){
+    const offset=z*planeSize;
+    for(const bin of weights[2][z]){
+      signal.throwIfAborted();
+      if(last!==bin.index){
+        const record=await readDisplayPlane(source.imageIds[bin.index],signal);
+        if(record.color || record.pixels.length!==record.columns*record.rows)throw Error('3D üçün monoxrom KT və ya MRT seriyası seçin.');
+        plane=resamplePlane(record.pixels,record.columns,weights[0],weights[1]);last=bin.index;
+      }
+      for(let i=0;i<planeSize;i++)values[offset+i]+=plane[i]*bin.weight;
+    }
+    for(let i=offset;i<offset+planeSize;i++){minimum=Math.min(minimum,values[i]);maximum=Math.max(maximum,values[i]);}
+    if(performance.now()-lastYield>20){progress(Math.round(100*(z+1)/dimensions[2]));await yieldToBrowser();lastYield=performance.now();}
+  }
+  signal.throwIfAborted();
+  return {dimensions,spacing,origin,direction:source.direction,values,range:[minimum,Math.max(minimum+1,maximum)] as [number,number],sourceSlices:source.dimensions[2]};
+}
+
 /** Stream a complete, geometry-validated CT/MR volume at the model's 3 mm scale.
  * Area averaging preserves every source voxel and the physical voxel centres;
  * it never uses screen captures, display windowing or arbitrary slice numbers.
