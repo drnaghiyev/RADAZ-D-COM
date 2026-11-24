@@ -5,9 +5,9 @@ import {networkCall,usePrivateDesktop,can,type NetworkState,type Delivery} from 
 import {NetworkPreview} from '@/components/private-network/preview';
 import {NetworkConfig,NetworkMembers} from '@/components/private-network/manage';
 import {NetworkPolicy} from '@/components/private-network/policy';
-import {NetworkSettingsLink} from '@/components/private-network/settings-link';
+import {NetworkSettingsLink,settingsDestinationEvent,type SettingsDestination} from '@/components/private-network/settings-link';
 import {InternetPairing,NetworkChoice} from './internet';
-import {chooseNetwork,currentNetwork} from './api';
+import {chooseNetwork,currentNetwork,type NetworkProfile} from './api';
 import {NetworkSettingsAccess,NetworkSettingsContext} from '@/components/private-network/settings-access';
 import {openStudyInViewer} from '@/lib/viewer-session';
 import '@/components/private-network/network.css';
@@ -37,43 +37,68 @@ function Transfers({rows,inbox,state,act}:{rows:Delivery[];inbox:boolean;state:N
 export function NetworkWorkspace({settings=false}:{settings?:boolean}){
  const title=settings?'DICOM Network ayarları':'DICOM Network';
  const desktop=usePrivateDesktop(),[section,setSection]=useState<Section>(settings?'settings':'inbox'),[clinic,setClinic]=useState('');
+ const [target,setTarget]=useState<SettingsDestination>(()=>({profile:currentNetwork(),
+   clinic:typeof window==='undefined'?undefined:new URLSearchParams(location.search).get('clinic')||undefined}));
+ const switchNetwork=useCallback((profile:NetworkProfile,preferredClinic?:string)=>{
+   const url=new URL(location.href);
+   url.searchParams.set('network',profile);
+   if(preferredClinic)url.searchParams.set('clinic',preferredClinic);
+   else url.searchParams.delete('clinic');
+   chooseNetwork(profile);
+   window.history.replaceState(window.history.state,'',url);
+   setClinic('');
+   setTarget({profile,clinic:preferredClinic});
+ },[]);
+ useEffect(()=>{
+   if(!settings||!desktop)return;
+   const navigate=(event:Event)=>{
+     const next=(event as CustomEvent<SettingsDestination>).detail;
+     if(!next||(next.profile!=='private'&&next.profile!=='internet'))return;
+     if(next.profile===target.profile&&(!next.clinic||next.clinic===clinic))return;
+     switchNetwork(next.profile,next.clinic);
+     setSection('settings');
+   };
+   window.addEventListener(settingsDestinationEvent,navigate);
+   return ()=>window.removeEventListener(settingsDestinationEvent,navigate);
+ },[settings,desktop,target.profile,clinic,switchNetwork]);
  useEffect(()=>{document.title=title+' · RADAZ';},[title]);
  if(!desktop)return <main className="dn dn-page"><h1>{title}</h1><p>Windows RADAZ Desktop proqramında açın.</p></main>;
- const shared={title,settings,section,setSection,clinic,setClinic};
- if(settings||configurationSections.some(([id])=>section===id)){
-   return <NetworkSettingsAccess back={settings?undefined:()=>setSection('inbox')}><NetworkPanel {...shared}/></NetworkSettingsAccess>;
- }
- return <NetworkPanel {...shared}/>;
+ const protectedSection=settings||configurationSections.some(([id])=>section===id);
+ return <NetworkSettingsAccess required={protectedSection} back={settings?undefined:()=>setSection('inbox')}>
+   <NetworkPanel key={target.profile+':'+(target.clinic||'')} {...{title,settings,section,setSection,clinic,setClinic,target,switchNetwork}}/>
+ </NetworkSettingsAccess>;
 }
-function NetworkPanel({title,settings,section,setSection,clinic,setClinic}:{
+function NetworkPanel({title,settings,section,setSection,clinic,setClinic,target,switchNetwork}:{
  title:string;settings:boolean;section:Section;setSection:(value:Section)=>void;clinic:string;setClinic:(value:string)=>void;
+ target:SettingsDestination;switchNetwork:(profile:NetworkProfile)=>void;
 }){
  const access=useContext(NetworkSettingsContext),request=access?.request??networkCall,controls=access?.controls,stateAction=access?'settings_state':'state';
  const [state,setState]=useState<NetworkState|null>(null),[message,setMessage]=useState(''),[busy,setBusy]=useState(false);
  const [loadError,setLoadError]=useState('');
- const sequence=useRef({id:0}),mutating=useRef(false);
- const refresh=useCallback(async()=>{const id=++sequence.current.id;try{const data=await request<NetworkState>(stateAction,{clinic});if(sequence.current.id!==id)return;setState(data);setLoadError('');
-   if(!clinic&&data.clinics?.length){const requested=new URLSearchParams(location.search).get('clinic');setClinic(data.clinics.find(c=>c.id===requested)?.id||data.clinic||data.clinics[0].id);}
+ const sequence=useRef({id:0,active:false}),mutating=useRef(false);
+ const refresh=useCallback(async()=>{if(!sequence.current.active)return;const id=++sequence.current.id;try{const data=await request<NetworkState>(stateAction,{clinic});if(sequence.current.id!==id)return;setState(data);setLoadError('');
+   if(!clinic&&data.clinics?.length)setClinic(data.clinics.find(c=>c.id===target.clinic)?.id||data.clinic||data.clinics[0].id);
    if(!data.configured&&stateAction==='settings_state')setSection('settings');
   }catch(e){if(sequence.current.id===id){setState(null);setLoadError(e instanceof Error?e.message:String(e));}}
- },[clinic,request,setClinic,setSection,stateAction]);
+ },[clinic,request,setClinic,setSection,stateAction,target.clinic]);
  useEffect(()=>{
    const current=sequence.current;
+   current.active=true;
    const initial=window.setTimeout(()=>void refresh(),0);
    const timer=window.setInterval(()=>{if(!mutating.current)void refresh();},7000);
-   return ()=>{window.clearTimeout(initial);window.clearInterval(timer);++current.id;};
+   return ()=>{current.active=false;window.clearTimeout(initial);window.clearInterval(timer);++current.id;};
  },[refresh]);
  async function act(action:string,payload:Record<string,unknown>){if(mutating.current)return false;mutating.current=true;setBusy(true);setMessage('');try{await request(action,payload);await refresh();setMessage('Əməliyyat tamamlandı.');return true;}catch(e){setMessage(e instanceof Error?e.message:String(e));return false;}finally{setBusy(false);mutating.current=false;}}
- return <main className="dn dn-page"><header className="dn-top"><div><Network size={25}/><h1>{title}</h1></div>{state&&<span role="status" className={state.online?'dn-online':''}>{state.online?'Qoşulub':state.enabled?'Əlaqə yoxdur':'Deaktiv'}</span>}{!settings&&<NetworkSettingsLink clinic={clinic}/>}{controls}<button onClick={()=>void refresh()} aria-label="Yenilə"><RefreshCw size={17}/></button></header>
+ return <main className="dn dn-page"><header className="dn-top"><div><Network size={25}/><h1>{title}</h1></div>{state&&<span role="status" className={state.online?'dn-online':''}>{state.online?'Qoşulub':state.enabled?'Əlaqə yoxdur':'Deaktiv'}</span>}{!settings&&<NetworkSettingsLink clinic={clinic} profile={target.profile}/>}{controls}<button onClick={()=>void refresh()} aria-label="Yenilə"><RefreshCw size={17}/></button></header>
  <div className="dn-layout"><aside><label>Klinika<select value={clinic} disabled={busy} onChange={e=>{++sequence.current.id;setClinic(e.target.value);setState(null);setMessage('');}}>{!clinic&&<option value="">Seçin</option>}{(state?.clinics||[]).map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
- <NetworkChoice disabled={busy}/>
+ <NetworkChoice profile={target.profile} onChange={switchNetwork} disabled={busy}/>
  <nav aria-label={title}>{(settings?configurationSections:sections).map(([id,label,Icon])=><button key={id} disabled={settings&&id!=='settings'&&!state?.configured} aria-current={section===id?'page':undefined} onClick={()=>{setSection(id);setMessage('');}}><Icon size={17}/>{label}</button>)}</nav></aside>
  <section className="dn-body"><h2>{sections.find(s=>s[0]===section)?.[1]}</h2>{(loadError||state?.error)&&<p role="alert">{loadError||state?.error}</p>}{message&&<p role="status">{message}</p>}
  {state?<fieldset disabled={busy} key={state.clinic||'-'} className="dn-fields">
- {settings&&currentNetwork()==='private'&&(section==='settings'||section==='people')&&<article><h3>Klinikadan həkimlərin kompüterlərinə göndəriş</h3>
-   <button onClick={()=>{chooseNetwork('internet');location.assign('/private-network/settings?network=internet');}}>RADAZ İnternet · həkim və kompüter qoş</button></article>}
- {currentNetwork()==='internet'&&(section==='settings'||section==='people')&&<InternetPairing state={state} act={act}/>}
- {section==='settings'&&(currentNetwork()!=='internet'||state.configured)&&<NetworkConfig key={String(state.configured)+String(state.enabled)} state={state} act={act}/>}
+ {settings&&target.profile==='private'&&(section==='settings'||section==='people')&&<article><h3>Klinikadan həkimlərin kompüterlərinə göndəriş</h3>
+   <button onClick={()=>{setSection('settings');switchNetwork('internet');}}>RADAZ İnternet · həkim və kompüter qoş</button></article>}
+ {target.profile==='internet'&&(section==='settings'||section==='people')&&<InternetPairing state={state} act={act}/>}
+ {section==='settings'&&(target.profile!=='internet'||state.configured)&&<NetworkConfig key={String(state.configured)+String(state.enabled)} state={state} act={act}/>}
  {section==='people'&&<NetworkMembers state={state} act={act} request={request}/>}
  {(section==='schedule'||section==='rules')&&<NetworkPolicy key={section} state={state} section={section} act={act}/>}
  {section==='sent'&&!!state.queue?.some(job=>['queued','paused','error'].includes(job.state))&&<article><h3>Lokal növbə</h3>{state.queue.filter(job=>['queued','paused','error'].includes(job.state)).map(job=><div className="dn-item" key={job.id}><div><strong>{statuses[job.state]||job.state}</strong><small>{job.study} {job.error}</small></div><div className="dn-row"><button onClick={()=>act('control',{job:job.id,action:job.state==='queued'?'pause':'resume'})}>{job.state==='queued'?'Dayandır':'Davam et'}</button><button onClick={()=>act('control',{job:job.id,action:'cancel'})}>Ləğv et</button></div></div>)}</article>}

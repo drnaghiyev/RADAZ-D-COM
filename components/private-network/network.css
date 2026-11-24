@@ -8,3 +8,6 @@
 .dn-member-editor{margin:12px 0;padding:12px;border:1px solid #355364;border-radius:5px}
 .dn button.dn-member-delete{color:#ffd6ce;background:#572b2b;border-color:#9d5a53}
 .dn article.dn-access-form{max-width:28rem;margin:clamp(1rem,8vh,5rem) auto;padding:1.5rem}
+.dn-layout > aside{min-width:0}
+.dn-layout > aside > label{min-width:0;grid-template-columns:minmax(0,1fr)}
+.dn-layout > aside select{width:100%;min-width:0;text-overflow:ellipsis}

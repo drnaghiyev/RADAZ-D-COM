@@ -1,14 +1,12 @@
 'use client';
 import {useState} from 'react';
-import {chooseNetwork,currentNetwork,type Act,type NetworkProfile,type NetworkState} from './api';
+import type {Act,NetworkProfile,NetworkState} from './api';
 
-export function NetworkChoice({onChange,disabled}:{onChange?:(profile:NetworkProfile)=>void;disabled?:boolean}){
-  return <label>Bağlantı<select aria-label="Şəbəkə bağlantısı" disabled={disabled} value={currentNetwork()} onChange={e=>{
-    const profile=e.target.value as NetworkProfile;
-    chooseNetwork(profile);
-    if(onChange)onChange(profile);
-    else location.assign(location.pathname+'?network='+profile);
-  }}><option value="private">Mövcud şəxsi şəbəkə</option><option value="internet">RADAZ İnternet · klinika və həkimlər</option></select></label>;
+export function NetworkChoice({profile,onChange,disabled}:{profile:NetworkProfile;onChange:(profile:NetworkProfile)=>void;disabled?:boolean}){
+  return <label>Bağlantı<select aria-label="Şəbəkə bağlantısı" disabled={disabled} value={profile}
+    onChange={e=>onChange(e.currentTarget.value as NetworkProfile)}>
+    <option value="private">Mövcud şəxsi şəbəkə</option><option value="internet">RADAZ İnternet · klinika və həkimlər</option>
+  </select></label>;
 }
 
 export function InternetPairing({state,act}:{state:NetworkState;act:Act}){

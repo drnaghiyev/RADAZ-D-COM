@@ -126,8 +126,11 @@ test('Viewer settings opens the desktop network settings window and reuses it',a
   await settings.getByRole('button',{name:'Növbə əlavə et'}).waitFor();
   await nav.getByRole('button',{name:'Avtomatik göndərmə'}).click();
   await settings.getByRole('heading',{name:'Avtomatik göndərmə'}).waitFor();
+  const documentStarted=await settings.evaluate(()=>performance.timeOrigin);
   await link.click();
-  await unlockTestSettings(settings,password);
+  await settings.getByRole('heading',{name:'Avtomatik göndərmə'}).waitFor();
+  assert.equal(await settings.evaluate(()=>performance.timeOrigin),documentStarted);
+  await nav.getByRole('button',{name:'Bağlantı və qəbul ayarları'}).click();
   await settings.getByRole('heading',{name:'Cihaz və bağlantı'}).waitFor();
   assert.equal(context.pages().length,2);
   state={enabled:false,configured:false,online:false};
@@ -152,6 +155,74 @@ test('Viewer settings opens the desktop network settings window and reuses it',a
   assert.equal(networkRequests,0);
  }finally{await browser.close();}
 });
+test('An unlocked network window keeps access across navigation and contains the network selector',async()=>{
+ const browser=await chromium.launch({headless:true,executablePath:process.env.RADAZ_CHROME||'C:/Program Files/Google/Chrome/Application/chrome.exe'});
+ try{
+  const context=await browser.newContext({userAgent:'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Electron/39.0.0'});
+  const password=testPassword();
+  let unlocks=0;
+  context.on('request',r=>{if(r.url().endsWith('/settings_unlock'))unlocks++;});
+  await context.route('**/local-archive-api/license',route=>route.fulfill({json:{valid:true,required:true,kind:'owner'}}));
+  const reply=route=>{
+   const req=route.request(),body=req.postDataJSON();
+   const internet=body._profile==='internet';
+   const clinics=internet?[{id:'online',name:'Internet clinic'}]:[{id:'alpha',name:'Klinika A'},{id:'beta',name:'Klinika B'}];
+   assert.ok(!body.clinic||clinics.some(c=>c.id===body.clinic),'Clinic belongs to the selected network');
+   return route.fulfill({json:{...mock,internet,clinics,clinic:body.clinic||clinics[0].id}});
+  };
+  await context.route('**/local-archive-api/private-network/state',route=>{
+   assert.equal(route.request().headers()['x-radaz-settings-session'],undefined);
+   return reply(route);
+  });
+  await mockSettingsGate(context,reply,password);
+  const page=await context.newPage();
+  page.setDefaultTimeout(7000);
+  const button=name=>page.getByRole('button',{name,exact:true});
+  const selector=page.getByRole('combobox',{name:'Şəbəkə bağlantısı',exact:true});
+  const clinic=page.locator('.dn-layout aside').getByRole('combobox',{name:'Klinika',exact:true});
+  await page.goto(new URL('private-network/settings?network=private&clinic=beta',base).href);
+  await unlockTestSettings(page,password);
+  await page.waitForFunction(()=>document.querySelector('.dn-layout aside select')?.value==='beta');
+  const documentStarted=await page.evaluate(()=>performance.timeOrigin);
+  for(const width of [1920,900,721,600,390]){
+   await page.setViewportSize({width,height:850});
+   assert.ok(await selector.evaluate(select=>{
+    const aside=select.closest('aside'),panel=aside.getBoundingClientRect(),control=select.getBoundingClientRect();
+    const css=getComputedStyle(aside);
+    return control.width>40 && control.left>=panel.left+parseFloat(css.paddingLeft)-1
+     && control.right<=panel.right-parseFloat(css.paddingRight)+1;
+   }),'Connection selector fits the sidebar at width '+width);
+  }
+  await page.setViewportSize({width:1280,height:900});
+  await button('Klinikalar və radioloqlar').click();
+  await button('RADAZ İnternet · həkim və kompüter qoş').click();
+  await page.getByRole('heading',{name:'Bu kompüterin RADAZ ID-si'}).waitFor();
+  assert.equal(await clinic.inputValue(),'online');
+  assert.equal(await page.evaluate(()=>performance.timeOrigin),documentStarted);
+  assert.equal(new URL(page.url()).searchParams.has('clinic'),false);
+  await selector.selectOption('private');
+  await button('RADAZ İnternet · həkim və kompüter qoş').waitFor();
+  await clinic.selectOption('beta');
+  await button('Növbə cədvəli').click();
+  await button('Avtomatik göndərmə').click();
+  await selector.selectOption('internet');
+  await page.waitForFunction(()=>document.querySelector('.dn-layout aside select')?.value==='online');
+  assert.equal(unlocks,1);
+  await button('Kilidlə').click();
+  await page.getByLabel('Şifrə',{exact:true}).waitFor();
+  await page.goto(new URL('private-network?network=private',base).href);
+  await button('Növbə cədvəli').click();
+  await unlockTestSettings(page,password);
+  await button('Mənə göndərilənlər').click();
+  await page.getByText('Qəbul gözləyən göndəriş yoxdur.').waitFor();
+  await button('Avtomatik göndərmə').click();
+  await button('Kilidlə').waitFor();
+  assert.equal(unlocks,2);
+  await page.reload();
+  await button('Bağlantı və qəbul ayarları').click();
+  await page.getByLabel('Şifrə',{exact:true}).waitFor();
+ }finally{await browser.close();}
+});
 test('Desktop network checks only selected archive studies and keeps web access disabled',async()=>{
  const browser=await chromium.launch({headless:true,executablePath:process.env.RADAZ_CHROME||'C:/Program Files/Google/Chrome/Application/chrome.exe'});
  try{
@@ -164,12 +235,12 @@ test('Desktop network checks only selected archive studies and keeps web access 
  await mockSettingsGate(context,route=>route.fulfill({json:mock}),password);
  const page=await context.newPage();page.setDefaultTimeout(6500);await page.goto(new URL('archive',base).href);
  const sendButton=page.getByRole('button',{name:'RADAZ-a göndər',exact:true});await sendButton.waitFor();assert.equal(await sendButton.isDisabled(),true);
- await page.getByLabel('TEST 1 müayinəsini seç',{exact:true}).check();await sendButton.click();const dialog=page.getByRole('dialog');await dialog.getByRole('combobox').nth(2).selectOption('dr1');assert.deepEqual(await dialog.locator('li').allTextContents(),['TEST 1 · CT']);await dialog.getByRole('button',{name:'Göndər',exact:true}).click();await dialog.getByText('Göndərişlər növbəyə əlavə edildi.').waitFor();
+ await page.getByLabel('TEST 1 müayinəsini seç',{exact:true}).check();await sendButton.click();const dialog=page.getByRole('dialog');await dialog.getByRole('combobox',{name:'Radioloq',exact:true}).selectOption('dr1');assert.deepEqual(await dialog.locator('li').allTextContents(),['TEST 1 · CT']);await dialog.getByRole('button',{name:'Göndər',exact:true}).click();await dialog.getByText('Göndərişlər növbəyə əlavə edildi.').waitFor();
  assert.deepEqual(calls.filter(c=>c.action==='send').map(c=>[c.payload.study,c.payload.recipients]),[['2.25.2',['dr1']]]);
  await dialog.getByRole('button',{name:'Bağla',exact:true}).click();
  await page.getByLabel('TEST 0 müayinəsini seç',{exact:true}).check();
  await sendButton.click();
- await dialog.getByRole('combobox').nth(2).selectOption('dr1');
+ await dialog.getByRole('combobox',{name:'Radioloq',exact:true}).selectOption('dr1');
  dropOnce=true;
  const nextSend=dialog.getByRole('button',{name:'Göndər',exact:true});
  await nextSend.click();
@@ -222,7 +293,7 @@ test('PACS checks study and series identity before archiving a selected study fo
   await page.getByRole('button',{name:/Axtar/}).first().click();
   const first=page.getByLabel('QA_STUDY müayinəsini seç',{exact:true});
   await first.check();
-  async function send(){await page.getByRole('button',{name:'RADAZ-a göndər',exact:true}).click();const dialog=page.getByRole('dialog');await dialog.getByRole('combobox').nth(2).selectOption('dr1');await dialog.getByRole('button',{name:'Göndər',exact:true}).click();return dialog;}
+  async function send(){await page.getByRole('button',{name:'RADAZ-a göndər',exact:true}).click();const dialog=page.getByRole('dialog');await dialog.getByRole('combobox',{name:'Radioloq',exact:true}).selectOption('dr1');await dialog.getByRole('button',{name:'Göndər',exact:true}).click();return dialog;}
   const good=await send();await good.getByText('Göndərişlər növbəyə əlavə edildi.').waitFor();
   assert.deepEqual(events,[{path:'import',bytes:bytes.length,ae:'QA_PACS',source:'private-network-stage'},{path:'send',study:uid,onlyUids:[sop]}]);
   await good.getByRole('button',{name:'Bağla',exact:true}).click();await first.uncheck();

@@ -12,7 +12,7 @@ const revoke=(session:string)=>networkCall('settings_lock',{},session).catch(()=
 
 export const NetworkSettingsContext=createContext<{request:NetworkRequest;controls:ReactNode}|null>(null);
 
-export function NetworkSettingsAccess({children,back}:{children:ReactNode;back?:()=>void}){
+export function NetworkSettingsAccess({children,required,back}:{children:ReactNode;required:boolean;back?:()=>void}){
   const [passwordSet,setPasswordSet]=useState<boolean|null>(null),[session,setSession]=useState(''),[changing,setChanging]=useState(false);
   const [error,setError]=useState(''),[submitting,setSubmitting]=useState(false),[checking,setChecking]=useState(true);
   const grant=useRef({session:'',expiresAt:0}),generation=useRef(0),active=useRef(false);
@@ -36,7 +36,6 @@ export function NetworkSettingsAccess({children,back}:{children:ReactNode;back?:
   },[]);
   useEffect(()=>{
     active.current=true;
-    const initialStatus=window.setTimeout(()=>void status(),0);
     const onHide=()=>lock();
     window.addEventListener('pagehide',onHide);
     if(typeof BroadcastChannel==='function'){
@@ -48,13 +47,17 @@ export function NetworkSettingsAccess({children,back}:{children:ReactNode;back?:
     }
     return ()=>{
       active.current=false;
-      window.clearTimeout(initialStatus);
       window.removeEventListener('pagehide',onHide);
       notices.current?.close();notices.current=null;
       if(grant.current.session)void revoke(grant.current.session);
       grant.current={session:'',expiresAt:0};
     };
-  },[lock,status]);
+  },[lock]);
+  useEffect(()=>{
+    if(!required)return;
+    const check=window.setTimeout(()=>void status(),0);
+    return ()=>window.clearTimeout(check);
+  },[required,status]);
   useEffect(()=>{
     if(!session)return;
     const checkExpiry=()=>{if(grant.current.session&&Date.now()>=grant.current.expiresAt)lock(expired);};
@@ -104,6 +107,7 @@ export function NetworkSettingsAccess({children,back}:{children:ReactNode;back?:
       }
     }finally{if(active.current)setSubmitting(false);}
   }
+  if(!required)return children;
   if(session&&!changing)return <NetworkSettingsContext.Provider value={{request,controls:<>
     <button type="button" onClick={()=>{setError('');setChanging(true);}}><KeyRound size={16}/>Şifrəni dəyiş</button>
     <button type="button" onClick={()=>lock()}><LockKeyhole size={16}/>Kilidlə</button>
