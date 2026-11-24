@@ -1,12 +1,17 @@
 """Clinic isolation, delivery authorization, relay expiry, integrity and restart tests."""
 import hashlib
+import http.client
+import socket
+import socketserver
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'bridge'))
-from private_network_authority import Authority, Fault
+from private_network_authority import Authority, Fault, make_server
 
 class PrivateNetworkAuthorityTest(unittest.TestCase):
     def setUp(self):
@@ -35,6 +40,41 @@ class PrivateNetworkAuthorityTest(unittest.TestCase):
         delivery=obj['deliveries'][0]['id']
         self.call(self.reader,'accept',delivery=delivery)
         return delivery
+
+    @unittest.skipUnless(hasattr(socketserver, 'ThreadingUnixStreamServer'), 'Production relay uses a Unix socket')
+    def test_large_download_continues_while_the_recipient_is_making_progress(self):
+        pixels = bytes(2 * 1024 * 1024)
+        digest = hashlib.sha256(pixels).hexdigest()
+        self.file.update(size=len(pixels), sha256=digest)
+        delivery = self.start()
+        envelope = b'PDN1' + (256).to_bytes(2, 'big') + bytes(256 + 28) + pixels
+        self.net.blob(self.operator, delivery, digest, envelope)
+        sock_path = str(Path(self.tmp.name) / 'network.sock')
+        with patch('private_network_authority.SOCKET_TIMEOUT', 1), make_server(
+            self.net, '127.0.0.1', 0, unix_path=sock_path
+        ) as server:
+            worker = threading.Thread(target=server.handle_request, daemon=True)
+            worker.start()
+            connection = http.client.HTTPConnection('localhost', timeout=5)
+            try:
+                connection.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                connection.sock.settimeout(5)
+                connection.sock.connect(sock_path)
+                connection.request('GET', f'/v1/blob/{delivery}/{digest}',
+                                   headers={'Authorization': 'Bearer ' + self.reader})
+                with connection.getresponse() as response:
+                    self.assertEqual(response.status, 200)
+                    self.assertEqual(int(response.getheader('Content-Length')), len(envelope))
+                    received = bytearray()
+                    while block := response.read(64 * 1024):
+                        received.extend(block)
+                        time.sleep(0.1)
+                    self.assertEqual(len(received), len(envelope))
+                    self.assertEqual(hashlib.sha256(received).digest(), hashlib.sha256(envelope).digest())
+            finally:
+                connection.close()
+                worker.join(5)
+        self.assertEqual(self.call(self.reader, 'ack', delivery=delivery, sha256=digest)['state'], 'complete')
 
     def test_tenant_admins_and_default_denial(self):
         other=self.call(self.root,'create_clinic',name='Clinic B',admin='bob',adminName='Bob')['id']

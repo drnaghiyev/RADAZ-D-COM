@@ -28,6 +28,7 @@ MAX_BLOB = 160 * 1024 * 1024
 MAX_CACHE = 384 * 1024 * 1024
 MAX_JSON = 4 * 1024 * 1024
 LEASE = 300
+SOCKET_TIMEOUT = 30
 
 class Fault(Exception):
     def __init__(self, code, message):
@@ -530,10 +531,18 @@ def make_server(authority,host,port,cert=None,key=None,*,unix_path=None):
             self.send_header('X-Content-Type-Options','nosniff')
             self.send_header('Content-Length',str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            if binary:
+                # A socket write has one timeout for its entire length. Keep that
+                # limit for stalled connections while a slow download makes progress.
+                view = memoryview(body)
+                chunk_size = 64 * 1024
+                for offset in range(0, len(view), chunk_size):
+                    self.wfile.write(view[offset:offset + chunk_size])
+            else:
+                self.wfile.write(body)
         def dispatch(self):
             try:
-                self.connection.settimeout(30)
+                self.connection.settimeout(SOCKET_TIMEOUT)
                 require(not self.headers.get('Origin'),403,'Brauzer sorğusu qəbul edilmir')
                 require(not self.headers.get('Transfer-Encoding'),400)
                 path=urlsplit(self.path).path
