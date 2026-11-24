@@ -514,7 +514,7 @@ class Authority:
             self.audit(db,d['clinic'],a['id'],'relay_write',delivery)
             return {'ok':True}
 
-def make_server(authority,host,port,cert=None,key=None):
+def make_server(authority,host,port,cert=None,key=None,*,unix_path=None):
     if not (cert and key):
         require(ipaddress.ip_address(host).is_loopback and not cert and not key,400,'HTTPS sertifikatı tələb olunur')
     class Handler(BaseHTTPRequestHandler):
@@ -571,8 +571,8 @@ def make_server(authority,host,port,cert=None,key=None):
                     require(self.command=='POST' and name,404,'Əməliyyat tapılmadı')
                     require(0<length<=MAX_JSON,413)
                     require(self.headers.get_content_type()=='application/json',415)
-                    peer_ip=self.client_address[0]
-                    if ipaddress.ip_address(peer_ip).is_loopback and not ipaddress.ip_address(host).is_loopback:
+                    peer_ip=None if unix_path else self.client_address[0]
+                    if peer_ip and ipaddress.ip_address(peer_ip).is_loopback and not ipaddress.ip_address(host).is_loopback:
                         peer_ip=None
                     result=authority.rpc(name[1],json.loads(self.rfile.read(length)),token,peer_ip)
                 self.respond(200,result)
@@ -585,7 +585,15 @@ def make_server(authority,host,port,cert=None,key=None):
         def service_actions(self):
             with authority.lock:
                 authority.prune()
-    server=RelayServer((host,port),Handler)
+    if unix_path:
+        import socketserver
+        class ProxyServer(socketserver.ThreadingUnixStreamServer):
+            daemon_threads=True
+            request_queue_size=64
+            service_actions=RelayServer.service_actions
+        server=ProxyServer(unix_path,Handler)
+    else:
+        server=RelayServer((host,port),Handler)
     server.upload_slots=threading.BoundedSemaphore(2)
     if cert and key:
         context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

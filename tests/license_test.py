@@ -6,6 +6,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from datetime import datetime, timezone
 from unittest.mock import patch
 ROOT=Path(__file__).resolve().parent.parent
 sys.path.insert(0,str(ROOT/'bridge'))
@@ -147,7 +148,7 @@ class Licenses(unittest.TestCase):
         with patch('radaz_product.time.time',return_value=time.time()+8*86400):
             state=service.status();self.assertTrue(state['valid']);self.assertEqual(state['kind'],'owner')
         published=json.loads((ROOT/'public/product.json').read_text())
-        self.assertTrue(published['licenseRequired']);self.assertEqual(published['trialDays'],30)
+        self.assertTrue(published['licenseRequired']);self.assertEqual(published['trialDays'],180)
         self.assertNotIn('entitlement',published);self.assertNotIn('deviceId',published)
 
 class Demo(unittest.TestCase):
@@ -159,31 +160,42 @@ class Demo(unittest.TestCase):
     def service(self,name='archive',device='A'*64):
         data=self.root/name;data.mkdir(exist_ok=True)
         return ProductService(data,self.config,device=device,trial_root=self.root/'trial')
-    def test_first_use_starts_exactly_thirty_days_and_expiry_limits_features(self):
+    def test_first_use_starts_six_calendar_months_and_expiry_limits_features(self):
         service=self.service()
         with patch('radaz_product.time.time',return_value=self.start):
             state=service.status();self.assertTrue(state['valid']);self.assertEqual(state['kind'],'trial')
-            self.assertEqual(state['trial']['expiresAt'],self.start+30*86400);self.assertEqual(state['trial']['daysRemaining'],30)
-        with patch('radaz_product.time.time',return_value=self.start+30*86400-1):self.assertTrue(service.allowed())
-        with patch('radaz_product.time.time',return_value=self.start+30*86400):
+            self.assertEqual(state['trial']['expiresAt'],self.start+181*86400);self.assertEqual(state['trial']['daysRemaining'],181)
+        with patch('radaz_product.time.time',return_value=self.start+181*86400-1):self.assertTrue(service.allowed())
+        with patch('radaz_product.time.time',return_value=self.start+181*86400):
             state=service.status();self.assertFalse(state['valid']);self.assertEqual(state['trial']['daysRemaining'],0)
     def test_restart_or_different_archive_folder_does_not_reset_trial(self):
         with patch('radaz_product.time.time',return_value=self.start):first=self.service().status()
         with patch('radaz_product.time.time',return_value=self.start+2*86400):
             second=self.service('new-install').status()
-        self.assertEqual(first['trial']['expiresAt'],second['trial']['expiresAt']);self.assertEqual(second['trial']['daysRemaining'],28)
+        self.assertEqual(first['trial']['expiresAt'],second['trial']['expiresAt']);self.assertEqual(second['trial']['daysRemaining'],179)
     def test_other_computer_gets_its_own_first_use(self):
         with patch('radaz_product.time.time',return_value=self.start):self.service().status()
         with patch('radaz_product.time.time',return_value=self.start+10*86400):
-            other=self.service('other','B'*64).status();self.assertTrue(other['valid']);self.assertEqual(other['trial']['daysRemaining'],30)
+            other=self.service('other','B'*64).status();self.assertTrue(other['valid']);self.assertEqual(other['trial']['daysRemaining'],181)
     def test_old_trial_is_extended_from_original_start_not_upgrade_date(self):
         service=self.service()
         service.trial.write(dict(v=1,deviceId=service.device,startedAt=self.start,lastSeen=self.start+8*86400))
         self.config.write_text(json.dumps({'licenseRequired':True,'trialDays':30}))
         with patch('radaz_product.time.time',return_value=self.start+8*86400):
             state=self.service().status()
-        self.assertTrue(state['valid']);self.assertEqual(state['trial']['daysRemaining'],22)
+        self.assertTrue(state['valid']);self.assertEqual(state['trial']['daysRemaining'],173)
         self.assertEqual(state['trial']['startedAt'],self.start)
+    def test_end_of_month_clamps_to_leap_day(self):
+        from radaz_trial import six_month_expiry
+        start=datetime(2023,8,31,14,20,tzinfo=timezone.utc)
+        self.assertEqual(six_month_expiry(start.timestamp()),datetime(2024,2,29,14,20,tzinfo=timezone.utc).timestamp())
+    def test_cached_legacy_policy_and_later_custom_duration(self):
+        service=self.service()
+        with patch('radaz_product.time.time',return_value=self.start):
+            service.policy={'trialDays':30,'revision':1}
+            self.assertEqual(service.status()['trial']['durationDays'],181)
+            service.policy={'trialDays':30,'revision':self.start*1000}
+            self.assertEqual(service.status()['trial']['durationDays'],30)
     def test_clock_rollback_and_corrupted_record_fail_closed(self):
         service=self.service()
         with patch('radaz_product.time.time',return_value=self.start):service.status()
@@ -201,7 +213,7 @@ class Demo(unittest.TestCase):
         with patch('radaz_product.time.time',return_value=self.start):service.status()
         raw=service.trial.path.read_text();service.trial.path.unlink()
         with patch.object(service.trial,'read_registry',return_value=raw),patch('radaz_product.time.time',return_value=self.start+86400):
-            state=service.status();self.assertTrue(state['valid']);self.assertEqual(state['trial']['daysRemaining'],29)
+            state=service.status();self.assertTrue(state['valid']);self.assertEqual(state['trial']['daysRemaining'],180)
         self.assertTrue(service.trial.path.exists())
     def test_http_trial_expiry_keeps_archive_but_blocks_advanced_output(self):
         from radaz_archive import Archive,handler_for
@@ -216,7 +228,7 @@ class Demo(unittest.TestCase):
             with patch('radaz_product.time.time',return_value=self.start):
                 self.assertEqual(json.load(urlopen(base+'/license'))['kind'],'trial')
                 self.assertEqual(urlopen(base+'/printer-settings').status,200)
-            with patch('radaz_product.time.time',return_value=self.start+30*86400):
+            with patch('radaz_product.time.time',return_value=self.start+181*86400):
                 self.assertFalse(json.load(urlopen(base+'/license'))['valid'])
                 self.assertEqual(urlopen(base+'/studies').status,200)
                 self.assertEqual(urlopen(base+'/status').status,200)

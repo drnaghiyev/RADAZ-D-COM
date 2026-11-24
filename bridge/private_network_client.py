@@ -6,6 +6,7 @@ import io
 import json
 import os
 import re
+import secrets
 import shutil
 import sqlite3
 import struct
@@ -25,6 +26,7 @@ from radaz_trial import protect
 MAX_DICOM = 512 * 1024 * 1024
 MAX_JSON = 24 * 1024 * 1024
 RUN_HIDDEN = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+INTERNET_URL = 'https://radaz.space/dicom-network'
 
 
 class RemoteError(ValueError):
@@ -83,6 +85,27 @@ class NetworkClient:
         self.last_error = ''
         self.client_path = self.root / 'identity.dpapi'
         self._settings = None
+        self.internet_client = None
+
+    def internet_profile(self):
+        with self.lock:
+            if self.internet_client is None:
+                self.internet_client = NetworkClient(self.archive,self.root/'internet')
+                self.internet_client.settings_lock = self.settings_lock
+            return self.internet_client
+
+    def enroll_internet(self,data):
+        with self.lock:
+            cfg=self.settings()
+            if cfg.get('token'):
+                return self.local_state()
+            identity=self.device()
+            token=cfg.get('enrollToken') or secrets.token_hex(48)
+            self.save({'enrollToken':token})
+            result=self.rpc('enroll_pc',{'name':data.get('name'),'publicKey':identity['publicKey']},url=INTERNET_URL,token=token)
+            self.save({'token':token,'enrollToken':None,'enabled':True,'url':INTERNET_URL,'internet':True,'deviceId':result['device']})
+        self.start()
+        return self.local_state()
 
     def settings(self):
         with self.lock:
@@ -208,7 +231,7 @@ class NetworkClient:
     def local_state(self):
         cfg = self.settings()
         public = {k:cfg.get(k) for k in ('url','deviceId','syncClinic','clinic')}
-        return {**public,'enabled':bool(cfg.get('enabled')), 'configured':bool(cfg.get('token')),
+        return {**public,'internet':bool(cfg.get('internet')), 'enabled':bool(cfg.get('enabled')), 'configured':bool(cfg.get('token')),
                 'acceptMode':cfg.get('acceptMode','manual'),'clinicModes':cfg.get('clinicModes',{}),
                 'online':False,'error':self.last_error}
 
@@ -315,9 +338,21 @@ class NetworkClient:
         public['history'] = [row for row in state.get('history',()) if row['action'] in (
             'send','forward','accept','ack','control','transfer','reassign','preview_read','relay_read','relay_write'
         )]
+        if state.get('internet'):
+            public['inviteCount']=len(state.get('invitations',[]))
+            public['inviteNotice']=next((i['id'] for i in state.get('invitations',[])),None)
         return public
 
     def action(self, action, data, settings_session=''):
+        if data.get('_profile')=='internet':
+            scoped={k:v for k,v in data.items() if k!='_profile'}
+            client=self.internet_profile()
+            if action=='enroll_pc':
+                self.settings_lock.require(settings_session)
+                return client.enroll_internet(scoped)
+            if action in ('local_setup','register','link_clinic') or (action=='configure' and 'url' in scoped):
+                raise ValueError('Bu əməliyyat ayrıca şəxsi şəbəkə üçündür.')
+            return client.action(action,scoped,settings_session)
         if action in ('settings_set','settings_status','settings_unlock','settings_change','settings_lock'):
             return self.settings_lock.action(action,data,settings_session)
         if action == 'state':
@@ -498,10 +533,11 @@ class NetworkClient:
         if state.get('superAdmin'):
             return
         try:
-            from private_network_peer import start
-            self.peer = start(self)
-            if self.peer:
-                self.peer.refresh()
+            if not cfg.get('internet'):
+                from private_network_peer import start
+                self.peer = start(self)
+                if self.peer:
+                    self.peer.refresh()
         except Exception as error:
             faults.append(str(error))
         for inbox in state.get('deliveries',[]):
@@ -535,6 +571,8 @@ class NetworkClient:
                     db.execute('UPDATE jobs SET state=? WHERE id=?',(final,job['id']))
 
     def start(self):
+        if (self.root/'internet'/'identity.dpapi').is_file():
+            self.internet_profile().start()
         if not self.settings().get('enabled') or not self.settings().get('token'):
             return
         with self.worker_lock:
@@ -554,6 +592,7 @@ class NetworkClient:
 
 
 AUTHORITY_ACTIONS = {
+    'open_clinic', 'invite_pc', 'answer_invite', 'cancel_invite',
     'accept', 'control', 'create_clinic', 'member', 'remove_member', 'invite', 'policy',
     'device-set', 'block_user', 'block_device', 'link_clinic', 'reassign',
 }

@@ -8,7 +8,7 @@ Hesablar və mövcud issuer açarı `Documents/RADAZ-License-Admin/owner-vault.j
 
 AZN və USD qiymət sahələri bir-birini hesablayır. Axırıncı dəyişdirilmiş sahə əsas valyutadır. Məzənnə Azərbaycan Mərkəzi Bankının tarixli XML mənbəyindən alınır; mənbə tarixi göstərilir. Şəbəkə xətası əvvəlki məzənnəni silmir. Çevrilən ödəniş üçün 7 gündən köhnə məzənnə qəbul edilmir. Bankın faktiki məzənnəsi və komissiyası fərqli ola bilər.
 
-Demo 0–365 gün arasında dəyişdirilir; 0 demo rejimini söndürür. Günlər ilk istifadədən hesablanır, yenidən quraşdırma ilə başlanğıc yenilənmir. Standart 30 gündür.
+Əsas Viewer-in standart demosu ilk istifadədən altı təqvim ayıdır. Paneldə 180 bu standart müddəti seçir. Digər müddətlər günlə hesablanır, 0 demonun söndürülməsidir.
 
 Yadda saxla yalnız şifrələnmiş yerli ayarları dəyişir. **Qiymət və demo ayarlarını yayımla** düyməsi sahibin RSA açarı ilə imzalanmış ümumi konfiqurasiyanı `drnaghiyev/RADAZ-D-COM` reposunun `commerce.json` faylına yazır. GitHub hesabı bu kompüterdə Git Credential Manager ilə qoşulmalıdır. Faylda yalnız qiymət, məzənnə, demo, modullar və ictimai ödəniş serverinin ünvanı var. Bank rekvizitləri və sirrlər göndərilmir. RADAZ 0.2.18+ və billing serveri imzanı və artan revision-u yoxlayır, ən gec 15 dəqiqəlik yoxlamada qəbul edir. İnternet yoxdursa son təsdiqlənmiş ayarlar saxlanır. İmzalı ayar faylını ayrıca endirmək də mümkündür.
 

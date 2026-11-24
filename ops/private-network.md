@@ -1,6 +1,14 @@
 # Private DICOM Network — administrator üçün qısa bələdçi
 
-## Noutbukda ilk açılış
+## Klinika və həkimin kompüteri ayrı şəbəkələrdə olduqda
+
+1. Hər iki kompüterdə **Ayarlar → DICOM Network ayarları** bölməsini açın. **Bağlantı** sahəsində **RADAZ İnternet · klinika və həkimlər** seçin.
+2. Həkimin kompüterində cihazın adını yazın və **Qoşul və kompüter ID-si al** düyməsini basın. **ID-ni kopyala** ilə alınan kodu klinikaya verin.
+3. Klinikada göndərən kompüteri də qoşun. **Bu kompüter üçün klinika yarat** düyməsi ilə klinikanı açın. Həkimin adını və onun verdiyi RADAZ ID-sini daxil edib dəvəti göndərin. Hər həkim üçün bu addımı təkrarlayın.
+4. Həkim öz RADAZ pəncərəsində klinikanın adını yoxlayıb **Dəvəti qəbul et** düyməsini basır. Dəvət 24 saat qüvvədədir.
+5. Klinika **Local Arxiv** və ya **PACS** siyahısında müayinəni işarələyir. **RADAZ-a göndər** bölməsində **RADAZ İnternet**, klinika və həkim seçilir. Həkim göndərişi **Mənə göndərilənlər** siyahısından qəbul edir.
+
+## Noutbukda ayrıca şəxsi şəbəkənin ilk açılışı
 
 1. Windows-da RADAZ-ı açın. Əsas pəncərədə **Ayarlar → DICOM Network ayarları** seçin. Bu pəncərədə bağlantını, cihazları, klinikaları, əməkdaşları, növbələri və avtomatik göndərməni idarə edə bilərsiniz. Gələn və gedən müayinələr üçün **Local Arxiv** düyməsinin yanındakı oxdan **DICOM Network** seçin.
 2. **Bağlantı və qəbul ayarları** bölməsində **Bu noutbukda şəxsi şəbəkə yarat** formasına administratorun hesab ID-sini və adını yazın. **Yerli xidməti qur** düyməsini basın. Bu seçim yalnız həmin kompüterin özündə işləyən koordinator yaradır.
@@ -26,7 +34,7 @@ Local Arxiv və ya PACS siyahısında müayinəni işarələyib **RADAZ-a gönd�
 
 Qəbul edən offline olduqda növbə göndərən kompüterdə qalır. Hər iki tərəf sonradan qoşulduqda təsdiqlənmiş fayllar ötürülür. Koordinator göndərişin vəziyyətini və audit məlumatlarını bazada saxlayır. Şifrəli relay paketləri operativ yaddaşda ən çox beş dəqiqə qalır. Bir orijinal DICOM obyekti üçün hədd 160 MiB, relay yaddaşının ümumi həddi 384 MiB-dır.
 
-## Ayrı klinikalardan internet bağlantısı
+## Öz HTTPS koordinatorunu işlədən klinikalar
 
 Ayrı şəbəkələrdən qoşulmaq üçün administrator həm göndərən, həm qəbul edən cihazın çata bildiyi, Windows-un etibar etdiyi TLS sertifikatlı HTTPS ünvanı təmin etməlidir. Sertifikat adı cihazlara verilən ünvanla uyğunlaşmalıdır. Koordinator verilənlər bazasını və serverin gizli açarını yalnız xidmət hesabının oxuya bildiyi qovluqda saxlayın. Qeydiyyat və transfer statusunun bərpası üçün metadata bazasının ehtiyat nüsxəsini saxlayın.
 

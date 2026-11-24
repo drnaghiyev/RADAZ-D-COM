@@ -53,6 +53,7 @@ import { iterateSources, filesFromDrop } from '@/lib/import-sources';
 import { prefetchOrdered } from '@/lib/import-pipeline';
 import { parseDicomFile } from '@/lib/dicom-file';
 import { getArchiveFiles, saveArchiveFiles } from '@/lib/local-archive';
+import { indexableNativeFrames } from '@/lib/dicom-frame-metadata';
 import { watchRemovableMedia, type MediaImage, type MediaProgress } from '@/lib/removable-media';
 import { bindWindowing, connectWindowLevels, WindowLevels } from '@/lib/image-windowing';
 import { reportHandoff } from '@/lib/report-handoff';
@@ -854,6 +855,10 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
         if (sopUID && found.get(uid)?.sopUIDs.has(sopUID)) { ignored++; continue; }
         const frameIds = registerLocalDicomFrames(bytes, ds),imageId=frameIds[0];
         createdIds.push(...frameIds);
+        if(indexableNativeFrames(ds,bytes.length,frameIds.length)){
+          for(const id of frameIds)decodedIds.add(id);
+          decoded+=frameIds.length;
+        }
         for(const id of frameIds)filesById.set(id,file);
         if (!current()) { discardUnpublished(); return false; }
         acceptedFiles.push(file);
@@ -888,7 +893,7 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
     registered=true;
     if(!createdIds.length)finished=true;
     publish();
-    for await (const {imageId,error} of prefetchOrdered(createdIds.filter(id=>!invalidIds.has(id)), async imageId=>{
+    for await (const {imageId,error} of prefetchOrdered(createdIds.filter(id=>!invalidIds.has(id)&&!decodedIds.has(id)), async imageId=>{
       try{await viewer.core.imageLoader.loadAndCacheImage(imageId);return {imageId,error:undefined};}catch(error){return {imageId,error};}
     },4,id=>filesById.get(id)?.size||1,32*1024*1024)) {
       if (!current()) { discardUnpublished(); return false; }
@@ -1166,7 +1171,7 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
     const root = files[0].webkitRelativePath?.split('/')[0] || files[0].name;
     setImportQueue(current => [...current, { id: ++sourceSerial.current, label: `${kind}: ${root}`, files }]);
   };
-  const openSources = (sources: File[]) => {
+  const openSources = (sources: File[], persistToArchive = true) => {
     if (!sources.length) return Promise.resolve();
     const request=++importEpoch.current;
     importPending.current++;setImportBusy(true);
@@ -1177,9 +1182,9 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
       const flush=async()=>{
         if(!batch.length)return;
         const files=batch;batch=[];bytes=0;
-        const ok=await importFiles(files,request,undefined,{select:()=>{if(selected||request!==importEpoch.current)return false;selected=true;return true;},progress:p=>progress(p?`${p.done}/${p.total} görüntü açılır`:'Arxivə yazılır')});
+        const ok=await importFiles(files,request,undefined,{select:()=>{if(selected||request!==importEpoch.current)return false;selected=true;return true;},progress:p=>progress(p?`${p.done}/${p.total} görüntü açılır`:persistToArchive?'Arxivə yazılır':'Görüntülər açılıb')});
         successful ||= ok;
-        if(ok)await saveArchiveFiles(files,(done,total)=>progress(`Arxiv ${done}/${total}`));
+        if(ok&&persistToArchive)await saveArchiveFiles(files,(done,total)=>progress(`Arxiv ${done}/${total}`));
         processed+=files.length;progress('Davam edir');await yieldToBrowser();
       };
       try {
@@ -1206,7 +1211,7 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
   }, [ready, detachedMode]);
   const dropSources = async (items: DataTransferItemList, fallback: FileList) => {
     setImportProgress({label:'Qovluqlar oxunur',done:0,total:0,indeterminate:true});
-    try { const files=await filesFromDrop(items,fallback);if(files.length)await openSources(files);else if(!importPending.current)setImportProgress(null); }
+    try { const files=await filesFromDrop(items,fallback);if(files.length)await openSources(files,false);else if(!importPending.current)setImportProgress(null); }
     catch (err) { if(!importPending.current)setImportProgress(null);setStatus(`Qovluqlar oxuna bilmədi: ${String(err)}`); }
   };
   const currentSeries = seriesList.find(s => s.id === assigned[active]);

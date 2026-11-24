@@ -239,6 +239,9 @@ class Archive:
                 from private_network_sync import observe
                 observe(network, item['uid'], item['sopUID'], item['modality'], network_source,
                         source_ae, str(getattr(ds,'StationName','')))
+                if network.internet_client:
+                    observe(network.internet_client, item['uid'], item['sopUID'], item['modality'], network_source,
+                            source_ae, str(getattr(ds,'StationName','')))
             except Exception:
                 # An optional transfer queue must never fail a committed archive write.
                 import logging

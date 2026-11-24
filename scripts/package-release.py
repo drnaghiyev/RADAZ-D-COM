@@ -16,7 +16,7 @@ if not (ROOT/'public/license-public.json').is_file():raise SystemExit('Initializ
 build=json.loads((ROOT/'dist/server/radaz-build.json').read_text(encoding='utf-8'))
 if build['product']['version'] != version or not build['product'].get('licenseRequired'):raise SystemExit('Rebuild this version with licensing enabled before packaging.')
 config['licenseRequired']=True
-config['trialDays']=30
+config['trialDays']=180
 out=ROOT/'outputs/releases';out.mkdir(parents=True,exist_ok=True)
 target=out/f'RADAZ-{version}-Windows-preview.zip'
 explicit=['package.json','pnpm-lock.yaml','pnpm-workspace.yaml','README.md','DISTRIBUTION.md','LOKAL-ISTIFADE.md','SETUP-RADAZ.cmd','START-RADAZ.cmd',

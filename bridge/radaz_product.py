@@ -118,8 +118,12 @@ class ProductService:
                 result.update(self.online.status())
                 result['modules'] = self.module_entitlements()
                 return result
-            days=self.policy['trialDays'] if self.policy else 30 if self.config.get('trialDays') in (7,30) else 0
-            trial = self.trial.status(days=days)
+            days=self.policy['trialDays'] if self.policy else self.config.get('trialDays',0)
+            # Older installations shipped a seven- or thirty-day standard demo.
+            # Explicit signed custom durations keep their day-based semantics.
+            old_default = days in (7,30) and (not self.policy or self.policy['revision'] < 1795478400000)
+            standard = days == 180 or old_default
+            trial = self.trial.status(days=days, six_months=standard)
             path = self.root/'license.json'
             if path.exists():
                 try:

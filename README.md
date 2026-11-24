@@ -14,9 +14,9 @@ Setup Windows-a daxil olanda serveri, Local arxivi və RADAZ pəncərəsini avto
 
 Əlavə proqramlaşdırma mühiti tələb olunmur. **Source code (zip)** quraşdırıcı deyil. Alternativ **Windows-x64.zip** tam oflayn paketdir; **Windows-preview.zip** isə texniki istifadə üçündür və ayrıca runtime tələb edir.
 
-## 30 günlük demo
+## 6 aylıq demo
 
-Standart olaraq ilk istifadədən **30 gün** bütün funksiyalar açıqdır; sahib imzalı ayarla demo müddətini dəyişə bilər. Demo üçün kart və açar lazım deyil. Əvvəlki 7 günlük demo yeni versiyada **ilk açılış tarixindən 30 günə** uzanır; yenidən quraşdırmaq tarixi sıfırlamır. Qalan vaxt **Yardım → Lisenziya** bölməsində görünür.
+Əsas Viewer-in demosu hər kompüterdə ilk istifadədən **altı təqvim ayı** davam edir. Köhnə versiyadan yenilənən kompüterdə müddət ilkin açılış tarixindən hesablanır. Qalan vaxt **Yardım → Lisenziya** bölməsində görünür.
 
 Aylıq lisenziya: **10 AZN**. Demo bitdikdə arxiv və PACS əlçatan qalır, Viewer-in qabaqcıl alətləri üçün lisenziya tələb olunur. Saxlanmış müayinələr silinmir. Onlayn ödəniş xidməti qoşulmayıbsa, aktivləşdirmə üçün məhsul sahibi ilə əlaqə saxlayın.
 

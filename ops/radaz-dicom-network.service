@@ -1,0 +1,27 @@
+[Unit]
+Description=RADAZ clinic and doctor DICOM network
+After=local-fs.target
+
+[Service]
+User=radaz-dicom-network
+Group=radaz-dicom-network
+WorkingDirectory=/opt/radaz-dicom-network/current
+ExecStart=/usr/bin/python3 -B /opt/radaz-dicom-network/current/private_network_internet.py --db /var/lib/radaz-dicom-network/metadata.sqlite3 --socket /run/radaz-network-gateway/network.sock
+StateDirectory=radaz-dicom-network
+StateDirectoryMode=0700
+RuntimeDirectory=radaz-network-gateway
+RuntimeDirectoryMode=0750
+BindPaths=/opt/radaz/shared/caddy-config/dicom-network:/run/radaz-network-gateway
+UMask=0077
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+NoNewPrivileges=true
+RestrictAddressFamilies=AF_UNIX
+MemoryMax=1200M
+TasksMax=100
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

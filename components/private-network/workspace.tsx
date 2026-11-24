@@ -6,6 +6,8 @@ import {NetworkPreview} from '@/components/private-network/preview';
 import {NetworkConfig,NetworkMembers} from '@/components/private-network/manage';
 import {NetworkPolicy} from '@/components/private-network/policy';
 import {NetworkSettingsLink} from '@/components/private-network/settings-link';
+import {InternetPairing,NetworkChoice} from './internet';
+import {chooseNetwork,currentNetwork} from './api';
 import {NetworkSettingsAccess,NetworkSettingsContext} from '@/components/private-network/settings-access';
 import {openStudyInViewer} from '@/lib/viewer-session';
 import '@/components/private-network/network.css';
@@ -64,10 +66,14 @@ function NetworkPanel({title,settings,section,setSection,clinic,setClinic}:{
  async function act(action:string,payload:Record<string,unknown>){if(mutating.current)return false;mutating.current=true;setBusy(true);setMessage('');try{await request(action,payload);await refresh();setMessage('Əməliyyat tamamlandı.');return true;}catch(e){setMessage(e instanceof Error?e.message:String(e));return false;}finally{setBusy(false);mutating.current=false;}}
  return <main className="dn dn-page"><header className="dn-top"><div><Network size={25}/><h1>{title}</h1></div>{state&&<span role="status" className={state.online?'dn-online':''}>{state.online?'Qoşulub':state.enabled?'Əlaqə yoxdur':'Deaktiv'}</span>}{!settings&&<NetworkSettingsLink clinic={clinic}/>}{controls}<button onClick={()=>void refresh()} aria-label="Yenilə"><RefreshCw size={17}/></button></header>
  <div className="dn-layout"><aside><label>Klinika<select value={clinic} disabled={busy} onChange={e=>{++sequence.current.id;setClinic(e.target.value);setState(null);setMessage('');}}>{!clinic&&<option value="">Seçin</option>}{(state?.clinics||[]).map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+ <NetworkChoice disabled={busy}/>
  <nav aria-label={title}>{(settings?configurationSections:sections).map(([id,label,Icon])=><button key={id} disabled={settings&&id!=='settings'&&!state?.configured} aria-current={section===id?'page':undefined} onClick={()=>{setSection(id);setMessage('');}}><Icon size={17}/>{label}</button>)}</nav></aside>
  <section className="dn-body"><h2>{sections.find(s=>s[0]===section)?.[1]}</h2>{(loadError||state?.error)&&<p role="alert">{loadError||state?.error}</p>}{message&&<p role="status">{message}</p>}
  {state?<fieldset disabled={busy} key={state.clinic||'-'} className="dn-fields">
- {section==='settings'&&<NetworkConfig key={String(state.configured)+String(state.enabled)} state={state} act={act}/>}
+ {settings&&currentNetwork()==='private'&&(section==='settings'||section==='people')&&<article><h3>Klinikadan həkimlərin kompüterlərinə göndəriş</h3>
+   <button onClick={()=>{chooseNetwork('internet');location.assign('/private-network/settings?network=internet');}}>RADAZ İnternet · həkim və kompüter qoş</button></article>}
+ {currentNetwork()==='internet'&&(section==='settings'||section==='people')&&<InternetPairing state={state} act={act}/>}
+ {section==='settings'&&(currentNetwork()!=='internet'||state.configured)&&<NetworkConfig key={String(state.configured)+String(state.enabled)} state={state} act={act}/>}
  {section==='people'&&<NetworkMembers state={state} act={act} request={request}/>}
  {(section==='schedule'||section==='rules')&&<NetworkPolicy key={section} state={state} section={section} act={act}/>}
  {section==='sent'&&!!state.queue?.some(job=>['queued','paused','error'].includes(job.state))&&<article><h3>Lokal növbə</h3>{state.queue.filter(job=>['queued','paused','error'].includes(job.state)).map(job=><div className="dn-item" key={job.id}><div><strong>{statuses[job.state]||job.state}</strong><small>{job.study} {job.error}</small></div><div className="dn-row"><button onClick={()=>act('control',{job:job.id,action:job.state==='queued'?'pause':'resume'})}>{job.state==='queued'?'Dayandır':'Davam et'}</button><button onClick={()=>act('control',{job:job.id,action:'cancel'})}>Ləğv et</button></div></div>)}</article>}

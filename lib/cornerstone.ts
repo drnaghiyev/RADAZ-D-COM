@@ -9,6 +9,7 @@ import { viewerPerformance } from './viewer-performance';
 import { describeVolume } from './volume-geometry';
 import { areaWeights, resamplePlane, volumeDimensions } from './volume-resampling';
 import { parseDicomFile } from './dicom-file';
+import { frameMetadata } from './dicom-frame-metadata';
 import {anatomyAutoError, type AnatomyPixels} from './anatomy-auto';
 import type {AnatomyVolumeGeometry} from './anatomy-volume';
 
@@ -171,6 +172,9 @@ function defaultWindow(item: RecordItem): { wl: number; ww: number } {
   const preferred = lung ? candidates.find(candidate => /lung|pulmon|ağciy|akciğ/.test(candidate.explanation)) : undefined;
   const chosen = preferred || candidates[0];
   if (chosen) return { wl: chosen.wl, ww: chosen.ww };
+  if (ds.string('x00080060')?.trim().toUpperCase() === 'MR' && item.pixels.length) {
+    return { wl: (item.min + item.max) / 2, ww: Math.max(1, item.max - item.min) };
+  }
   if (lung && (ds.string('x00080060') || '').toUpperCase() === 'CT') return { wl: -600, ww: 1500 };
   return { wl: 50, ww: 400 };
 }
@@ -367,6 +371,7 @@ export function registerLocalDicomFrames(bytes:Uint8Array,ds:DataSet):string[]{
  return Array.from({length:frames},(_,frame)=>registerLocalDicom(bytes,ds,frame));
 }
 export function registerLocalDicom(bytes: Uint8Array, ds: DataSet, frameIndex=0): string {
+  ds=frameMetadata(ds,frameIndex);
   const rows=ds.uint16('x00280010')||0,columns=ds.uint16('x00280011')||0;
   if(!rows||!columns||!ds.elements.x7fe00010)throw Error('DICOM piksel məlumatı tapılmadı');
   const id=`localdicom:${serial++}`;
@@ -518,9 +523,9 @@ const normalized = (point: Point3): Point3 => point.map(value => value / Math.hy
 
 export function seriesGeometry(imageIds:string[]) {
   return describeVolume(imageIds.map(id=>{
-    const g=getLocalizerGeometry(id),ds=records.get(id)?.dataSet;
+    const g=getLocalizerGeometry(id),record=records.get(id),ds=record?.dataSet;
     if(!g||!ds)throw Error('Volume üçün DICOM məkan koordinatları tələb olunur');
-    return {...g,id,sopUID:derived.has(id)||geometryOverrides.has(id)?undefined:ds.string('x00080018')?.trim(),sliceThickness:asNumber(ds,'x00180050',0),spacingBetweenSlices:asNumber(ds,'x00180088',0)};
+    return {...g,id,frameIndex:record?.frameIndex,sopUID:derived.has(id)||geometryOverrides.has(id)?undefined:ds.string('x00080018')?.trim(),sliceThickness:asNumber(ds,'x00180050',0),spacingBetweenSlices:asNumber(ds,'x00180088',0)};
   }));
 }
 /** Stream a complete, geometry-validated CT/MR volume at the model's 3 mm scale.

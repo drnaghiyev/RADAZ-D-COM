@@ -1,6 +1,6 @@
 {
   "name": "RADAZ",
-  "version": "0.2.92",
+  "version": "0.2.93",
   "deltaOnlyUpdates": true,
   "channel": "preview",
   "owner": "Radioloq Rövşən Nağıyev",
@@ -10,7 +10,7 @@
   "updateRepository": "drnaghiyev/RADAZ-D-COM",
   "salesUrl": "",
   "licenseRequired": true,
-  "trialDays": 30,
+  "trialDays": 180,
   "currency": "AZN",
   "monthly": null,
   "billingUrl": "",

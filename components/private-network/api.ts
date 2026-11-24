@@ -9,6 +9,9 @@ export type Rule={enabled:boolean;days:number[];start:string;end:string;modaliti
 export type Policy={timezone:string;shifts:Shift[];exceptions:Exception[];rules:Rule[];fallback:string[];autoEnabled:boolean};
 export const initialPolicy:Policy={timezone:'Asia/Baku',shifts:[],exceptions:[],rules:[],fallback:[],autoEnabled:false};
 export type NetworkState={
+  internet?:boolean;ownsClinic?:boolean;inviteCount?:number;inviteNotice?:string;
+  invitations?:{id:string;clinic:string;sender:string;doctor:string;expires:number}[];
+  outgoingInvites?:{id:string;doctor:string;target:string;expires:number}[];
   enabled:boolean;configured:boolean;online:boolean;error?:string;url?:string;deviceId?:string;
   user?:{id:string;name:string};superAdmin?:boolean;clinic?:string;clinics?:{id:string;name:string}[];
   membership?:Member;members?:Member[];devices?:Device[];policy?:Partial<Policy>;memberManagementVersion?:number;
@@ -19,6 +22,20 @@ export function isPrivateDesktop(){return typeof window!=='undefined'&&['localho
 const subscribeDesktop=()=>()=>{};
 export function usePrivateDesktop(){return useSyncExternalStore(subscribeDesktop,isPrivateDesktop,()=>false);}
 export type NetworkRequest=<T>(action:string,body?:Record<string,unknown>)=>Promise<T>;
+export type NetworkProfile='private'|'internet';
+let selectedProfile:NetworkProfile|undefined;
+export function currentNetwork():NetworkProfile{
+  if(typeof window==='undefined')return 'private';
+  if(!selectedProfile){
+    const requested=new URLSearchParams(location.search).get('network');
+    selectedProfile=(requested||localStorage.getItem('radaz-network-profile'))==='internet'?'internet':'private';
+  }
+  return selectedProfile;
+}
+export function chooseNetwork(profile:NetworkProfile){
+  selectedProfile=profile;
+  localStorage.setItem('radaz-network-profile',profile);
+}
 export class NetworkRequestError extends Error{
   constructor(message:string,readonly code?:string){super(message);}
 }
@@ -26,7 +43,8 @@ export async function networkCall<T>(action:string,body:Record<string,unknown>={
   if(!isPrivateDesktop())throw Error('Bu modul Windows RADAZ Desktop üçün nəzərdə tutulub.');
   const headers:Record<string,string>={'Content-Type':'application/json'};
   if(session)headers['X-RADAZ-Settings-Session']=session;
-  const response=await fetch('/local-archive-api/private-network/'+encodeURIComponent(action),{method:'POST',headers,body:JSON.stringify(body),cache:'no-store',keepalive:action==='settings_lock'});
+  const payload=currentNetwork()==='internet'?{_profile:'internet',...body}:body;
+  const response=await fetch('/local-archive-api/private-network/'+encodeURIComponent(action),{method:'POST',headers,body:JSON.stringify(payload),cache:'no-store',keepalive:action==='settings_lock'});
   const data=await response.json().catch(()=>null) as {error?:string;code?:string}|null;
   if(response.status===403&&(data?.code==='NETWORK_DESKTOP_REQUIRED'||data?.code==='NETWORK_DESKTOP_IDENTITY'||data?.error==='Bu əməliyyat yalnız Windows RADAZ Desktop üçün açıqdır.')){
     const recovery=data?.code==='NETWORK_DESKTOP_IDENTITY'

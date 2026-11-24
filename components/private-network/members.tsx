@@ -89,7 +89,7 @@ export function MemberDirectory({state,act,request}:{state:NetworkState;act:Act;
   const activeAdmins=members.filter(member=>member.role==='admin'&&member.active).length;
   const isLastAdmin=(member:Member)=>member.role==='admin'&&!!member.active&&activeAdmins===1;
   const editable=(member:Member)=>writable&&superAdmin===(member.role==='admin');
-  const mayInvite=(member:Member)=>manages&&state.online&&!!member.active&&
+  const mayInvite=(member:Member)=>!state.internet&&manages&&state.online&&!!member.active&&
     (superAdmin?member.role==='admin':member.role!=='admin'||member.id===state.user?.id);
   const selected=members.find(member=>member.id===editor);
   const removed=members.find(member=>member.id===removing);
@@ -118,7 +118,7 @@ export function MemberDirectory({state,act,request}:{state:NetworkState;act:Act;
     });
   }
   return <article><header><h3>Radioloqlar və əməkdaşlar</h3>
-    {writable&&<button type="button" disabled={editor===''} onClick={()=>setEditor('')}><UserPlus size={16}/>{superAdmin?'Yeni klinika administratoru':'Yeni əməkdaş'}</button>}</header>
+    {writable&&!state.internet&&<button type="button" disabled={editor===''} onClick={()=>setEditor('')}><UserPlus size={16}/>{superAdmin?'Yeni klinika administratoru':'Yeni əməkdaş'}</button>}</header>
     {manages&&state.online&&!supported&&<p role="alert">Əməkdaşları əlavə etmək, redaktə etmək və silmək üçün DICOM Network xidmətini 0.2.92 və ya daha yeni versiyaya yeniləyin.</p>}
     {superAdmin&&state.clinic&&<p>Radioloq və operatorları klinika administratoru idarə edir. Administratoru qoşmaq üçün onun sətrində dəvət kodu yaradın.</p>}
     {!manages&&state.clinic&&<p>Əməkdaşları bu klinikanın administratoru idarə edir.</p>}

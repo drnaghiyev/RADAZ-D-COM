@@ -1,4 +1,5 @@
 import { prefetchOrdered } from './import-pipeline.ts';
+import { storedZipMembers } from './stored-zip.ts';
 
 export type SourceFile = {file:File;source:string;sourceIndex:number;sourceCount:number;entryIndex:number;entryCount:number};
 /** Decompress one member at a time; the consumer applies backpressure. */
@@ -33,12 +34,17 @@ export async function* iterateSources(files:File[],onProgress:(message:string)=>
       continue;
     }
     onProgress(`ZIP açılır: ${sourceIndex + 1} / ${files.length} · ${file.name}`);
+    const stored = await storedZipMembers(file);
+    if (stored) {
+      for (const [index, member] of stored.entries()) yield item(member,index,stored.length);
+      continue;
+    }
     const JSZip = (await import('jszip')).default;
     const archive = await JSZip.loadAsync(file);
     const entries = Object.values(archive.files).filter(entry => !entry.dir);
     for (const [index, entry] of entries.entries()) {
-      const data = await entry.async('uint8array');
-      yield item(new File([new Uint8Array(data)], entry.name, { type: 'application/dicom' }),index,entries.length);
+      const data = await entry.async('arraybuffer');
+      yield item(new File([data], entry.name, { type: 'application/dicom' }),index,entries.length);
       if (index && index % 25 === 0) onProgress(`ZIP açılır: ${file.name} · ${index + 1} / ${entries.length}`);
     }
   }
