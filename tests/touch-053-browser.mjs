@@ -7,6 +7,7 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import JSZip from 'jszip';
+import gestures from './navigation-measurement.cjs';
 import {setTimeout as delay} from 'node:timers/promises';
 const {chromium}=createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE||'playwright');
 const free=()=>new Promise(resolve=>{const s=http.createServer();s.listen(0,'127.0.0.1',()=>{const port=s.address().port;s.close(()=>resolve(port));});});
@@ -96,5 +97,7 @@ try{
  await longPress(x,y+100);
  await viewer.getByRole('menuitem',{name:'Sil',exact:true}).click();
  await pane.locator('[data-drawing="pencil"]').waitFor({state:'hidden'});
- assert.deepEqual(errors,[]);console.log('PASS: real touch pan, zoom, scroll, native/local long-press deletion, unchanged image and VOI');
+ await chooseMeasurement(/^Uzunluq/);await touchLine(x-95,y-50,x+95,y-50);
+ await gestures.verifyEdits(viewer,pane,cdp);
+ assert.deepEqual(errors,[]);console.log('PASS: real touch pan, zoom, scroll, native/local long-press deletion, editable body/endpoints with mouse, touch and pen in navigation modes, unchanged image and VOI');
 }finally{await browser?.close();server?.kill();fixture.kill();}

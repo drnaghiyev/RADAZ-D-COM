@@ -3,7 +3,7 @@ import {useTranslation as useUiTranslation,translate as tr} from '@/lib/i18n';
 
 import {useEffect,useRef,useState,type RefObject} from 'react';
 import type * as Core from '@cornerstonejs/core';
-import {cancelMeasurementInteraction,annotationBelongsToPane} from '@/lib/measurement-tools';
+import {beginNavigationEdit,cancelMeasurementInteraction,annotationBelongsToPane} from '@/lib/measurement-tools';
 import {getViewer} from '@/lib/cornerstone';
 import type {LocalMark,Point3} from './measurement-overlay';
 
@@ -28,6 +28,7 @@ export function ViewportMouseControls(props:Props){
   let hold:ReturnType<typeof setTimeout>|null=null;
   let heldPointer:number|null=null;
   let passPrimary=false;
+  let editing:{id:number;action:NonNullable<ReturnType<typeof beginNavigationEdit>>;last:PointerEvent}|null=null;
   let holdStart:{id:number;x:number;y:number}|null=null;
   const cancelHold=()=>{if(hold!==null)clearTimeout(hold);hold=null;holdStart=null;};
   const showMenu=(x:number,y:number,target:Target)=>{
@@ -48,7 +49,7 @@ export function ViewportMouseControls(props:Props){
   const isControl=(event:Event)=>event.target instanceof Element&&!!event.target.closest('button,input,textarea,select,.measurement-menu,.arrow-comment-editor,.hu-editor');
   const down=(event:PointerEvent)=>{
    const scrolling=event.button===0&&current.current.tool==='scroll';
-   if((current.current.disabled&&!scrolling)||isControl(event)||gesture)return;
+   if((current.current.disabled&&!scrolling)||isControl(event)||gesture||editing)return;
    const localizer=event.target instanceof Element&&!!event.target.closest('.localizer-line,.localizer-center');
    const target=current.current.disabled?null:hit(event);
    passPrimary=event.button===0&&(localizer||!!target);
@@ -61,6 +62,7 @@ export function ViewportMouseControls(props:Props){
      holdStart={id:event.pointerId,x:event.clientX,y:event.clientY};
      hold=setTimeout(()=>{
       cancelHold();if(current.current.disabled||current.current.tool!==pressedTool)return;
+      if(editing){editing.action.end(editing.last);editing=null;}
       const tools=viewer.current?.tools;
       if(tools)cancelMeasurementInteraction(tools.ToolGroupManager.getToolGroupForViewport(viewport.id),element);
       gesture=null;delete root.dataset.mouseGesture;
@@ -84,7 +86,17 @@ export function ViewportMouseControls(props:Props){
     return;
    }
    // Existing marks keep Cornerstone's handle/body drag or the SVG mark's own pointer capture.
-   if(passPrimary&&['scroll','pan','zoom'].includes(current.current.tool))return;
+   if(passPrimary&&['scroll','pan','zoom'].includes(current.current.tool)){
+    if(target?.kind==='native'){
+     const action=beginNavigationEdit(element,target.id,event);
+     if(action){
+      editing={id:event.pointerId,action,last:event};root.setPointerCapture(event.pointerId);
+      root.dataset.suppressMaximizeUntil=String(performance.now()+750);
+      event.preventDefault();event.stopPropagation();
+     }
+    }
+    return;
+   }
    const touch=event.button===0;
    const touchButton=touch&&current.current.tool==='pan'?1:touch&&current.current.tool==='zoom'?2:event.button;
    if(touchButton!==1&&touchButton!==2&&!scrolling)return;
@@ -100,6 +112,7 @@ export function ViewportMouseControls(props:Props){
   const move=(event:PointerEvent)=>{
    if(holdStart&&event.pointerId===holdStart.id&&Math.hypot(event.clientX-holdStart.x,event.clientY-holdStart.y)>8)cancelHold();
    if(heldPointer===event.pointerId){event.preventDefault();event.stopPropagation();return;}
+   if(editing?.id===event.pointerId){event.preventDefault();event.stopPropagation();editing.last=event;editing.action.move(event);return;}
    if(current.current.disabled&&gesture?.button!==0)return;
    if(!gesture){root.dataset.measurementHover=String(!event.buttons&&!isControl(event)&&!!hit(event));return;}
    if(event.pointerId!==gesture.pointer)return;
@@ -125,19 +138,24 @@ export function ViewportMouseControls(props:Props){
   const end=(event:PointerEvent)=>{
    cancelHold();
    if(heldPointer===event.pointerId){heldPointer=null;return;}
+   if(editing?.id===event.pointerId){
+    event.preventDefault();event.stopPropagation();editing.action.end(event);editing=null;
+    if(root.hasPointerCapture(event.pointerId))root.releasePointerCapture(event.pointerId);
+    return;
+   }
    if(!gesture||gesture.pointer!==event.pointerId)return;
    event.preventDefault();event.stopPropagation();
    const saved=gesture;gesture=null;delete root.dataset.mouseGesture;
    if(root.hasPointerCapture(event.pointerId))root.releasePointerCapture(event.pointerId);
-   if(event.type==='pointerup'&&saved.button===2&&!saved.moved){
+   if(event.type==='pointerup'&&event.button===2&&saved.button===2&&!saved.moved){
     root.dataset.suppressMaximizeUntil=String(performance.now()+750);
     const r=root.getBoundingClientRect();setMenu({x:Math.max(4,Math.min(event.clientX-r.left,r.width-254)),y:Math.max(4,Math.min(event.clientY-r.top,r.height-130)),target:saved.target});
    }
   };
   const leave=()=>{root.dataset.measurementHover='false';};
-  const blur=()=>{cancelHold();heldPointer=null;if(gesture&&root.hasPointerCapture(gesture.pointer))root.releasePointerCapture(gesture.pointer);gesture=null;delete root.dataset.mouseGesture;leave();setMenu(null);};
-  const mouseDown=(e:MouseEvent)=>{if(!isControl(e)&&(gesture||(!current.current.disabled&&current.current.tool==='erase'))&&!(e.button===0&&passPrimary&&current.current.tool!=='erase')){e.preventDefault();e.stopPropagation();}};
-  const suppressEraseTouch=(e:TouchEvent)=>{if((gesture||(!current.current.disabled&&(current.current.tool==='erase'||heldPointer!==null)))&&!isControl(e)){e.preventDefault();e.stopPropagation();}};
+  const blur=()=>{if(editing){editing.action.end(editing.last);editing=null;}cancelHold();heldPointer=null;if(gesture&&root.hasPointerCapture(gesture.pointer))root.releasePointerCapture(gesture.pointer);gesture=null;delete root.dataset.mouseGesture;leave();setMenu(null);};
+  const mouseDown=(e:MouseEvent)=>{if(editing||(!isControl(e)&&(gesture||(!current.current.disabled&&current.current.tool==='erase'))&&!(e.button===0&&passPrimary&&current.current.tool!=='erase'))){e.preventDefault();e.stopPropagation();}};
+  const suppressEraseTouch=(e:TouchEvent)=>{if((editing||gesture||(!current.current.disabled&&(current.current.tool==='erase'||heldPointer!==null)))&&!isControl(e)){e.preventDefault();e.stopPropagation();}};
   const preventContext=(e:Event)=>e.preventDefault();
   root.addEventListener('contextmenu',preventContext);
   root.addEventListener('touchmove',suppressEraseTouch,{capture:true,passive:false});

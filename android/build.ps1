@@ -65,4 +65,10 @@ try {
 } finally {Remove-Item Env:RADAZ_TABLET_STORE_PASS -ErrorAction SilentlyContinue}
 Run (Join-Path $Jdk 'bin/java.exe') @('-jar',(Join-Path $bt 'lib/apksigner.jar'),'verify','--verbose',$apk)
 Run (Join-Path $bt 'zipalign.exe') @('-c','-P','16','4',$apk)
+$release = [ordered]@{
+    version=$product; revision=[int]$revision; versionCode=[int]$manifest.manifest.GetAttribute('versionCode',$androidNamespace)
+    sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath $apk).Hash.ToLowerInvariant(); size=(Get-Item -LiteralPath $apk).Length
+    url="https://github.com/drnaghiyev/RADAZ-D-COM/releases/download/v$product/$(Split-Path -Leaf $apk)"
+}
+[IO.File]::WriteAllText((Join-Path $out 'RADAZ-Tablet-update.json'),($release | ConvertTo-Json),[Text.UTF8Encoding]::new($false))
 Write-Output $apk

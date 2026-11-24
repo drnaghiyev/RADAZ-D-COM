@@ -8,6 +8,7 @@ const JSZip = deps('jszip');
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const project = path.resolve(__dirname, '..');
 const {fixture,checkNetwork}=require('./clinic-workflow.cjs');
+const gestures=require('../../tests/navigation-measurement.cjs');
 const origin = 'https://appassets.androidplatform.net';
 const waitReady = page => page.waitForFunction(() => document.querySelector('.statusbar')?.textContent.includes('Cornerstone3D hazırdır'));
 async function command(page, name) {
@@ -211,9 +212,27 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
     await dismissOverflow(page);
     await page.waitForFunction(()=>/\b1\s*\/\s*12/.test((document.querySelector('[data-panel="A"] .bottom-right span')?.textContent||'').replace(/[^\d/ ]/g,'')));
     Object.assign(suite,{folderSlices:12,zipSlices:12,presets:true,cine:true,source:initial.match(/SYNTHETIC/i)?.[0],offlineOrigins:[...requests]});
+    await panel.locator('canvas').first().waitFor();
+    await page.locator('.series-card img').first().waitFor();
+    await command(page,'Ölçmə alətləri');
+    await page.getByRole('menuitem',{name:/Uzunluq/}).click();await dismissOverflow(page);
+    const tabletInput=await context.newCDPSession(page),mainBox=await panel.locator('.dicom-canvas').boundingBox();
+    const from={x:mainBox.x+mainBox.width*.35,y:mainBox.y+mainBox.height*.4};
+    await gestures.contact(page,tabletInput,'touch',from,{x:from.x+105,y:from.y+8});
+    await gestures.verifyEdits(page,panel,tabletInput);suite.navigationMeasurements=true;
     const mprButton=page.getByRole('button',{name:'MPR rekonstruksiya',exact:true}).first();
     const [mpr]=await Promise.all([context.waitForEvent('page'),mprButton.tap()]);
     await mpr.waitForFunction(()=>document.querySelectorAll('[data-has-image="true"]').length>=3 && !document.querySelector('.viewport-loading'),{},{timeout:60000});
+    await mpr.keyboard.press('s');
+    const mprInput=await context.newCDPSession(mpr),cross=mpr.locator('[data-panel="MA"] .localizer-center-hit');
+    for(const kind of ['touch','pen']){
+      const box=await cross.boundingBox(),overlay=mpr.locator('[data-panel="MA"] .localizer-overlay');
+      assert.ok(box);const before=await overlay.getAttribute('data-world');
+      const center={x:box.x+box.width/2,y:box.y+box.height/2};
+      await gestures.contact(mpr,mprInput,kind,center,{x:center.x+16,y:center.y+12});
+      assert.notEqual(await overlay.getAttribute('data-world'),before,'MPR intersection moves with '+kind);
+    }
+    suite.mprTouchAndPen=true;
     suite.mprPanels=await mpr.locator('[data-has-image="true"]').count();
     await mpr.locator('[data-panel="MA"]').click({position:{x:60,y:70}});
     await command(mpr,'Ölçmə alətləri');
@@ -237,7 +256,7 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
       suite.volumeDimensions=await volume.locator('.sv-surface-canvas').getAttribute('data-context-dimensions');
     }
     suite.volumeCanvas=true;
-    await volume.getByRole('button',{name:'Bağla',exact:true}).last().click();await page.bringToFront();
+    await volume.getByRole('button',{name:'3D-ni bağla',exact:true}).last().click();await page.bringToFront();
     assert.equal(await panel.getAttribute('data-has-image'),'true');
     const smartOpen=context.waitForEvent('page');
     await command(page,'Smart Volume');
@@ -256,6 +275,12 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
     await archive.getByText(/1 müayinə saxlanıldı/).waitFor();
     await archive.reload();
     await archive.getByText(/1 müayinə arxivdədir/).waitFor();
+    const row=archive.locator('tbody tr').first();
+    await row.locator('td').nth(2).tap();
+    await archive.getByRole('button',{name:'Viewer',exact:true}).click();
+    await page.waitForFunction(()=>location.hash.includes('archive-studies='));
+    await archive.bringToFront();await row.locator('td').nth(2).dblclick();
+    await archive.getByText(/1 seçilmiş müayinə Viewer-də açıldı/).waitFor();
     suite.archiveAfterReopen=true;
     await archive.close();await page.bringToFront();
     const beforeTouch=await frame.innerText();
@@ -267,6 +292,22 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
     await page.waitForFunction(before=>document.querySelector('[data-panel="A"] .bottom-right span')?.textContent!==before,beforeTouch);
     const afterTouch=await frame.innerText();
     suite.touch=[beforeTouch,afterTouch];
+    if(process.env.RADAZ_LARGE_TABLET_ZIP){
+      await page.locator('input[type=file][accept*="zip"]').first().setInputFiles(process.env.RADAZ_LARGE_TABLET_ZIP);
+      await page.waitForFunction(()=>document.querySelector('.statusbar')?.textContent.includes('442 DICOM'),{},{timeout:120000});
+      const start=Date.now();
+      await page.getByRole('button',{name:'3D həcm görüntüləmə',exact:true}).first().click();
+      const texture=page.locator('.sv-surface-canvas[data-context-dimensions]');await texture.waitFor({timeout:120000});
+      const dims=(await texture.getAttribute('data-context-dimensions')).split('x').map(Number);
+      assert.ok(dims.every(n=>n>=3)&&dims.reduce((a,b)=>a*b,4)<=24*1024*1024);
+      assert.match(await page.locator('.sv-surface footer').innerText(),/442 mənbə kəsiyi/);
+      suite.largeVolume={source:'512x512x442',texture:dims,ms:Date.now()-start};
+      const image=texture.locator('canvas').first(),prior=await image.screenshot(),rect=await image.boundingBox();
+      const startPoint={x:rect.x+rect.width*.5,y:rect.y+rect.height*.4};
+      await gestures.contact(page,tabletInput,'touch',startPoint,{x:startPoint.x+75,y:startPoint.y+30});
+      assert.ok(!prior.equals(await image.screenshot()),'volume rotates and repaints');
+      await page.getByRole('button',{name:'3D-ni bağla',exact:true}).click();
+    }
     if(network)await verifyAutomaticDelivery();
     assert.deepEqual([...requests],[]);
     assert.deepEqual(issues,[]);

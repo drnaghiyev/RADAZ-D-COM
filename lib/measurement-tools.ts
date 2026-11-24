@@ -10,6 +10,37 @@ export function annotationBelongsToPane(annotation: any, element: HTMLElement) {
   return !owner || owner === element.dataset.radazProjectionPanel;
 }
 
+// A navigation drag that starts on an annotation uses the annotation tool's normal
+// edit callbacks, including its statistics, undo and shape-specific handle rules.
+export function beginNavigationEdit(element:HTMLDivElement,uid:string,start:PointerEvent){
+  const enabled=getEnabledElement(element),annotation=tools.annotation.state.getAnnotation(uid);
+  if(!enabled||!annotation?.metadata||tools.annotation.locking.isAnnotationLocked(uid))return;
+  const tool=tools.ToolGroupManager.getToolGroupForViewport(enabled.viewportId,enabled.renderingEngineId)?.getToolInstance(annotation.metadata.toolName);
+  if(!(tool instanceof tools.AnnotationTool))return;
+  const coords=(event:PointerEvent)=>{
+    const rect=element.getBoundingClientRect(),canvas:[number,number]=[event.clientX-rect.left,event.clientY-rect.top];
+    return {canvas,world:enabled.viewport.canvasToWorld(canvas),client:[event.clientX,event.clientY] as [number,number],page:[event.pageX,event.pageY] as [number,number]};
+  };
+  const first=coords(start);let last=first;
+  const eventFor=(type:string,event:PointerEvent)=>{
+    const current=coords(event);
+    const difference=(a:[number,number],b:[number,number]):[number,number]=>[a[0]-b[0],a[1]-b[1]];
+    const detail={element,event,eventName:type,camera:{...enabled.viewport.getCamera()},buttons:event.buttons,viewportId:enabled.viewportId,renderingEngineId:enabled.renderingEngineId,
+      currentPoints:current,startPoints:first,lastPoints:last,deltaPoints:{
+        world:[current.world[0]-last.world[0],current.world[1]-last.world[1],current.world[2]-last.world[2]] as [number,number,number],canvas:difference(current.canvas,last.canvas),client:difference(current.client,last.client),page:difference(current.page,last.page)}};
+    last=current;
+    return new CustomEvent(type,{cancelable:true,detail});
+  };
+  const event=eventFor(tools.Enums.Events.MOUSE_DOWN,start) as tools.Types.EventTypes.MouseDownEventType;
+  const handle=tool.getHandleNearImagePoint(element,annotation,first.canvas,start.pointerType==='mouse'?8:22);
+  const interaction=start.pointerType==='touch'?'Touch':'Mouse';
+  tools.annotation.selection.setAnnotationSelected(uid,true);
+  if(handle)tool.handleSelectedCallback(event,annotation,handle,interaction);
+  else tool.toolSelectedCallback(event,annotation,interaction,first.canvas);
+  return {move:(e:PointerEvent)=>element.dispatchEvent(eventFor(tools.Enums.Events.MOUSE_DRAG,e)),
+    end:(e:PointerEvent)=>element.dispatchEvent(eventFor(tools.Enums.Events.MOUSE_UP,e))};
+}
+
 /** Cancel by tool instance: image-filtered cancellation misses a draft after scrolling. */
 export function cancelMeasurementInteraction(group: any, element: HTMLElement) {
   for (const instance of Object.values(group?.getToolInstances() || {}) as any[]) instance.cancel?.(element);

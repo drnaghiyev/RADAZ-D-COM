@@ -24,7 +24,7 @@ import javax.net.ssl.HttpsURLConnection;
 
 final class TabletUpdater {
     private static final String RELEASES="https://github.com/drnaghiyev/RADAZ-D-COM/releases/";
-    private static final String FEED="https://raw.githubusercontent.com/drnaghiyev/RADAZ-D-COM/main/android/release.json";
+    private static final String FEED=RELEASES+"latest/download/RADAZ-Tablet-update.json";
     private static final int LIMIT=64*1024*1024;
     private final Activity owner;
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
@@ -55,7 +55,9 @@ final class TabletUpdater {
         throw new IOException("Yenilənmə ünvanına keçid alınmadı.");
     }
     private static JSONObject manifest() throws Exception{
-        HttpsURLConnection conn=connect(FEED);
+        HttpsURLConnection conn;
+        try{conn=connect(FEED);}
+        catch(IOException offline){conn=connect("https://raw.githubusercontent.com/drnaghiyev/RADAZ-D-COM/main/android/release.json");}
         try(InputStream in=conn.getInputStream();ByteArrayOutputStream out=new ByteArrayOutputStream()){
             byte[] buf=new byte[2048];int n;
             while((n=in.read(buf))!=-1){if(out.size()+n>16384)throw new IOException("Yenilənmə məlumatı düzgün deyil.");out.write(buf,0,n);}

@@ -23,7 +23,7 @@ if (!existsSync(marker)) {
   mkdirSync(cache,{recursive:true});
   const work = mkdtempSync(path.join(cache,'source-'));
   const archive = path.join(work,'source.tar');
-  const sourcePaths = ['.openai','app','components','hooks','lib','offline','scripts','build','db','types','vendor/shadcn-tailwind-4.13.0.css','public','bridge/radiology-profile.json','package.json','pnpm-lock.yaml','vite.config.ts','next.config.ts','postcss.config.mjs','tsconfig.json','components.json'];
+  const sourcePaths = ['.openai','app','components','hooks','lib','offline','scripts','build','db','types','cloudflare-env.d.ts','vendor/shadcn-tailwind-4.13.0.css','public','bridge/radiology-profile.json','package.json','pnpm-lock.yaml','vite.config.ts','next.config.ts','postcss.config.mjs','tsconfig.json','components.json'];
   run('git',['archive',commit,'--format=tar','--output',archive,'--',...sourcePaths],checkout);
   run('tar',['-xf',archive],work);
   unlinkSync(archive);

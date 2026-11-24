@@ -903,7 +903,9 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
     registered=true;
     if(!createdIds.length)finished=true;
     publish();
-    for await (const {imageId,error} of prefetchOrdered(createdIds.filter(id=>!invalidIds.has(id)&&!decodedIds.has(id)), async imageId=>{
+    // Android 3D streams display planes. Eagerly decoding the entire stack here would keep a second full volume in RAM.
+    const toPrefetch=location.origin==='https://appassets.androidplatform.net'?[]:createdIds.filter(id=>!invalidIds.has(id)&&!decodedIds.has(id));
+    for await (const {imageId,error} of prefetchOrdered(toPrefetch, async imageId=>{
       try{await viewer.core.imageLoader.loadAndCacheImage(imageId);return {imageId,error:undefined};}catch(error){return {imageId,error};}
     },4,id=>filesById.get(id)?.size||1,32*1024*1024)) {
       if (!current()) { discardUnpublished(); return false; }
