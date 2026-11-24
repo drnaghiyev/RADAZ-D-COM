@@ -31,6 +31,21 @@ try {
   context.on('page',p=>{p.on('pageerror',e=>errors.push(e.stack || e.message));});page.on('pageerror',e=>errors.push(e.stack || e.message));
   page.on('filechooser',()=>pickers++);
   context.on('request',r=>{if(r.url().endsWith('/local-archive-api/import'))imports++;});
+  const recovery=process.argv.includes('--preview-recovery'),blockedIds=new Set(['2.25.101.351']);
+  let failedCentre=0,readNeighbour=0;
+  if(recovery){
+    await context.route('**/removable/entries?*',async route=>{
+      const response=await route.fetch(),data=await response.json();
+      for(const item of data.items)if(item.instance===351)blockedIds.add(item.id);
+      await route.fulfill({response,json:data});
+    });
+    await context.route('**/file/**',async route=>{
+      const id=new URL(route.request().url()).pathname.split('/').pop();
+      if(blockedIds.has(id)){failedCentre++;return route.fulfill({status:503,body:''});}
+      if(failedCentre)readNeighbour++;
+      return route.continue();
+    });
+  }
   await page.goto(base);
   assert.equal(await page.locator('.series-card').count(),0,'Production starts without demo patients');
   await page.getByRole('button',{name:'CD/DVD import',exact:true}).click();
@@ -40,6 +55,13 @@ try {
   await page.locator('.series-card').filter({hasText:'JPEG compressed CD'}).locator('img').waitFor();
   assert.equal(await page.locator('.series-card img').count(),2,'Both thumbnails appear without any series click');
   await page.screenshot({path:'outputs/media/unopened-series-thumbnails.png'});
+  if(recovery){
+    const until=Date.now()+15000;
+    while((!failedCentre||!readNeighbour)&&Date.now()<until)await delay(100);
+    assert.ok(failedCentre>0&&readNeighbour>0,'Unreadable middle image followed by successful alternative');
+    assert.equal(await page.locator('.series-card img').evaluateAll(nodes=>nodes.filter(img=>img.complete&&img.naturalWidth>0).length),2);
+    console.log('PASS: missing central CT disk frame recovers, compressed JPEG preview remains visible');
+  }else{
   // A newly opened patient replaces the CD list, including late media watcher events.
   await control('window-study');
   await page.evaluate(()=>{const c=new BroadcastChannel('radaz-viewer-open-v2');c.postMessage({kind:'OPEN',target:window.name,request:'test-new-patient',studies:['2.25.301']});c.close();});
@@ -49,6 +71,7 @@ try {
   const status=await (await fetch(`http://127.0.0.1:${archivePort}/status`)).json();
   assert.ok(status.instanceCount>3,'Previously imported CD remains in Local Archive');
   assert.deepEqual(errors,[]);console.log('PASS: disk CD and compressed JPEG series thumbnails appear before series selection');
+  }
 } catch(error) {
   for (const [i,p] of (browser?.contexts()[0]?.pages() || []).entries()) {
     console.error(`PAGE ${i} ${p.url()}:`,await p.locator('body').innerText().catch(()=>''));

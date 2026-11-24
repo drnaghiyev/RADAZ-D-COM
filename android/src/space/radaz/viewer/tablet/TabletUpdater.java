@@ -101,7 +101,7 @@ final class TabletUpdater {
         ProgressDialog dialog=new ProgressDialog(owner);dialog.setTitle("RADAZ yenilənir");dialog.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
         dialog.setMax(100);dialog.setCancelable(false);dialog.show();
         worker.execute(()->{
-            File staging=new File(owner.getCacheDir(),"tablet-update.part"),ready=UpdateFileProvider.apk(owner);
+            File staging=new File(owner.getCacheDir(),"tablet-update-staging.apk"),ready=UpdateFileProvider.apk(owner);
             try{
                 HttpsURLConnection conn=connect(url);MessageDigest hash=MessageDigest.getInstance("SHA-256");long read=0;int shown=-1;
                 try(InputStream input=conn.getInputStream();FileOutputStream output=new FileOutputStream(staging)){

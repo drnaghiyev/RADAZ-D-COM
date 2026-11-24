@@ -25,7 +25,7 @@ export function beginNavigationEdit(element:HTMLDivElement,uid:string,start:Poin
   const eventFor=(type:string,event:PointerEvent)=>{
     const current=coords(event);
     const difference=(a:[number,number],b:[number,number]):[number,number]=>[a[0]-b[0],a[1]-b[1]];
-    const detail={element,event,eventName:type,camera:{...enabled.viewport.getCamera()},buttons:event.buttons,viewportId:enabled.viewportId,renderingEngineId:enabled.renderingEngineId,
+    const detail={element,event,eventName:type,camera:{...enabled.viewport.getCamera()},buttons:event.buttons,mouseButton:tools.Enums.MouseBindings.Primary,viewportId:enabled.viewportId,renderingEngineId:enabled.renderingEngineId,
       currentPoints:current,startPoints:first,lastPoints:last,deltaPoints:{
         world:[current.world[0]-last.world[0],current.world[1]-last.world[1],current.world[2]-last.world[2]] as [number,number,number],canvas:difference(current.canvas,last.canvas),client:difference(current.client,last.client),page:difference(current.page,last.page)}};
     last=current;

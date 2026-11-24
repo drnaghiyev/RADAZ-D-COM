@@ -158,7 +158,7 @@ export function requestedStudies(hash:string):string[] {
 export async function openStudiesInViewer(studies: string[], reserved?: ViewerTarget | null): Promise<'new'|'reused'> {
   if (!studies.length||studies.length>200||studies.some(study=>!validStudy(study))) throw new Error('DICOM Study UID düzgün deyil');
   const unique=[...new Set(studies)];
-  if (location.origin==='https://appassets.androidplatform.net' && window.prompt('radaz-tablet/open-studies',JSON.stringify(unique))==='ok') return 'reused';
+  if (typeof window!=='undefined' && window.location?.origin==='https://appassets.androidplatform.net' && window.prompt('radaz-tablet/open-studies',JSON.stringify(unique))==='ok') return 'reused';
   const url = unique.length===1?`/#archive-study=${encodeURIComponent(unique[0])}`:`/#archive-studies=${encodeURIComponent(unique.join(','))}`;
   const tab = reserved === undefined ? await focusViewer() : reserved;
   if (!tab || tab.closed) throw new Error('Yeni Viewer vərəqəsi açıla bilmədi. RADAZ üçün pop-up icazəsini aktiv edin.');
