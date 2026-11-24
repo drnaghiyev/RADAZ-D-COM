@@ -62,15 +62,22 @@ try {
     assert.equal(await page.locator('.series-card img').evaluateAll(nodes=>nodes.filter(img=>img.complete&&img.naturalWidth>0).length),2);
     console.log('PASS: missing central CT disk frame recovers, compressed JPEG preview remains visible');
   }else{
-  // A newly opened patient replaces the CD list, including late media watcher events.
-  await control('window-study');
-  await page.evaluate(()=>{const c=new BroadcastChannel('radaz-viewer-open-v2');c.postMessage({kind:'OPEN',target:window.name,request:'test-new-patient',studies:['2.25.301']});c.close();});
-  await page.locator('.series-card').filter({hasText:'Window isolation'}).waitFor();
-  await page.waitForTimeout(2500);
-  assert.equal(await page.locator('.series-card').count(),1,'Prior CD patient is removed from the Viewer');
-  const status=await (await fetch(`http://127.0.0.1:${archivePort}/status`)).json();
-  assert.ok(status.instanceCount>3,'Previously imported CD remains in Local Archive');
-  assert.deepEqual(errors,[]);console.log('PASS: disk CD and compressed JPEG series thumbnails appear before series selection');
+    // Opening an archived examination adds it to the current session and keeps its CD previews.
+    await control('window-study');
+    const archiveStatus=async()=> (await fetch(`http://127.0.0.1:${archivePort}/status`)).json();
+    const before=await archiveStatus();
+    assert.ok(before.instanceCount>=3,'The fixture has an archived examination');
+    await page.evaluate(()=>{const c=new BroadcastChannel('radaz-viewer-open-v2');c.postMessage({kind:'OPEN',target:window.name,request:'test-new-patient',studies:['2.25.301']});c.close();});
+    const cards=page.locator('.series-card');
+    await cards.filter({hasText:'Window isolation'}).locator('img').waitFor();
+    assert.equal(await cards.count(),3,'Both CD series and the archived series remain available');
+    for(const name of ['CD progressive CT','JPEG compressed CD','Window isolation']){
+      const img=cards.filter({hasText:name}).locator('img');
+      assert.ok(await img.evaluate(async image=>{await image.decode();return image.naturalWidth>0;}),name+' preview is readable');
+    }
+    assert.equal((await archiveStatus()).instanceCount,before.instanceCount,'Viewing a series does not change the stored archive');
+    assert.equal(imports,0,'Opening or switching studies does not import the disc');
+    assert.deepEqual(errors,[]);console.log('PASS: both CD previews survive opening an archived examination and all three thumbnails are readable');
   }
 } catch(error) {
   for (const [i,p] of (browser?.contexts()[0]?.pages() || []).entries()) {

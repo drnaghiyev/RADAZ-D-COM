@@ -61,7 +61,11 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
           await d.accept('ok');
           const home=context.pages().find(web=>new URL(web.url()).pathname==='/');
           assert.ok(home);await home.bringToFront();
-          assert.ok(await home.evaluate(ids=>!dispatchEvent(new CustomEvent('radaz-tablet-open-studies',{cancelable:true,detail:ids})),ids));return;
+          assert.ok(await home.evaluate(ids=>{
+            const handled=!dispatchEvent(new CustomEvent('radaz-tablet-open-studies',{cancelable:true,detail:ids}));
+            if(handled)window.qaArchiveHandoffs=[...(window.qaArchiveHandoffs||[]),ids];
+            return handled;
+          },ids));return;
         }
         if(cmd==='network'){
           const v=JSON.parse(d.defaultValue());
@@ -233,7 +237,26 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
       await gestures.contact(mpr,mprInput,kind,center,{x:center.x+16,y:center.y+12});
       assert.notEqual(await overlay.getAttribute('data-world'),before,'MPR intersection moves with '+kind);
     }
-    suite.mprTouchAndPen=true;
+    for(const kind of ['touch','pen']){
+      const overlay=mpr.locator('[data-panel="MA"] .localizer-overlay');
+      const line=await overlay.evaluate(svg=>{
+        for(const node of svg.querySelectorAll('.localizer-hit')){
+          const length=node.getTotalLength(),matrix=node.getScreenCTM();
+          for(const fraction of [.3,.65,.4,.8,.18]){
+            const q=node.getPointAtLength(length*fraction).matrixTransform(matrix);
+            if(document.elementFromPoint(q.x,q.y)!==node)continue;
+            const next=node.getPointAtLength(length*fraction+1).matrixTransform(matrix);
+            const dx=next.x-q.x,dy=next.y-q.y,mag=Math.hypot(dx,dy);
+            return {from:{x:q.x,y:q.y},to:{x:q.x-18*dy/mag,y:q.y+18*dx/mag}};
+          }
+        }
+      });
+      assert.ok(line,'an exposed MPR line can receive a contact');
+      const before=await overlay.getAttribute('data-world');
+      await gestures.contact(mpr,mprInput,kind,line.from,line.to);
+      assert.notEqual(await overlay.getAttribute('data-world'),before,'MPR line moves its source plane with '+kind);
+    }
+    console.log('Navigation edits and MPR lines and intersection passed for touch and pen.');suite.mprTouchAndPen=true;
     suite.mprPanels=await mpr.locator('[data-has-image="true"]').count();
     await mpr.locator('[data-panel="MA"]').click({position:{x:60,y:70}});
     await command(mpr,'Ölçmə alətləri');
@@ -277,13 +300,24 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
     await archive.getByText(/1 müayinə saxlanıldı/).waitFor();
     await archive.reload();
     await archive.getByText(/1 müayinə arxivdədir/).waitFor();
-    const row=archive.locator('tbody tr').first();
-    await row.locator('td').nth(2).tap();
-    await archive.getByRole('button',{name:'Viewer',exact:true}).click();
-    await page.waitForFunction(()=>location.hash.includes('archive-studies='));
-    await archive.bringToFront();await row.locator('td').nth(2).dblclick();
+    const todayFilter=archive.locator('.today-filter input');if(await todayFilter.isChecked())await todayFilter.uncheck();
+    const row=archive.locator('tbody tr').filter({has:archive.locator('.record-open-button')}).first();
+    const dateCell=row.locator('td').nth(2);
+    await dateCell.tap();
+    await archive.getByRole('button',{name:'Viewer',exact:true}).tap();
+    await page.waitForFunction(()=>window.qaArchiveHandoffs?.length===1 && location.hash.includes('archive-studies='));
+    const opened=await page.evaluate(()=>window.qaArchiveHandoffs[0]);
+    assert.equal(opened.length,1);
+    assert.equal(new URLSearchParams(new URL(page.url()).hash.slice(1)).get('archive-studies'),opened[0]);
     await archive.getByText(/1 seçilmiş müayinə Viewer-də açıldı/).waitFor();
-    suite.archiveAfterReopen=true;
+    await archive.bringToFront();
+    // The initial selection tap and the next double gesture are separate actions.
+    await archive.waitForTimeout(460);
+    await dateCell.tap();await dateCell.tap();
+    await page.waitForFunction(()=>window.qaArchiveHandoffs?.length===2 && document.querySelector('[data-panel="A"] canvas')?.width>0);
+    assert.deepEqual(await page.evaluate(()=>window.qaArchiveHandoffs[1]),opened);
+    await page.waitForFunction(()=>!document.querySelector('.viewport-loading'));
+    console.log('Archive Viewer and double-tap handoffs passed.');suite.archiveAfterReopen=true;
     await archive.close();await page.bringToFront();
     const beforeTouch=await frame.innerText();
     const box=await panel.boundingBox();
@@ -294,6 +328,21 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
     await page.waitForFunction(before=>document.querySelector('[data-panel="A"] .bottom-right span')?.textContent!==before,beforeTouch);
     const afterTouch=await frame.innerText();
     suite.touch=[beforeTouch,afterTouch];
+    if(process.env.RADAZ_TABLET_THUMB_ZIP){
+      await page.locator('input[type=file][accept*="zip"]').first().setInputFiles(process.env.RADAZ_TABLET_THUMB_ZIP);
+      const preview=page.locator('.series-card').filter({hasText:'THUMBNAIL RECOVERY QA'}).locator('img');
+      await preview.waitFor();
+      await page.waitForFunction(()=>{
+        const card=[...document.querySelectorAll('.series-card')].find(item=>item.textContent.includes('THUMBNAIL RECOVERY QA'));
+        const img=card?.querySelector('img');if(!img?.complete||!img.naturalWidth)return false;
+        const canvas=document.createElement('canvas');canvas.width=canvas.height=48;
+        const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0,48,48);
+        const pixels=ctx.getImageData(0,0,48,48).data;
+        let min=255,max=0;for(let i=0;i<pixels.length;i+=4){min=Math.min(min,pixels[i]);max=Math.max(max,pixels[i]);}
+        return max-min>100;
+      });
+      suite.thumbnailRecovered=true;
+    }
     if(process.env.RADAZ_LARGE_TABLET_ZIP){
       await page.locator('input[type=file][accept*="zip"]').first().setInputFiles(process.env.RADAZ_LARGE_TABLET_ZIP);
       await page.waitForFunction(()=>document.querySelector('.statusbar')?.textContent.includes('442 DICOM'),{},{timeout:120000});

@@ -26,4 +26,10 @@ Windows-da JDK 21, Android SDK Platform 36, Build Tools 36.0.0, Git, Node.js və
 
 Nəticə `out/RADAZ-Tablet-0.2.97-1.apk` faylıdır. İmzalama açarı `.local` qovluğunda saxlanılır. Mövcud quraşdırmanın üzərinə yenilənmə vermək üçün eyni açar lazımdır.
 
-Buraxılış üçün mövcud imza qovluğunu `-SigningDirectory` ilə göstərin. APK və yaratdığı `RADAZ-Tablet-update.json` faylını eyni Windows versiyasının GitHub buraxılışına əlavə edin. Son versiya ünvanı bu məlumatı planşetə çatdırır.
+Buraxılış üçün mövcud imza qovluğunu `-SigningDirectory` ilə göstərin. Windows buraxılışı hazırlanarkən aşağıdakı əmrlə imzalı APK-nı və yeniləmə məlumatını həmin buraxılışın qaralamasına əlavə edin.
+
+```powershell
+python android/stage-release.py <tam-Git-commit>
+```
+
+Buraxılış yayımlandıqdan sonra `python android/stage-release.py <tam-Git-commit> --promote` planşetin istifadə etdiyi açıq ünvandan məlumatı və APK-nı yükləyib yoxlayır. Yaranan `android/release.json` faylını əsas budağa daxil edin. Planşet əsas ünvana çata bilməyəndə bu ehtiyat ünvandan son Android paketini tapır.
