@@ -198,7 +198,7 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
     assert.ok(await panel.locator('canvas').count());
     const readPanel=()=>panel.innerText();
     const initial=await readPanel();
-    await page.bringToFront();await panel.click();
+    await page.bringToFront();await panel.tap();
     await page.keyboard.press('F1');
     await page.waitForFunction(()=>/1500/.test(document.querySelector('[data-panel="A"]')?.textContent||''));
     await page.keyboard.press('F2');
@@ -215,9 +215,10 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
     await panel.locator('canvas').first().waitFor();
     await page.locator('.series-card img').first().waitFor();
     await command(page,'Ölçmə alətləri');
-    await page.getByRole('menuitem',{name:/Uzunluq/}).click();await dismissOverflow(page);
+    await page.getByRole('menuitem',{name:/Uzunluq/}).tap();await dismissOverflow(page);
+    await page.getByRole('menu').waitFor({state:'hidden'});await page.waitForTimeout(250);
     const tabletInput=await context.newCDPSession(page),mainBox=await panel.locator('.dicom-canvas').boundingBox();
-    const from={x:mainBox.x+mainBox.width*.35,y:mainBox.y+mainBox.height*.4};
+    const from={x:mainBox.x+mainBox.width*.45,y:mainBox.y+mainBox.height*.42};
     await gestures.contact(page,tabletInput,'touch',from,{x:from.x+105,y:from.y+8});
     await gestures.verifyEdits(page,panel,tabletInput);suite.navigationMeasurements=true;
     const mprButton=page.getByRole('button',{name:'MPR rekonstruksiya',exact:true}).first();
@@ -258,6 +259,7 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
     suite.volumeCanvas=true;
     await volume.getByRole('button',{name:'3D-ni bağla',exact:true}).last().click();await page.bringToFront();
     assert.equal(await panel.getAttribute('data-has-image'),'true');
+    await page.waitForFunction(()=>!document.querySelector('.tablet-volume-overlay,.sv-surface'));
     const smartOpen=context.waitForEvent('page');
     await command(page,'Smart Volume');
     const smart=await smartOpen;

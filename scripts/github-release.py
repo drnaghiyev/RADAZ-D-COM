@@ -48,7 +48,7 @@ class GitHub:
         data = None
         if upload:
             data = upload.read_bytes()
-            headers['Content-Type'] = {'.zip':'application/zip','.exe':'application/octet-stream'}.get(upload.suffix, 'text/plain')
+            headers['Content-Type'] = {'.zip':'application/zip','.exe':'application/octet-stream','.apk':'application/vnd.android.package-archive','.json':'application/json'}.get(upload.suffix, 'text/plain')
         elif payload is not None:
             data = json.dumps(payload).encode()
             headers['Content-Type'] = 'application/json'

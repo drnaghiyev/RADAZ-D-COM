@@ -513,6 +513,7 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
   const [maximizedPane, setMaximizedPane] = useState<string | null>(null);
   const [maximizedMprPane, setMaximizedMprPane] = useState<string | null>(null);
   const [datasetVersion, setDatasetVersion] = useState(0);
+  const [tabletVolumeId,setTabletVolumeId]=useState<string|null>(null);
   const [workspace, setWorkspace] = useState<'viewer' | 'mpr' | '3d'>(detachedMode || 'viewer');
   useEffect(()=>{if(limited){setTool('scroll');setLayout({rows:1,columns:1});setActive('A');setMaximizedPane(null);setLocalizers(false);setSelectedMarkId(null);setWorkspace('viewer');}},[limited]);
   const [mprSettings, setMprSettings] = useState<MprSettings>(newMprSettings);
@@ -749,27 +750,30 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
   }, [ready, mediaEnabled, mediaFilter]);
 
   const thumbnailJobs = useRef(new Set<string>());
-  const thumbnailAttempts = useRef(new Set<string>());
+  const thumbnailAttempts = useRef(new Map<string,{thumb:string;image:string}|null>());
   useEffect(() => {
     if (!ready) return;
     const pending=thumbnailAttempts.current;
     const keyFor=(ids:string[])=>ids[Math.floor(ids.length/2)];
     const available=new Set(seriesList.map(s=>keyFor(s.imageIds)));
-    for(const key of pending)if(!available.has(key))pending.delete(key);
+    for(const key of pending.keys())if(!available.has(key))pending.delete(key);
     for (const series of seriesList) {
       if (thumbnailJobs.current.size>=2)break;
       const key=keyFor(series.imageIds);
-      if(series.loading||!key||pending.has(key))continue;
-      if(series.thumb && series.thumbImageId===key)continue;
-      pending.add(key);thumbnailJobs.current.add(key);
+      if(series.loading||!key||thumbnailJobs.current.has(key))continue;
+      const cached=pending.get(key);
+      if(cached===null || (series.thumb && (series.thumbImageId===key || cached?.thumb===series.thumb)))continue;
+      thumbnailJobs.current.add(key);
       const current=()=>listRef.current.some(s=>s.id===series.id&&keyFor(s.imageIds)===key);
       void (async()=>{
-        let result=await representativeThumbnail(series.imageIds,current);
+        let result=cached||await representativeThumbnail(series.imageIds,current);
         if(!result && current()){
           await new Promise(resolve=>setTimeout(resolve,750));
           result=await representativeThumbnail(series.imageIds,current);
         }
-        if(!result||!current())return;
+        if(!current())return;
+        pending.set(key,result||null);
+        if(!result)return;
         const update={thumb:result.thumb,thumbImageId:result.image};
         const media=mediaSeries.current.get(series.id);
         if(media)mediaSeries.current.set(series.id,{...media,...update});
@@ -809,7 +813,9 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
     const publish = () => {
       const imported = [...found.values()].map(({ ordered, sopUIDs, ...s }) => {
         const imageIds = ordered.sort((a, b) => a.n - b.n).map(o => o.id);
-        return { ...s, imageIds, loading: (!finished && (!registered || ordered.some(o => filesById.has(o.id) && !decodedIds.has(o.id)))) || !!job?.pending?.(s.id) };
+        const existing=listRef.current.find(item=>item.id===s.id);
+        const preview=existing?.thumbImageId&&imageIds.includes(existing.thumbImageId)?{thumb:existing.thumb,thumbImageId:existing.thumbImageId}:{};
+        return { ...s, ...preview, imageIds, loading: (!finished && (!registered || ordered.some(o => filesById.has(o.id) && !decodedIds.has(o.id)))) || !!job?.pending?.(s.id) };
       });
       if (!imported.length) return;
       if (!published && (!job || job.select())) {
@@ -1040,7 +1046,7 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
 
   useEffect(()=>{
     if(location.origin!=='https://appassets.androidplatform.net')return;
-    const back=()=>{if(!history.state?.radazTabletVolume)setWorkspace(view=>view==='3d'?'viewer':view);};
+    const back=()=>setTabletVolumeId(history.state?.radazTabletVolume||null);
     window.addEventListener('popstate',back);return ()=>window.removeEventListener('popstate',back);
   },[]);
 
@@ -1048,8 +1054,8 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
     const source=listRef.current.find(s=>s.id===selectedIdRef.current);
     if(!source){setStatus('Əvvəlcə seriya seçin');return;}
     if(mode==='3d' && location.origin==='https://appassets.androidplatform.net'){
-      history.pushState({...history.state,radazTabletVolume:true},'','#volume');
-      setWorkspace('3d');return;
+      history.pushState({...history.state,radazTabletVolume:source.id},'','#volume');
+      setTabletVolumeId(source.id);return;
     }
     const key=`${mode}:${source.id}`;
     const existing=detachedWindows.current.get(key);
@@ -1081,7 +1087,7 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if(limited)return;
-      if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement).tagName) || document.querySelector('[role=dialog], dialog[open]') || (e.target as HTMLElement).isContentEditable) return;
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement).tagName) || document.querySelector('[role=dialog], dialog[open], .tablet-volume-overlay') || (e.target as HTMLElement).isContentEditable) return;
       if(e.ctrlKey&&!e.altKey&&!e.shiftKey&&e.code==='KeyD'){
         e.preventDefault();
         if(workspace!=='3d'&&currentImages[workspace==='mpr'?mprActive:active])setClearToken(value=>value+1);
@@ -1459,8 +1465,8 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
   const jobProgress = importProgress || transferProgress || loadProgress || mediaLoading;
   const floatingProgress = !detachedMode && (railHidden || importOpen);
   const sourceLoading: LoadingProgress | null = volumeSeries?.loading ? {label:'Seriya yüklənir',done:volumeSeries.imageIds.length,total:volumeSeries.discovered||0,indeterminate:!volumeSeries.discovered} : null;
-  if(['3d'].includes(workspace))return <SharedVolumeView series={volumeSeries} anatomy={volumeResultFor(volumeSeries)} onClose={()=>{if(detachedMode)window.close();else if(history.state?.radazTabletVolume)history.back();else setWorkspace('viewer');}}/>;
-  return <ToolbarWorkspace scope={workspace}><main className={`workstation grouped-workstation ${railHidden ? 'rail-hidden' : ''} ${detachedMode ? 'detached' : ''}`} data-mode={detachedMode || 'viewer'} style={measurementVariables as React.CSSProperties}
+  if(['3d'].includes(workspace))return <SharedVolumeView series={volumeSeries} anatomy={volumeResultFor(volumeSeries)} onClose={()=>{if(detachedMode)window.close();else setWorkspace('viewer');}}/>;
+  return <><ToolbarWorkspace scope={workspace}><main inert={tabletVolumeId?true:undefined} className={`workstation grouped-workstation ${railHidden ? 'rail-hidden' : ''} ${detachedMode ? 'detached' : ''}`} data-mode={detachedMode || 'viewer'} style={measurementVariables as React.CSSProperties}
     onDragOverCapture={event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; } }}
     onDropCapture={event => {
       if (event.dataTransfer.types.includes('application/x-series-id') || !event.dataTransfer.types.includes('Files') || (event.target as HTMLElement).closest('.source-list')) return;
@@ -1618,5 +1624,5 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
         <footer className="statusbar"><div><span className="viewer-version">v{releaseVersion}</span><span className="status-led"/> {ready ? 'Cornerstone3D hazırdır' : 'Görüntüləmə hazırlanır'} <span className="status-sep">/</span> <span>{workspace === 'mpr' ? `MPR · ${mprSettings[panePlane[mprActive as keyof typeof panePlane] || 'AX'].mode}` : workspace === '3d' ? '3D görünüş' : `Aktiv panel ${active}`}</span><span className="status-sep">/</span>{status}<span className="status-sep">/</span><span aria-label={tr('ui.licence_status_2eb16')}>{licenseStatus}</span></div></footer>
       </section>
     </div>
-  </main></ToolbarWorkspace>;
+  </main></ToolbarWorkspace>{tabletVolumeId&&<div className="tablet-volume-overlay" role="dialog" aria-modal="true" aria-label="3D həcm görüntüləmə"><SharedVolumeView series={seriesList.find(s=>s.id===tabletVolumeId)} anatomy={volumeResultFor(seriesList.find(s=>s.id===tabletVolumeId))} onClose={()=>{if(history.state?.radazTabletVolume)history.back();else setTabletVolumeId(null);}}/></div>}</>;
 }
