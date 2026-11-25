@@ -32,3 +32,4 @@ body .flat-toolbar-workspace .flat-toolbar-tool button>svg+svg {position:absolut
 .flat-toolbar-editor-item button {min-height:34px;display:grid;place-items:center}
 .flat-toolbar-editor-item button[aria-pressed=true] {background:#215c70}
 @media(max-width:540px){.toolbar-editor .flat-toolbar-editor-item{grid-template-columns:minmax(55px,1fr) 80px repeat(3,29px);gap:3px}}
+[data-radix-popper-content-wrapper]:has([data-toolbar-menu][data-state="open"]) {z-index:160!important}
