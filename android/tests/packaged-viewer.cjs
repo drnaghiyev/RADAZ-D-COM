@@ -25,7 +25,7 @@ async function dismissOverflow(page) {
 }
 const types = {html:'text/html',js:'application/javascript',css:'text/css',json:'application/json',svg:'image/svg+xml',wasm:'application/wasm',rsc:'text/x-component',woff2:'font/woff2',png:'image/png'};
 (async () => {
-  const apk = await JSZip.loadAsync(fs.readFileSync(path.join(project,'out',process.env.RADAZ_TEST_APK||'RADAZ-Tablet-0.2.97-1.apk')));
+  const apk = await JSZip.loadAsync(fs.readFileSync(path.join(project,'out',process.env.RADAZ_TEST_APK||'RADAZ-Tablet-0.2.98-1.apk')));
   assert.ok(apk.file('classes.dex'));
   assert.ok(Object.keys(apk.files).some(p => p.startsWith('assets/web/_next/static/chunks/') && p.endsWith('.js')));
   const sample = fs.readFileSync(path.resolve(process.argv[3]));

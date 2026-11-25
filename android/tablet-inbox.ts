@@ -1,6 +1,6 @@
 import {storeIncomingDicom} from '../lib/local-archive';
 
-type Reply={ticket?:string;study:string;uid:string;sha:string;size:number;error?:string;message?:string};
+type Reply={ticket?:string;study:string;uid:string;sha:string;size:number;error?:string;message?:string;pending?:boolean};
 type InboxWindow=Window&{radazInboxResult?:(id:string,reply:Reply)=>void};
 if(typeof window!=='undefined'&&location.origin==='https://appassets.androidplatform.net'&&location.pathname==='/'){
   const app=window as InboxWindow;
@@ -10,7 +10,8 @@ if(typeof window!=='undefined'&&location.origin==='https://appassets.androidplat
     return new Promise<Reply>((resolve,reject)=>{
       const id=crypto.randomUUID();
       const fail=()=>{waiting.delete(id);reject(Error('Qəbul xidməti cavab vermədi.'));};
-      const timer=setTimeout(fail,120000);
+      // Each socket has an idle timeout. A progressing large image can take several minutes.
+      const timer=action==='next'?undefined:setTimeout(fail,120000);
       waiting.set(id,reply=>{clearTimeout(timer);waiting.delete(id);if(reply.error)reject(Error(reply.error));else resolve(reply);});
       if(window.prompt('radaz-tablet/inbox',JSON.stringify({id,action,ticket}))!=='ok'){clearTimeout(timer);fail();}
     });
@@ -22,6 +23,7 @@ if(typeof window!=='undefined'&&location.origin==='https://appassets.androidplat
     let delay=4000;
     try{
       const item=await request('next');
+      if(item.pending)delay=100;
       if(item.ticket){
         try{
           const response=await fetch('/_tablet/inbox/'+encodeURIComponent(item.ticket),{cache:'no-store'});

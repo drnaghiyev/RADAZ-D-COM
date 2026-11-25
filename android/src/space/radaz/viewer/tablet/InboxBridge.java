@@ -14,7 +14,7 @@ final class InboxBridge {
     final TabletInbox inbox;
     private final ThreadPoolExecutor worker=new ThreadPoolExecutor(1,1,0,TimeUnit.SECONDS,new ArrayBlockingQueue<>(4));
     InboxBridge(Context context){
-        ClinicHttps https=new ClinicHttps();
+        ClinicHttps https=new ClinicHttps(new File(context.getCacheDir(),"network-encrypted-parts"));
         inbox=new TabletInbox(new ClinicVault(context),https,https::download,new File(context.getCacheDir(),"network-inbox"));
     }
     private static boolean mainPage(String address){

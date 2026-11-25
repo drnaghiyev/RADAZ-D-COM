@@ -1,4 +1,4 @@
-export type UpdateDiagnostic = {phase?:string;type?:string;message?:string;version?:string;at?:number;startup?:unknown;rollback?:unknown};
+export type UpdateDiagnostic = {phase?:string;repairAvailable?:boolean;type?:string;message?:string;version?:string;at?:number;startup?:unknown;rollback?:unknown};
 export type InstallationState = {managed?:boolean;state:string;message:string;version?:string;activeVersion?:string;buildId?:string;healthy?:boolean;activationComplete?:boolean;diagnostic?:UpdateDiagnostic|null;progress?:{done:number;total:number;unit?:string}|null};
 let lastDiagnostic = '';
 export function reportUpdateDiagnostic(state: Pick<InstallationState,'diagnostic'>) {

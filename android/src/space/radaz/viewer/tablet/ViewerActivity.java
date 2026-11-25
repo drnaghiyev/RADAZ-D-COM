@@ -32,7 +32,7 @@ public final class ViewerActivity extends Activity {
     private FrameLayout stage;
     private LinearLayout childBar;
     private TextView childTitle;
-    private WebView home, active, chooserWindow, saveWindow;
+    private WebView home, active, archiveWindow, chooserWindow, saveWindow;
     private ValueCallback<Uri[]> chooser;
     private boolean pickingTree;
     private String saveId;
@@ -149,6 +149,11 @@ public final class ViewerActivity extends Activity {
                     case "updates": if(web==active)web.post(()->updater.check(true));else answer="denied";break;
                     case "network": answer=clinics.request(web,url,value);break;
                     case "inbox": answer=web==home?receiver.request(web,url,value):"denied";break;
+                    case "open-archive":
+                        if(web!=home || web!=active || !"/".equals(Uri.parse(url).getPath()))answer="denied";
+                        else if(archiveWindow==null && windows.size()>=10)answer="busy";
+                        else web.post(ViewerActivity.this::openArchive);
+                        break;
                     case "open-studies":
                         if (web!=active || !openStudies(value)) answer="denied";
                         break;
@@ -170,6 +175,13 @@ public final class ViewerActivity extends Activity {
             }catch(Exception problem){answer="error";message("Əməliyyat tamamlanmadı.");}
             result.confirm(answer);return true;
         }
+    }
+    private void openArchive(){
+        if(archiveWindow==null){
+            archiveWindow=createWindow();
+            archiveWindow.loadUrl(TabletAssets.ORIGIN+"/archive");
+        }
+        show(archiveWindow);
     }
     private boolean openStudies(String value) throws org.json.JSONException {
         if(value==null || value.length()>14000)return false;
@@ -205,6 +217,7 @@ public final class ViewerActivity extends Activity {
     private void close(WebView web) {
         if(web==home || !windows.contains(web))return;
         int previous=Math.max(0,windows.indexOf(web)-1);
+        if(web==archiveWindow)archiveWindow=null;
         initialized.remove(web);windows.remove(web);clinics.navigate(web,null);stage.removeView(web);web.destroy();
         if(active==web){active=null;show(windows.get(previous));}
     }

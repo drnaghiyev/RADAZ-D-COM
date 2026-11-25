@@ -158,7 +158,7 @@ final class TabletInbox implements AutoCloseable {
             }catch(Exception invalid){temporary.delete();deferred.put(item.key(),System.currentTimeMillis()+30000);
                 error="DICOM qəbulu tamamlanmadı. Bağlantı və boş yaddaş yoxlanmalıdır.";break;}
         }
-        if(active==null)return new JSONObject().put("message",error);
+        if(active==null)return new JSONObject().put("message",error).put("pending",!items.isEmpty());
         return new JSONObject().put("ticket",ticket).put("study",active.study).put("uid",active.uid).put("sha",active.sha).put("size",active.size);
     }
     synchronized InputStream open(String id)throws Exception{

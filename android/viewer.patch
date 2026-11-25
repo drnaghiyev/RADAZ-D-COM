@@ -221,3 +221,12 @@
 +  "ru": "Импорт файлов и папок DICOM, ZIP/RAR · Локальный архив"
   },
   "ui.image_viewing_and_windowing_measurement_tools_e8457": {
+--- a/lib/viewer-session.ts
++++ b/lib/viewer-session.ts
+@@ -10,3 +10,6 @@
+ export function openRecordsWindow(kind: RecordsKind): Promise<boolean> {
++  if(kind==='archive' && location.origin==='https://appassets.androidplatform.net' && location.pathname==='/' &&
++      window.prompt('radaz-tablet/open-archive','')==='ok')
++    return Promise.resolve(true);
+   const pending = recordsOpening.get(kind);
+   if (pending) return pending;

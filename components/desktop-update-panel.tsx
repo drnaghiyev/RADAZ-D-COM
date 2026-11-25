@@ -17,10 +17,10 @@ export function DesktopUpdatePanel({fallback,onCheck,busy}:{fallback:React.React
   };void poll();return()=>{alive=false;clearTimeout(timer);};
  },[]);
  const active=!!state&&['checking','downloading','verifying','installing','activating','rolling-back'].includes(state.state);
- const start=async(version?:string)=>{
+ const start=async(version?:string,repair=false)=>{
   if(!state?.managed){onCheck();return;}
   setStarting(true);setError('');
-  try{const response=await fetch('/radaz-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(version?{action:'download',version,confirmed:true}:{action:'check'})});
+  try{const response=await fetch('/radaz-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(repair?{action:'repair-trust',confirmed:true}:version?{action:'download',version,confirmed:true}:{action:'check'})});
    if(!response.ok)throw Error('Yeniləmə başladılmadı. RADAZ-ı iş masasındakı qısayoldan başladın.');
    setState({...state,state:'checking',message:version?'Yeniləmə avtomatik yüklənib hazırlanır…':'Yeniləmələr yoxlanılır…',progress:null});
   }catch(cause){setError(cause instanceof Error?cause.message:String(cause));}finally{setStarting(false);}
@@ -45,6 +45,7 @@ export function DesktopUpdatePanel({fallback,onCheck,busy}:{fallback:React.React
    <p role={state.state==='error'?'alert':'status'}>{state.message}</p>
    {(active||state.state==='ready')&&<><progress aria-label={tr('ui.update_progress_48685')} max={total||1} value={total?Math.min(done,total):undefined}/>
     <span>{total?`${Math.round(done/total*100)}%`:'Hazırlanır…'}{state.progress?.unit==='bayt'&&total>0?` · ${(done/1048576).toFixed(1)} / ${(total/1048576).toFixed(1)} MB`:''}</span></>}
+   {state.state==='error'&&state.diagnostic?.repairAvailable&&<button disabled={starting} onClick={()=>void start(undefined,true)}>Windows sertifikatlarını administrator icazəsi ilə bərpa et</button>}
    {success&&<p className="update-confirmation">{state.state==='ready'?'Endirmə tamamlandı. Yeni versiyanı tətbiq etmək üçün yenidən başladın.':'RADAZ yenilənmə vəziyyəti təsdiqləndi.'}</p>}
   </div>:fallback}
   {error&&<p role="alert">{error}</p>}

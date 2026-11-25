@@ -9,20 +9,13 @@ import java.nio.charset.StandardCharsets;
 import javax.net.ssl.HttpsURLConnection;
 
 final class ClinicHttps implements ClinicNetwork.Transport {
+    private final ResumableBlob blobs;
+    ClinicHttps(){this(null);}
+    ClinicHttps(java.io.File directory){blobs=new ResumableBlob(directory);}
     void download(String endpoint,String token,String delivery,String sha,TabletInbox.StreamReader reader)throws Exception {
         if(!delivery.matches("[A-Za-z0-9_-]{1,128}")||!sha.matches("[a-f0-9]{64}"))throw new IllegalArgumentException("manifest");
         URL url=new URL(ClinicNetwork.endpoint(endpoint)+"/v1/blob/"+delivery+"/"+sha);
-        HttpsURLConnection connection=(HttpsURLConnection)url.openConnection();
-        boolean consumed=false;
-        try{
-            connection.setInstanceFollowRedirects(false);connection.setUseCaches(false);
-            connection.setConnectTimeout(10000);connection.setReadTimeout(30000);
-            connection.setRequestProperty("Authorization","Bearer "+token);
-            connection.setRequestProperty("Accept-Encoding","identity");
-            if(connection.getResponseCode()!=200)throw new java.io.IOException("DICOM faylı hazır deyil.");
-            try(InputStream stream=connection.getInputStream()){reader.read(stream);}
-            consumed=true;
-        }finally{if(!consumed)connection.disconnect();}
+        blobs.read(url,token,delivery+"-"+sha,reader);
     }
     @Override public JSONObject post(String endpoint,String action,JSONObject body,String token)throws Exception {
         if(!action.matches("[a-z_]{1,32}"))throw new IllegalArgumentException("action");
