@@ -42,7 +42,8 @@ final class ResumableBlob {
                 Matcher range=RANGE.matcher(String.valueOf(conn.getHeaderField("Content-Range")));
                 if(start<=0 || !prior.equals(tag) || !range.matches() || Long.parseLong(range.group(1))!=start ||
                    (total=Long.parseLong(range.group(3)))!=start+count || Long.parseLong(range.group(2))!=total-1){
-                    part.delete();id.delete();throw new IOException("Invalid resume response");
+                    if(part!=null){part.delete();id.delete();}
+                    throw new IOException("Invalid resume response");
                 }
             } else if(status==200)start=0;
             else{

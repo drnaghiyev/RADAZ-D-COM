@@ -83,7 +83,7 @@ try:
         setup = os.environ.get('RADAZ_TEST_SETUP_PATH') or ROOT/f'outputs/releases/RADAZ-Setup-v{VERSION}.exe'
         icon_root = os.environ.get('RADAZ_TEST_ICON_ROOT')
         icon_options = [] if icon_root else ['/NoShortcuts=1','/NoStartup=1']
-        run([setup,'/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/NoRegistry=1',*icon_options,f'/DIR={install}'])
+        run([setup,'/VERYSILENT','/SSLDiagnosticsOnly=1','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/NoRegistry=1',*icon_options,f'/DIR={install}'])
         assert get('/radaz-runtime.json')['version'] == VERSION
         assert get('/radaz-health.json')['ready'] is True
         if icon_root:
@@ -187,7 +187,7 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
             script=f"from pathlib import Path;import radaz_desktop;radaz_desktop.stage_package(Path({str(install)!r}),Path({str(package)!r}),{VERSION!r},{digest!r},{package.stat().st_size})"
         if os.environ.get('RADAZ_TEST_SETUP_UPGRADE')=='1':
             setup=ROOT/f'outputs/releases/RADAZ-Setup-v{VERSION}.exe'
-            run([setup,'/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/NoRegistry=1','/NoShortcuts=1','/NoStartup=1',f'/DIR={install}'])
+            run([setup,'/VERYSILENT','/SSLDiagnosticsOnly=1','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/NoRegistry=1','/NoShortcuts=1','/NoStartup=1',f'/DIR={install}'])
             assert get('/radaz-runtime.json')['version']==base_version
             assert get('/radaz-runtime.json')['startedAt']==first['startedAt']
             assert json.loads((install/'pending.json').read_text())['version']==VERSION

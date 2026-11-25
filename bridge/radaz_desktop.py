@@ -14,7 +14,9 @@ import time
 import zlib
 from http.client import HTTPException
 from pathlib import Path, PurePosixPath
-from urllib.request import Request, urlopen, build_opener, ProxyHandler
+from urllib.request import Request, build_opener, ProxyHandler
+import radaz_update_tls as update_tls
+from radaz_update_tls import open_https as urlopen
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from zipfile import ZipFile
@@ -143,12 +145,7 @@ def local_or_remote_open(request, timeout=15):
     url = request.full_url if isinstance(request, Request) else request
     if urlsplit(url).hostname in ('localhost', '127.0.0.1', '::1'):
         return build_opener(ProxyHandler({})).open(request, timeout=timeout)
-    try:
-        return urlopen(request, timeout=timeout)
-    except URLError:
-        # A stale Windows proxy must not make every update source unreachable.
-        # Direct retry retains normal TLS certificate verification.
-        return build_opener(ProxyHandler({})).open(request, timeout=timeout)
+    return urlopen(request, timeout=timeout)
 
 
 def get_json(url, timeout=15):
@@ -163,6 +160,7 @@ class UpdateSourcesError(ValueError):
 def get_latest_release(repo=UPDATE_REPOSITORY):
     if not re.fullmatch(r'[\w.-]+/[\w.-]+', repo): raise ValueError('Invalid update repository')
     errors = []
+    tls_errors = []
     sources = [f'https://github.com/{repo}/releases/latest/download/radaz-update.json?check={int(time.time())//60}']
     if repo == UPDATE_REPOSITORY:
         sources.append('https://radaz.space/radaz-update.json')
@@ -172,6 +170,7 @@ def get_latest_release(repo=UPDATE_REPOSITORY):
             authenticate_release(release)
             return release
         except (OSError, ValueError, KeyError) as error:
+            if isinstance(error, update_tls.TLSIssue): tls_errors.append(error)
             errors.append(urlsplit(url).hostname + ': ' + update_error_message(error))
     try:
         release = get_json(f'https://api.github.com/repos/{repo}/releases/latest')
@@ -188,7 +187,10 @@ def get_latest_release(repo=UPDATE_REPOSITORY):
         authenticate_release(release)
         return release
     except (OSError, ValueError, KeyError) as error:
+        if isinstance(error, update_tls.TLSIssue): tls_errors.append(error)
         errors.append('api.github.com: ' + update_error_message(error))
+    if tls_errors:
+        raise tls_errors[0]
     raise UpdateSourcesError('Yenilənmə mənbələri yoxlanmadı. ' + ' | '.join(errors))
 
 
@@ -209,6 +211,8 @@ def open_release_download(url, offset=0):
         except HTTPError as error:
             if error.code not in (500, 502, 503, 504) or attempt == 2:
                 raise
+        except update_tls.TLSIssue:
+            raise
         except (URLError, TimeoutError):
             if attempt == 2:
                 raise
@@ -298,6 +302,8 @@ def download_asset(root, asset, target):
             return temporary
         except ValueError:
             temporary.unlink(missing_ok=True);metadata.unlink(missing_ok=True);raise
+        except update_tls.TLSIssue:
+            raise
         except (OSError,HTTPException,TimeoutError):
             if attempt==2:raise
             time.sleep(.5*(attempt+1))
@@ -485,6 +491,8 @@ def stage_file_update(root, release, target, base):
                             if retry_after.isdigit():delay=max(delay,min(int(retry_after),60))
                             error.close()
                             time.sleep(delay)
+                        except update_tls.TLSIssue:
+                            raise
                         except (OSError,HTTPException,TimeoutError):
                             if attempt==4:raise
                             time.sleep(min(2**attempt,16))
@@ -855,6 +863,15 @@ def install(root, shortcuts=True):
     return initialize(root, shortcuts)
 
 def update_error_message(error):
+    if isinstance(error, update_tls.TLSIssue):
+        messages = {
+            'hostname': 'Yenilənmə serverinin adı sertifikatla uyğun gəlmir.',
+            'validity': 'Sertifikatın etibarlılıq müddətini və Windows tarixini yoxlayın.',
+            'distrust': 'Windows bu sertifikata etibar etmir və ya sertifikat ləğv olunub.',
+            'chain': 'Windows yenilənmə serverinin sertifikat zəncirini təsdiqləmədi.',
+            'handshake': 'Serverlə təhlükəsiz TLS bağlantısı qurulmadı.',
+        }
+        return messages.get(error.kind, 'Yenilənmə serverinin sertifikatı təsdiqlənmədi.')
     if isinstance(error, UpdateSourcesError): return str(error)
     if isinstance(error, ValueError) and any(word in str(error).lower() for word in ('signature','authenticity')):
         return 'Buraxılışın rəqəmsal imzası yoxdur və ya düzgün deyil. Təhlükəsizlik yoxlaması yenilənməni saxladı.'
@@ -878,6 +895,8 @@ def consume_update_request(root):
     except FileNotFoundError: return None
     try:
         request = read_json(consumed)
+        if request.get('action') == 'repair-trust' and request.get('confirmed') is True:
+            return 'repair-trust'
         if request.get('action') == 'download' and request.get('confirmed') is True:
             approved = request.get('version')
             if isinstance(approved, str):
@@ -956,10 +975,23 @@ def watch(root):
                 if active != own_version:
                     handoff = version_dir(root, active)
                     break
-                try: check_update(root, consume_update_request(root))
+                approved = consume_update_request(root)
+                try:
+                    if approved == 'repair-trust':
+                        prior = read_json(root / 'update-state.json').get('diagnostic') or {}
+                        approved = prior.get('approvedVersion')
+                        if prior.get('repairAvailable') is True:
+                            state(root, 'checking', 'Windows təhlükəsizlik sertifikatlarını yoxlayır…')
+                            update_tls.native_check(SOURCE, root, prior.get('host'), repair=True)
+                            update_tls.opener.cache_clear()
+                    check_update(root, approved)
                 except Exception as error:
                     saved = read_json(root / 'update-state.json')
                     detail = failure(root, error, saved.get('state', 'download'), saved.get('version'))
+                    if isinstance(error, update_tls.TLSIssue):
+                        update_tls.log_issue(root, error)
+                        native = update_tls.native_check(SOURCE, root, error.host)
+                        detail.update(host=error.host, repairAvailable=native == 10 and error.kind == 'chain', approvedVersion=approved)
                     state(root, 'error', update_error_message(error), diagnostic=detail)
                     retry_delay = 60
                 # A transient outage must not hide a new version for six hours.

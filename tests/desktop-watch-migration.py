@@ -20,6 +20,7 @@ from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 PS = Path(os.environ['SystemRoot']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'bridge'))
 spec = importlib.util.spec_from_file_location('desktop', ROOT/'bridge/radaz_desktop.py')
 desktop = importlib.util.module_from_spec(spec); spec.loader.exec_module(desktop)
 temporary = Path(tempfile.mkdtemp(prefix='radaz-watch-migration-')).resolve()

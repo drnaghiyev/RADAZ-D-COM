@@ -27,6 +27,7 @@ CloseApplications=no
 CreateUninstallRegKey=RegisterUninstaller
 
 [Files]
+Source: "{#StageRoot}\runtime\RadazTls.exe"; Flags: dontcopy
 Source: "{#StageRoot}\*"; DestDir: "{app}\versions\{#ProductVersion}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "launcher.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageRoot}\public\radaz.ico"; DestDir: "{app}"; Flags: ignoreversion
@@ -43,6 +44,48 @@ Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile
 ; No recursive uninstall-delete rules: clinical data and rollback versions are preserved.
 
 [Code]
+procedure InitializeWizard;
+var
+  Page: TOutputProgressWizardPage;
+  Helper, Args, Mode, LogsDir: String;
+  Code: Integer;
+begin
+  Page := CreateOutputProgressPage('RADAZ DICOM Viewer', 'Quraşdırma hazırlanır');
+  Page.Show;
+  try
+    Page.SetText('Windows uyğunluğu yoxlanılır...', '');
+    Page.SetProgress(1, 5);
+    try
+      ExtractTemporaryFile('RadazTls.exe');
+      Helper := ExpandConstant('{tmp}\RadazTls.exe');
+      LogsDir := ExpandConstant('{localappdata}\RADAZ\logs');
+      Page.SetText('Təhlükəsizlik sertifikatları yoxlanılır...', '');
+      Page.SetProgress(2, 5);
+      Mode := 'setup';
+      if ExpandConstant('{param:SSLDiagnosticsOnly|0}') = '1' then Mode := 'inspect';
+      Page.SetText('Zərurət olduqda sertifikatlar yenilənir...', 'Windows administrator təsdiqi istəyə bilər.');
+      Page.SetProgress(3, 5);
+      Args := Mode + ' github.com "' + LogsDir + '"';
+      if not Exec(Helper, Args, '', SW_HIDE, ewWaitUntilTerminated, Code) then Code := -1;
+      Log(Format('Windows certificate preflight exit %d', [Code]));
+      Page.SetText('HTTPS bağlantısı yoxlanılır...', '');
+      Page.SetProgress(4, 5);
+      if not Exec(Helper, 'diagnose radaz.space "' + LogsDir + '"', '', SW_HIDE, ewWaitUntilTerminated, Code) then Code := -1;
+      Log(Format('HTTPS mirror status %d', [Code]));
+    except
+      Log('Windows TLS diagnostics unavailable: ' + GetExceptionMessage);
+    end;
+    Page.SetText('RADAZ DICOM Viewer quraşdırılır...', '');
+    Page.SetProgress(5, 5);
+  finally
+    Page.Hide;
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssInstall then WizardForm.StatusLabel.Caption := 'RADAZ DICOM Viewer quraşdırılır...';
+end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   ExitCode: Integer;

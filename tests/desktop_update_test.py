@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import sys
 import tempfile
 import threading
 import unittest
@@ -11,6 +12,7 @@ from unittest.mock import patch
 from zipfile import ZipFile
 from urllib.error import HTTPError, URLError
 
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'bridge'))
 spec = importlib.util.spec_from_file_location('desktop', Path(__file__).resolve().parents[1] / 'bridge/radaz_desktop.py')
 desktop = importlib.util.module_from_spec(spec); spec.loader.exec_module(desktop)
 
@@ -22,11 +24,11 @@ class DesktopUpdates(unittest.TestCase):
             remote.assert_not_called()
             direct.return_value.open.assert_called_once()
 
-    def test_update_transport_retries_direct_after_proxy_network_failure(self):
+    def test_remote_updates_respect_configured_proxy_after_connection_failure(self):
         with patch.object(desktop,'urlopen',side_effect=URLError('proxy unavailable')), patch.object(desktop,'build_opener') as direct:
-            direct.return_value.open.return_value='verified TLS transport'
-            self.assertEqual(desktop.local_or_remote_open('https://radaz.space/radaz-update.json'),'verified TLS transport')
-            direct.return_value.open.assert_called_once()
+            with self.assertRaises(URLError):
+                desktop.local_or_remote_open('https://radaz.space/radaz-update.json')
+            direct.assert_not_called()
 
     def test_launch_lock_errors_are_recorded(self):
         args=['radaz_desktop.py','launch','--install-root',str(self.root),'--no-browser']

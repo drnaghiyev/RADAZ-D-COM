@@ -57,7 +57,14 @@ def main():
     with ZipFile(inputs['python']) as package: package.extractall(python)
     pth = next(python.glob('python*._pth'))
     pth.write_text('python313.zip\n.\nLib/site-packages\n../../bridge\nimport site\n')
-    with ZipFile(inputs['pillow']) as package: package.extractall(python / 'Lib/site-packages')
+    for dependency in ('pillow', 'certifi', 'truststore'):
+        with ZipFile(inputs[dependency]) as package:
+            package.extractall(python / 'Lib/site-packages')
+    if not (python / 'Lib/site-packages/certifi/cacert.pem').is_file():
+        raise ValueError('Missing packaged CA bundle')
+    compiler_dir = Path(os.environ['SystemRoot']) / 'Microsoft.NET/Framework64/v4.0.30319'
+    subprocess.run([str(compiler_dir / 'csc.exe'), '/nologo', '/target:exe', '/platform:x64', '/optimize+',
+                    '/out:' + str(STAGE / 'runtime/RadazTls.exe'), str(ROOT / 'installer/UpdateTrust.cs')], check=True)
     ffmpeg = STAGE / 'runtime/ffmpeg'; ffmpeg.mkdir()
     with ZipFile(inputs['ffmpeg']) as package:
         exe = next(n for n in package.namelist() if n.endswith('.exe'))

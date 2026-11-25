@@ -33,8 +33,9 @@ with tempfile.TemporaryDirectory(dir=root / 'build' / 'qa', prefix='clinic-') as
     classes = work / 'classes'
     classes.mkdir()
     src = root / 'src/space/radaz/viewer/tablet'
-    checked(jdk/'bin/javac','-encoding','UTF-8','-cp',jar,'-d',classes,src/'ClinicNetwork.java',src/'ClinicHttps.java',src/'TabletInbox.java',root/'tests/ClinicProbe.java',root/'tests/InboxFairness.java')
+    checked(jdk/'bin/javac','-encoding','UTF-8','-cp',jar,'-d',classes,src/'ClinicNetwork.java',src/'ClinicHttps.java',src/'ResumableBlob.java',src/'TabletInbox.java',root/'tests/ClinicProbe.java',root/'tests/InboxFairness.java',root/'tests/ResumeBlobTest.java')
     checked(jdk/'bin/java','-cp',str(classes)+os.pathsep+str(jar),'space.radaz.viewer.tablet.InboxFairness',str(work))
+    checked(jdk/'bin/java','-cp',str(classes)+os.pathsep+str(jar),'space.radaz.viewer.tablet.ResumeBlobTest',str(work))
     internet = InternetAuthority(work / 'internet.db')
     private = Authority(work / 'private.db')
     owner = private.bootstrap('synthetic-admin','Synthetic administrator')

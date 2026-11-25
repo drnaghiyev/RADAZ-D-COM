@@ -86,6 +86,7 @@ class NetworkClient:
         self.client_path = self.root / 'identity.dpapi'
         self._settings = None
         self.internet_client = None
+        self.deferred_instances = {}
 
     def internet_profile(self):
         with self.lock:
@@ -172,6 +173,11 @@ class NetworkClient:
         headers = {'Content-Type':'application/octet-stream' if binary else 'application/json'}
         if auth:
             headers['Authorization'] = 'Bearer ' + auth
+        if binary and method == 'PUT':
+            # sendall has a deadline for a whole write. Each progressing block gets its own idle timeout.
+            view = memoryview(data)
+            headers['Content-Length'] = str(len(view))
+            data = (view[offset:offset + 65536] for offset in range(0, len(view), 65536))
         req = urllib.request.Request(base+'/v1/'+path, data=data, method=method, headers=headers)
         try:
             with urllib.request.build_opener(NoRedirect).open(req,timeout=90) as response:
@@ -472,7 +478,9 @@ class NetworkClient:
             return
         received,uploaded=set(item.get('received',[])),set(item.get('uploaded',[]))
         count=0
-        if limit is not None:
+        now=time.monotonic()
+        self.deferred_instances={key:until for key,until in self.deferred_instances.items() if until>now}
+        if sending and limit is not None:
             # Keep room on the relay for the recipient's other active studies.
             limit=min(limit, max(0, 8-len(uploaded-received)))
             if not limit:
@@ -496,35 +504,50 @@ class NetworkClient:
                 return
             path=f'blob/{delivery}/{sha}'
             aad='|'.join([delivery,item['clinic'],study,f['uid'],sha,item['device']])
-            if sending:
-                raw=(self.root/'outbox'/safe_id(job['id'])/sha).read_bytes()
-                if len(raw)!=f['size'] or hashlib.sha256(raw).hexdigest()!=sha:
-                    raise ValueError('Göndərilən fayl bütövlük yoxlamasından keçmədi.')
-                if viewing:
-                    from private_network_preview import make_preview
-                    frame=item['previewFrames'][sha]
-                    raw=make_preview(raw,frame)
-                    path+=f'?frame={frame}'
-                    aad+=f'|preview|{frame}'
-                blob=crypto('seal',key=item['publicKey'],context=aad,data=raw)
-                if viewing or not self.peer or not self.peer.publish(item,item['device'],sha,blob):
-                    self.request('PUT',path,blob,binary=True)
-            else:
-                blob = self.peer.take(item,sha) if self.peer else None
-                if blob is None:
-                    if sha not in uploaded:
-                        continue
-                    blob=self.request('GET',path,binary=True)
-                raw=crypto('open',key=cfg['privateKey'],context=aad,data=blob)
-                if len(raw)!=f['size'] or hashlib.sha256(raw).hexdigest()!=sha:
-                    raise ValueError('Qəbul edilən fayl bütövlük yoxlamasından keçmədi.')
-                ds=pydicom.dcmread(io.BytesIO(raw),force=True)
-                if str(ds.StudyInstanceUID)!=study or str(ds.SOPInstanceUID)!=f['uid']:
-                    raise ValueError('DICOM manifestə uyğun deyil.')
-                with self.db() as db:
-                    db.execute('INSERT OR IGNORE INTO imports VALUES(?)',(study,))
-                self.archive.store(raw,ds)
-                self.rpc('ack',{'delivery':delivery,'sha256':sha})
+            key=(delivery,sha)
+            if key in self.deferred_instances:
+                continue
+            try:
+                if sending:
+                    raw=(self.root/'outbox'/safe_id(job['id'])/sha).read_bytes()
+                    if len(raw)!=f['size'] or hashlib.sha256(raw).hexdigest()!=sha:
+                        raise ValueError('Göndərilən fayl bütövlük yoxlamasından keçmədi.')
+                    if viewing:
+                        from private_network_preview import make_preview
+                        frame=item['previewFrames'][sha]
+                        raw=make_preview(raw,frame)
+                        path+=f'?frame={frame}'
+                        aad+=f'|preview|{frame}'
+                    blob=crypto('seal',key=item['publicKey'],context=aad,data=raw)
+                    if viewing or not self.peer or not self.peer.publish(item,item['device'],sha,blob):
+                        self.request('PUT',path,blob,binary=True)
+                else:
+                    blob = self.peer.take(item,sha) if self.peer else None
+                    if blob is None:
+                        if sha not in uploaded:
+                            continue
+                        blob=self.request('GET',path,binary=True)
+                    raw=crypto('open',key=cfg['privateKey'],context=aad,data=blob)
+                    if len(raw)!=f['size'] or hashlib.sha256(raw).hexdigest()!=sha:
+                        raise ValueError('Qəbul edilən fayl bütövlük yoxlamasından keçmədi.')
+                    ds=pydicom.dcmread(io.BytesIO(raw),force=True)
+                    if str(ds.StudyInstanceUID)!=study or str(ds.SOPInstanceUID)!=f['uid']:
+                        raise ValueError('DICOM manifestə uyğun deyil.')
+                    with self.db() as db:
+                        db.execute('INSERT OR IGNORE INTO imports VALUES(?)',(study,))
+                    self.archive.store(raw,ds)
+                    self.rpc('ack',{'delivery':delivery,'sha256':sha})
+            except (ConnectionError, TimeoutError, RemoteError, OSError, ValueError, RuntimeError) as error:
+                if isinstance(error,RemoteError) and error.status in (401,403):
+                    raise
+                # Keep verified receipts and the outbox; other files in this study can still advance.
+                self.deferred_instances[key]=time.monotonic()+15
+                self.last_error=str(error)[:512]
+                if isinstance(error,RemoteError) and error.status in (429,503,507):
+                    break
+                if isinstance(error,ConnectionError):
+                    break
+                continue
             count+=1
             if limit is not None and count>=limit:
                 break
@@ -578,13 +601,15 @@ class NetworkClient:
                     self.peer.refresh()
         except Exception as error:
             faults.append(str(error))
+        received_progress=False
         for inbox in state.get('deliveries',[]):
             try:
                 mode=cfg.get('clinicModes',{}).get(inbox['clinic'],cfg.get('acceptMode','manual'))
                 if mode=='auto' and inbox.get('state') in ('queued','pending','offered','waiting'):
                     self.rpc('accept',{'delivery':inbox['id']})
+                    received_progress=True
                 else:
-                    self.transfer(inbox,False)
+                    received_progress=bool(self.transfer(inbox,False,4)) or received_progress
             except Exception as error:
                 faults.append(str(error))
         sent=state.get('sent',[])
@@ -600,7 +625,10 @@ class NetworkClient:
             except Exception as error:
                 faults.append(str(error))
         self.finish_outbox(sent)
-        self.last_error='; '.join(dict.fromkeys(faults))[:512]
+        if faults or not self.deferred_instances:
+            self.last_error='; '.join(dict.fromkeys(faults))[:512]
+        if received_progress:
+            return 0.25
         if active and relay and not faults:
             return 0.25 if progressed else 3
 

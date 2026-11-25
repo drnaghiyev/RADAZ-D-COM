@@ -10,6 +10,7 @@ import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'bridge'))
 spec = importlib.util.spec_from_file_location('desktop', ROOT/'bridge/radaz_desktop.py')
 desktop = importlib.util.module_from_spec(spec); spec.loader.exec_module(desktop)
 

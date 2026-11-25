@@ -74,8 +74,9 @@ const server=http.createServer((req,res)=>{
   let request;
   try{
    const input=JSON.parse(body||'{}'),action=input.action||'check';
-   if(!['check','download','apply'].includes(action))throw Error('action');
-   if(action!=='check'&&(input.confirmed!==true||typeof input.version!=='string'||!/^\d+\.\d+\.\d+$/.test(input.version)))throw Error('confirmation');
+   if(!['check','download','apply','repair-trust'].includes(action))throw Error('action');
+   if(action==='repair-trust'&&(input.confirmed!==true||JSON.parse(readFileSync(path.join(installRoot,'update-state.json'),'utf8')).diagnostic?.repairAvailable!==true))throw Error('repair');
+   if(['download','apply'].includes(action)&&(input.confirmed!==true||typeof input.version!=='string'||!/^\d+\.\d+\.\d+$/.test(input.version)))throw Error('confirmation');
    if(action==='apply'&&JSON.parse(readFileSync(path.join(installRoot,'pending.json'),'utf8')).version!==input.version)throw Error('stale version');
    request=action!=='check'?{action,confirmed:true,version:input.version}:{action};
   }catch{res.writeHead(400);res.end('Invalid update request');return;}

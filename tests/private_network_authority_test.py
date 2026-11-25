@@ -1,5 +1,6 @@
 """Clinic isolation, delivery authorization, relay expiry, integrity and restart tests."""
 import hashlib
+import contextlib
 import http.client
 import socket
 import socketserver
@@ -75,6 +76,40 @@ class PrivateNetworkAuthorityTest(unittest.TestCase):
                 connection.close()
                 worker.join(5)
         self.assertEqual(self.call(self.reader, 'ack', delivery=delivery, sha256=digest)['state'], 'complete')
+
+    def test_authenticated_range_after_interruption_and_replacement(self):
+        pixels = bytes(2 * 1024 * 1024)
+        digest = hashlib.sha256(pixels).hexdigest()
+        self.file.update(size=len(pixels), sha256=digest)
+        delivery = self.start()
+        header = b'PDN1' + (256).to_bytes(2, 'big') + bytes(256 + 28)
+        original = header + pixels
+        self.net.blob(self.operator, delivery, digest, original)
+        with make_server(self.net, '127.0.0.1', 0) as server:
+            worker = threading.Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            def fetch(token, **headers):
+                with contextlib.closing(http.client.HTTPConnection('127.0.0.1', server.server_address[1], timeout=6)) as conn:
+                    conn.request('GET', f'/v1/blob/{delivery}/{digest}', headers={'Authorization':'Bearer '+token, **headers})
+                    with conn.getresponse() as res:
+                        return res.status, dict(res.getheaders()), res.read()
+            try:
+                status,head,original_bytes=fetch(self.reader)
+                self.assertEqual((status,original_bytes),(200,original))
+                offset=len(original)//2
+                options={'Range':f'bytes={offset}-','If-Range':head['ETag']}
+                status,res,chunk=fetch(self.reader,**options)
+                self.assertEqual((status,original[:offset]+chunk),(206,original))
+                self.assertEqual(res['Content-Range'],f'bytes {offset}-{len(original)-1}/{len(original)}')
+                self.assertEqual(fetch(self.outsider,**options)[0],403)
+                resealed=header[:8]+b'x'+original[9:]
+                self.net.blob(self.operator,delivery,digest,resealed)
+                self.assertEqual(fetch(self.reader,**options)[::2],(200,resealed))
+                self.assertEqual(fetch(self.reader,Range='bytes=999999999-')[0],416)
+                self.assertEqual(self.call(self.reader,'state')['deliveries'][0]['done'],0)
+            finally:
+                server.shutdown()
+                worker.join(6)
 
     def test_tenant_admins_and_default_denial(self):
         other=self.call(self.root,'create_clinic',name='Clinic B',admin='bob',adminName='Bob')['id']

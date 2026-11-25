@@ -3,6 +3,7 @@ import importlib.util
 import io
 import json
 import os
+import sys
 import struct
 import tempfile
 import unittest
@@ -11,6 +12,7 @@ from unittest.mock import patch
 from zipfile import ZipFile, ZIP_DEFLATED
 
 ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'bridge'))
 def load(name, file):
     spec=importlib.util.spec_from_file_location(name,ROOT/file)
     module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module

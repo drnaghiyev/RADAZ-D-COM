@@ -522,10 +522,11 @@ def make_server(authority,host,port,cert=None,key=None,*,unix_path=None):
         server_version='RADAZNetwork'
         def log_message(self,*args):
             pass
-        def respond(self,status,body):
-            binary=isinstance(body,bytes)
+        def respond(self,status,body,headers=None):
+            binary=isinstance(body,(bytes,memoryview))
             if not binary:body=json.dumps(body,ensure_ascii=False).encode()
             self.send_response(status)
+            for name,value in (headers or {}).items(): self.send_header(name,value)
             self.send_header('Content-Type','application/octet-stream' if binary else 'application/json; charset=utf-8')
             self.send_header('Cache-Control','no-store')
             self.send_header('X-Content-Type-Options','nosniff')
@@ -575,6 +576,20 @@ def make_server(authority,host,port,cert=None,key=None,*,unix_path=None):
                             self.server.upload_slots.release()
                     else:
                         result=authority.blob(token,*blob.groups(),frame=frame)
+                        # The authenticated GCM tag and per-envelope key change on every reseal.
+                        envelope=result[:34+int.from_bytes(result[4:6],'big')]
+                        tag='"'+hashlib.sha256(envelope).hexdigest()+'"'
+                        headers={'Accept-Ranges':'bytes','ETag':tag}
+                        segment=self.headers.get('Range')
+                        if segment and self.headers.get('If-Range',tag)==tag:
+                            match=re.fullmatch(r'bytes=([0-9]{1,12})-',segment)
+                            if not match or int(match[1])>=len(result):
+                                headers['Content-Range']=f'bytes */{len(result)}'
+                                return self.respond(416,b'',headers)
+                            offset=int(match[1])
+                            headers['Content-Range']=f'bytes {offset}-{len(result)-1}/{len(result)}'
+                            return self.respond(206,memoryview(result)[offset:],headers)
+                        return self.respond(200,result,headers)
                 else:
                     name=re.fullmatch(r'/v1/([a-z_]+)',path)
                     require(self.command=='POST' and name,404,'Əməliyyat tapılmadı')

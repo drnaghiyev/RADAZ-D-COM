@@ -41,6 +41,7 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
     const context = await browser.newContext({viewport:{width:1200,height:800},isMobile:true,hasTouch:true,deviceScaleFactor:1});
     context.setDefaultTimeout(20000);
     let picker = '',delayReceiver=false,interruptReceipt=false,damageRead=false;
+    let archiveWindow=null,archiveOpens=0;
     context.on('page',p=>{
       p.on('pageerror',e=>issues.push(e.message));
       p.on('dialog',async d=>{
@@ -55,6 +56,13 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
           else reply=await network.call('Tablet','inbox_'+v.action,{ticket:v.ticket});
           if(!p.isClosed())await p.evaluate(([id,result])=>window.radazInboxResult?.(id,result),[v.id,reply.data||reply]).catch(()=>{});
           return;
+        }
+        if(cmd==='open-archive'){
+          await d.accept('ok');
+          if(!archiveWindow || archiveWindow.isClosed()){
+            archiveWindow=await context.newPage();await archiveWindow.goto(origin+'/archive');
+          }
+          await archiveWindow.bringToFront();archiveOpens++;return;
         }
         if(cmd==='open-studies'){
           const ids=JSON.parse(d.defaultValue());
@@ -126,7 +134,9 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
         await new Promise(resolve=>setTimeout(resolve,600));
       }while(Date.now()<until);
       assert.deepEqual(receipt,{state:'complete',done:12,total:12});
-      const archive=await context.newPage();await archive.goto(origin+'/archive');
+      const firstOpen=context.waitForEvent('page');
+      await command(page,'Local arxiv');
+      const archive=await firstOpen;await archive.waitForURL(origin+'/archive');
       const today=archive.locator('.today-filter input');
       if(await today.isChecked())await today.uncheck();
       await archive.getByText('RADAZ DELIVERY QA',{exact:true}).first().waitFor();
@@ -143,7 +153,10 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
       await row.locator('.record-open-button').click();
       await archive.getByText(/1 seçilmiş müayinə Viewer-də açıldı/).waitFor();
       await page.waitForFunction(()=>document.querySelector('.series-rail, .study-rail, [data-panel="A"]')?.ownerDocument.body.innerText.includes('RADAZ DELIVERY QA')&&document.querySelector('[data-panel="A"] canvas')?.width>0);
-      suite.automaticDelivery={confirmed:receipt.done,originalHashesMatched:totals.length,openedInViewer:true,offlineResume:true,damagedReadRetried:true,lostReceiptRetried:true,uniqueTransfer:true};
+      await command(page,'Local arxiv');await archive.waitForFunction(()=>document.body.innerText.includes('RADAZ DELIVERY QA'));
+      await new Promise((resolve,reject)=>{const end=Date.now()+5000;const check=()=>archiveOpens>=2?resolve():Date.now()>end?reject(Error('archive did not reopen')):setTimeout(check,20);check();});
+      assert.equal(archiveWindow,archive);
+      suite.automaticDelivery={reopened:true,confirmed:receipt.done,originalHashesMatched:totals.length,openedInViewer:true,offlineResume:true,damagedReadRetried:true,lostReceiptRetried:true,uniqueTransfer:true};
       await archive.close();
     }
     async function assertDock(count){
