@@ -26,6 +26,18 @@ def run(args):
     assert result.returncode==0,result.stdout.decode('utf-8',errors='replace')
     return result.stdout.decode('utf-8',errors='replace')
 
+def start_desktop():
+    native = install/'RADAZ-Start.exe'
+    if native.is_file():
+        return run([native,'--no-browser'])
+    return ps(install/'launcher.ps1','-NoBrowser')
+
+def assert_shortcut(meta):
+    if (install/'RADAZ-Start.exe').is_file():
+        assert Path(meta['target']) == install/'RADAZ-Start.exe' and not meta['arguments']
+    else:
+        assert Path(meta['target']) == PS and str(install/'launcher.ps1') in meta['arguments']
+
 def ps(script,*args): return run([PS,'-NoProfile','-ExecutionPolicy','Bypass','-File',script,*args])
 def get(path):
     with urlopen(base+path,timeout=5) as response:return json.load(response)
@@ -34,10 +46,10 @@ def stop_test_watchers():
     if os.environ.get('RADAZ_TEST_GATEWAY_UPDATER') != '1':return
     # Force the real HTTP apply path to create its own updater. Only processes
     # in this disposable installation are eligible; never touch the user's app.
-    literal=str(install.resolve()).replace("'","''")
-    assert install.resolve().parent==temporary
-    command=f"Get-CimInstance Win32_Process | Where-Object {{ $_.Name -eq 'python.exe' -and $_.ExecutablePath -and $_.ExecutablePath.StartsWith('{literal}\\') -and $_.CommandLine -match 'radaz_desktop\\.py\"?\\s+watch(?:\\s|$)' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}"
-    run([PS,'-NoProfile','-Command',command])
+    assert install.resolve().parent == temporary
+    run([STAGE/'runtime/python/python.exe','-c',
+         f"from pathlib import Path; import radaz_desktop_processes as p; p.manage(Path({str(install)!r}),'Quiesce')"])
+
 def variant(value, broken=False, broken_asset=False):
     source=STAGE; destination=install/'versions'/value; destination.mkdir()
     manifest=json.loads((source/'SHA256SUMS.json').read_text())
@@ -90,8 +102,7 @@ try:
             for name in ('Desktop', 'Programs', 'Startup'):
                 link = str(Path(icon_root)/name/'RADAZ.lnk').replace("'", "''")
                 metadata = json.loads(run([PS, '-NoProfile', '-Command', f"$link=(New-Object -ComObject WScript.Shell).CreateShortcut('{link}'); @{{target=$link.TargetPath;arguments=$link.Arguments;icon=$link.IconLocation}} | ConvertTo-Json -Compress"]))
-                assert Path(metadata['target']) == PS
-                assert f'-File "{install / "launcher.ps1"}"' in metadata['arguments']
+                assert_shortcut(metadata)
                 assert metadata['icon'].split(',')[0] == str(install/'radaz.ico')
             print('Setup created Desktop, Start menu and Windows Startup shortcuts with the RADAZ icon', flush=True)
         print('Fresh Setup started localhost in the background without opening a window', flush=True)
@@ -102,19 +113,18 @@ try:
     assert run([folder/'runtime/node/node.exe','--version']).strip()=='v24.21.0'
     run([folder/'runtime/python/python.exe','-c','import ssl,sqlite3;from PIL import Image;import radaz_pacs_bridge'])
     run([folder/'runtime/ffmpeg/ffmpeg.exe','-version'])
-    shortcuts=temporary/'shortcuts';shortcuts.mkdir()
-    ps(folder/'scripts/desktop-shortcuts.ps1','-InstallRoot',install,'-ShortcutDirectory',shortcuts)
-    assert (shortcuts/'RADAZ.lnk').is_file()
-    shortcut_literal = str(shortcuts/'RADAZ.lnk').replace("'", "''")
-    shortcut = json.loads(run([PS, '-NoProfile', '-Command',
-        f"$link=(New-Object -ComObject WScript.Shell).CreateShortcut('{shortcut_literal}'); @{{target=$link.TargetPath;arguments=$link.Arguments;icon=$link.IconLocation;directory=$link.WorkingDirectory;window=$link.WindowStyle}} | ConvertTo-Json -Compress"]))
-    assert Path(shortcut['target']) == PS
-    assert f'-File "{install / "launcher.ps1"}"' in shortcut['arguments']
-    assert '-WindowStyle Hidden' in shortcut['arguments']
-    assert shortcut['icon'].split(',')[0] == str(install/'radaz.ico')
-    assert shortcut['directory'] == str(install) and shortcut['window'] == 7
+    if not (install/'RADAZ-Start.exe').exists() or os.environ.get('RADAZ_SKIP_LEGACY_PS_SMOKE') != '1':
+        shortcuts=temporary/'shortcuts';shortcuts.mkdir()
+        ps(folder/'scripts/desktop-shortcuts.ps1','-InstallRoot',install,'-ShortcutDirectory',shortcuts)
+        assert (shortcuts/'RADAZ.lnk').is_file()
+        shortcut_literal = str(shortcuts/'RADAZ.lnk').replace("'", "''")
+        shortcut = json.loads(run([PS, '-NoProfile', '-Command',
+            f"$link=(New-Object -ComObject WScript.Shell).CreateShortcut('{shortcut_literal}'); @{{target=$link.TargetPath;arguments=$link.Arguments;icon=$link.IconLocation;directory=$link.WorkingDirectory;window=$link.WindowStyle}} | ConvertTo-Json -Compress"]))
+        assert_shortcut(shortcut)
+        assert shortcut['icon'].split(',')[0] == str(install/'radaz.ico')
+        assert shortcut['directory'] == str(install) and shortcut['window'] == 7
     run([folder/'runtime/python/python.exe', '-c', f"from PIL import Image; icon=Image.open({str(install/'radaz.ico')!r}); assert {{(16,16),(32,32),(48,48),(256,256)}} <= icon.ico.sizes()"])
-    ps(install/'launcher.ps1','-NoBrowser')
+    start_desktop()
     first=get('/radaz-runtime.json');assert first['version']==base_version
     if base_version == VERSION:
         assert (folder/'vendor/medsam2/sam2/build_sam.py').is_file()
@@ -170,7 +180,7 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
     ai_file=data/'product/openai-key.dpapi'
     ai_file.write_bytes(b'synthetic-encrypted-credential-marker')
     preserved[ai_file]=hashlib.sha256(ai_file.read_bytes()).hexdigest()
-    ps(install/'launcher.ps1','-NoBrowser')
+    start_desktop()
     assert get('/radaz-runtime.json')['startedAt']==first['startedAt']
     print('Offline installation, private runtimes, desktop shortcut, five routes, C-ECHO and repeat launch passed',flush=True)
     if os.environ.get('RADAZ_TEST_INSTALL_ONLY')=='1': raise SystemExit(0)
@@ -223,17 +233,22 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
     if legacy_lease:lease_file.write_text(json.dumps({'version':VERSION,'launchId':'current-test-lease','controllerPid':os.getpid()}))
     stale_env={**env,'RADAZ_INSTALL_ROOT':str(install),'RADAZ_LAUNCH_ID':'superseded-test-launch',
                'RADAZ_STARTUP_CONTROLLER':str(os.getpid())}
-    rejected=subprocess.run([str(PS),'-NoProfile','-ExecutionPolicy','Bypass','-File',str(folder/'scripts/start-radaz.ps1'),'-NoBrowser'],env=stale_env,capture_output=True,timeout=30,creationflags=0x08000000)
-    assert rejected.returncode!=0 and b'Superseded RADAZ startup attempt' in rejected.stderr
+    if os.environ.get('RADAZ_SKIP_LEGACY_PS_SMOKE') != '1':
+        rejected=subprocess.run([str(PS),'-NoProfile','-ExecutionPolicy','Bypass','-File',str(folder/'scripts/start-radaz.ps1'),'-NoBrowser'],env=stale_env,capture_output=True,timeout=30,creationflags=0x08000000)
+        assert rejected.returncode!=0 and b'Superseded RADAZ startup attempt' in rejected.stderr
     assert get('/radaz-runtime.json')['startedAt']==before_stale
     if legacy_lease:lease_file.unlink()
-    print('Superseded startup rejected before touching the healthy runtime',flush=True)
+    if os.environ.get('RADAZ_SKIP_LEGACY_PS_SMOKE') != '1':
+        print('Legacy superseded startup rejected before touching the healthy runtime',flush=True)
     if os.environ.get('RADAZ_TEST_ELECTRON') == '1':
         print(run([folder/'runtime/node/node.exe', ROOT/'tests/native-electron-browser.mjs', install]), flush=True)
     # The background watcher restores an unexpectedly stopped runtime without
     # requiring a browser refresh or advancing the active version.
     before_recovery=get('/radaz-runtime.json')['startedAt']
-    ps(folder/'scripts/stop-web-server.ps1','-Port',str(web))
+    if (install/'RADAZ-Start.exe').exists():
+        run([folder/'runtime/python/python.exe','-c',f"from pathlib import Path; import radaz_desktop_processes as p; p.manage(Path({str(install)!r}),'StopRuntime',{VERSION!r})"])
+    else:
+        ps(folder/'scripts/stop-web-server.ps1','-Port',str(web))
     for _ in range(150):
         try:
             runtime=get('/radaz-runtime.json')
@@ -270,7 +285,7 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
         assert not (install/'versions'/base_version).exists(), 'After a second successful upgrade, reclaim the older third runtime'
     for file,digest in preserved.items():assert hashlib.sha256(file.read_bytes()).hexdigest()==digest,file.name
     print('Verified new runtime retained one stable rollback and preserved all user data',flush=True)
-    variant('99.0.2',broken=True);ps(install/'launcher.ps1','-NoBrowser')
+    variant('99.0.2',broken=True);start_desktop()
     assert get('/radaz-runtime.json')['version']=='99.0.1'
     assert get('/local-archive-api/status')['appVersion']=='99.0.1'
     assert json.loads((install/'active.json').read_text())['version']=='99.0.1'
@@ -279,7 +294,7 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
     detail=json.loads((install/'failed-update.json').read_text())['diagnostic']
     assert detail['phase']=='startup-health',detail
     assert (install/'logs/update-errors.jsonl').is_file()
-    variant('99.0.3',broken_asset=True);ps(install/'launcher.ps1','-NoBrowser')
+    variant('99.0.3',broken_asset=True);start_desktop()
     assert get('/radaz-runtime.json')['version']=='99.0.1'
     detail=json.loads((install/'failed-update.json').read_text())['diagnostic']
     assert detail['startup']['phase']=='client-files'
@@ -288,9 +303,9 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
     print('Real frontend/backend update and failed-runtime rollback passed; clinical archive stayed separate',flush=True)
     if (install/'unins000.exe').exists():
         # A failed shutdown must abort Inno before it removes any program file.
-        launcher=install/'launcher.ps1';original_launcher=launcher.read_bytes()
+        launcher=install/('RADAZ-Start.exe' if (install/'RADAZ-Start.exe').exists() else 'launcher.ps1');original_launcher=launcher.read_bytes()
         try:
-            launcher.write_text('exit 42')
+            launcher.write_bytes(b'exit 42')
             refused=subprocess.run([str(install/'unins000.exe'),'/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'],env=env,capture_output=True,timeout=30,creationflags=0x08000000)
             assert refused.returncode!=0
             assert (install/'versions'/'99.0.1'/'SHA256SUMS.json').is_file()
@@ -314,9 +329,15 @@ s=a.associate('127.0.0.1',{dicom},ae_title='RADAZ_TEST');assert s.is_established
         assert not remaining,{'uninstallPortsStillListening':remaining,'markerExists':(install/'uninstalling.json').exists()}
         print('Uninstall stopped this installation without removing archive, settings or license',flush=True)
 finally:
-    # Stop only synthetic processes whose executable/script path is inside this temp directory.
-    literal=str(temporary).replace("'","''")
-    subprocess.run([PS,'-NoProfile','-Command',f"Get-CimInstance Win32_Process | Where-Object {{ $_.ProcessId -ne $PID -and $_.CommandLine -like '*{literal}*' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }}"],creationflags=0x08000000,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    # Shut down only installations under the disposable smoke-test directory.
+    assert temporary.parent == Path(tempfile.gettempdir()).resolve() and temporary.name.startswith('radaz-desktop-test-')
+    for sandbox_install in [install, temporary/'baseline-setup']:
+        if not (sandbox_install/'versions').is_dir(): continue
+        stop = ("from pathlib import Path; import radaz_desktop_processes as p; "
+                f"root=Path({str(sandbox_install)!r}); p.manage(root,'Quiesce'); "
+                "[p.manage(root,'StopRuntime',v) for v in p.manage(root,'InUse')['versions']]; "
+                "p.manage(root,'StopServices')")
+        run([STAGE/'runtime/python/python.exe','-c',stop])
     time.sleep(1)
     logs=ROOT/'outputs/desktop-test-logs';logs.mkdir(exist_ok=True)
     if (install/'logs').exists():shutil.copytree(install/'logs',logs,dirs_exist_ok=True)

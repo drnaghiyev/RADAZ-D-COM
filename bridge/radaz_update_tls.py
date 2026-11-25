@@ -80,9 +80,14 @@ def open_https(request, timeout=15):
     return opener().open(request, timeout=timeout)
 
 
+def diagnostics_directory(root):
+    local = os.environ.get('LOCALAPPDATA') if os.name == 'nt' else None
+    return Path(local) / 'RADAZ/logs' if local else root / 'logs'
+
+
 def log_issue(root, error):
     try:
-        logs = root / 'logs'
+        logs = diagnostics_directory(root)
         logs.mkdir(parents=True, exist_ok=True)
         with (logs / 'ssl-diagnostics.jsonl').open('a', encoding='utf8') as out:
             json.dump(dict(at=int(time.time()), phase='update', host=error.host if error.host in HOSTS else 'cdn',
@@ -96,7 +101,7 @@ def native_check(source, root, host, repair=False):
     if os.name != 'nt' or host not in HOSTS:
         return None
     try:
-        args = [str(source / 'runtime/RadazTls.exe'), 'repair' if repair else 'diagnose', host, str(root / 'logs')]
+        args = [str(source / 'runtime/RadazTls.exe'), 'repair' if repair else 'diagnose', host, str(diagnostics_directory(root))]
         return subprocess.run(args, timeout=150, creationflags=subprocess.CREATE_NO_WINDOW).returncode
     except (OSError, subprocess.TimeoutExpired):
         return None

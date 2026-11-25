@@ -1,4 +1,5 @@
 import json
+import os
 import ssl
 import sys
 import tempfile
@@ -46,8 +47,9 @@ class UpdateTrustTests(unittest.TestCase):
     def test_logs_exclude_query_and_manual_requests_require_consent(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)
-            tls.log_issue(root,tls.TLSIssue('chain','cdn.invalid/opaque?token=private',20))
-            entry=json.loads((root/'logs/ssl-diagnostics.jsonl').read_text())
+            with patch.dict(os.environ,{'LOCALAPPDATA':temp}):
+                tls.log_issue(root,tls.TLSIssue('chain','cdn.invalid/opaque?token=private',20))
+                entry=json.loads((tls.diagnostics_directory(root)/'ssl-diagnostics.jsonl').read_text())
             self.assertEqual(entry['host'],'cdn')
             for consent in (False,True):
                 (root/'update-request.json').write_text(json.dumps(dict(action='repair-trust',confirmed=consent)))

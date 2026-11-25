@@ -29,17 +29,18 @@ CreateUninstallRegKey=RegisterUninstaller
 [Files]
 Source: "{#StageRoot}\runtime\RadazTls.exe"; Flags: dontcopy
 Source: "{#StageRoot}\*"; DestDir: "{app}\versions\{#ProductVersion}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#StageRoot}\runtime\RadazStart.exe"; DestDir: "{app}"; DestName: "RADAZ-Start.exe"; Flags: ignoreversion
 Source: "launcher.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageRoot}\public\radaz.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autodesktop}\RADAZ"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\launcher.ps1"""; WorkingDir: "{app}"; IconFilename: "{app}\radaz.ico"; Comment: "RADAZ - DICOM Viewer"; AppUserModelID: "RADAZ.DICOM"; Check: WantShortcuts
-Name: "{autoprograms}\RADAZ"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\launcher.ps1"""; WorkingDir: "{app}"; IconFilename: "{app}\radaz.ico"; Comment: "RADAZ - DICOM Viewer"; AppUserModelID: "RADAZ.DICOM"; Check: WantShortcuts
-Name: "{userstartup}\RADAZ"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\launcher.ps1"""; WorkingDir: "{app}"; IconFilename: "{app}\radaz.ico"; Comment: "RADAZ - DICOM Viewer"; AppUserModelID: "RADAZ.DICOM"; Check: WantStartup
+Name: "{autodesktop}\RADAZ"; Filename: "{app}\RADAZ-Start.exe"; WorkingDir: "{app}"; IconFilename: "{app}\radaz.ico"; Comment: "RADAZ - DICOM Viewer"; AppUserModelID: "RADAZ.DICOM"; Check: WantShortcuts
+Name: "{autoprograms}\RADAZ"; Filename: "{app}\RADAZ-Start.exe"; WorkingDir: "{app}"; IconFilename: "{app}\radaz.ico"; Comment: "RADAZ - DICOM Viewer"; AppUserModelID: "RADAZ.DICOM"; Check: WantShortcuts
+Name: "{userstartup}\RADAZ"; Filename: "{app}\RADAZ-Start.exe"; WorkingDir: "{app}"; IconFilename: "{app}\radaz.ico"; Comment: "RADAZ - DICOM Viewer"; AppUserModelID: "RADAZ.DICOM"; Check: WantStartup
 
 [Run]
 Filename: "{app}\versions\{#ProductVersion}\runtime\python\python.exe"; Parameters: """{app}\versions\{#ProductVersion}\bridge\radaz_desktop.py"" initialize --install-root ""{app}"" --no-shortcuts --start-background"; Flags: runhidden waituntilterminated
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\launcher.ps1"""; Description: "RADAZ proqramini ac"; Flags: postinstall nowait skipifsilent runhidden
+Filename: "{app}\RADAZ-Start.exe"; Description: "RADAZ proqramini ac"; Flags: postinstall nowait skipifsilent runhidden
 
 ; No recursive uninstall-delete rules: clinical data and rollback versions are preserved.
 
@@ -91,8 +92,7 @@ var
   ExitCode: Integer;
 begin
   if CurUninstallStep <> usUninstall then Exit;
-  if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-    ExpandConstant('-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{app}\launcher.ps1" -Uninstall'),
+  if not Exec(ExpandConstant('{app}\RADAZ-Start.exe'), '--uninstall',
     '', SW_HIDE, ewWaitUntilTerminated, ExitCode) then ExitCode := -1;
   Log(Format('RADAZ shutdown exit code: %d', [ExitCode]));
   if ExitCode <> 0 then begin

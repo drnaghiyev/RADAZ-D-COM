@@ -45,7 +45,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           pnpm install --frozen-lockfile
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pip install 'Pillow>=10,<13' 'numpy==2.2.6' 'fastapi==0.115.12'
+          python -m pip install 'Pillow>=10,<13' 'numpy==2.2.6' 'fastapi==0.115.12' 'psutil==7.2.2' 'truststore==0.10.5' 'certifi==2026.11.20'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           choco install ffmpeg --yes --no-progress
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

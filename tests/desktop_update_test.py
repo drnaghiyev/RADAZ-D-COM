@@ -393,7 +393,7 @@ class DesktopUpdates(unittest.TestCase):
         def process(root, action, target=None):
             calls.append(action)
             if action=='Owner': raise RuntimeError('Port belongs to another installation')
-        with patch.object(desktop,'get_json',side_effect=status),patch.object(desktop,'runtime_processes',side_effect=process),patch.object(desktop,'run_hidden',return_value=Child()):
+        with patch.object(desktop,'get_json',side_effect=status),patch.object(desktop,'runtime_processes',side_effect=process),patch.object(desktop,'start_services',return_value=Child()):
             with self.assertRaisesRegex(RuntimeError,'launcher exited'):
                 desktop.open_version(self.root,self.target)
         self.assertEqual(calls,['Owner','Quiesce','StopRuntime'])
@@ -410,7 +410,7 @@ class DesktopUpdates(unittest.TestCase):
         def status(url, timeout):
             if url.endswith('/status'): return {'version':1,'desktopManaged':True,'appVersion':self.target}
             return {'name':'RADAZ','version':self.target,'buildId':'wrong-build'}
-        with patch.object(desktop,'get_json',side_effect=status),patch.object(desktop,'run_hidden',return_value=Child()),patch.object(desktop.time,'sleep'):
+        with patch.object(desktop,'get_json',side_effect=status),patch.object(desktop,'start_services',return_value=Child()),patch.object(desktop.time,'sleep'):
             with self.assertRaisesRegex(RuntimeError,'Runtime build mismatch: expected synthetic; received wrong-build'):
                 desktop.open_version(self.root,self.target)
         self.assertEqual([call.args[1] for call in self.processes.call_args_list],['Quiesce','StopRuntime'])

@@ -57,7 +57,7 @@ def main():
     with ZipFile(inputs['python']) as package: package.extractall(python)
     pth = next(python.glob('python*._pth'))
     pth.write_text('python313.zip\n.\nLib/site-packages\n../../bridge\nimport site\n')
-    for dependency in ('pillow', 'certifi', 'truststore'):
+    for dependency in ('pillow', 'certifi', 'truststore', 'psutil'):
         with ZipFile(inputs[dependency]) as package:
             package.extractall(python / 'Lib/site-packages')
     if not (python / 'Lib/site-packages/certifi/cacert.pem').is_file():
@@ -91,6 +91,9 @@ def main():
     subprocess.run(['node','--input-type=module','-e',render], cwd=ROOT, check=True)
     from PIL import Image
     Image.open(ROOT / 'outputs/radaz-icon.png').save(STAGE / 'public/radaz.ico', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])
+    subprocess.run([str(compiler_dir / 'csc.exe'), '/nologo', '/target:winexe', '/platform:x64', '/optimize+',
+                    '/r:System.Web.Extensions.dll', '/r:System.Windows.Forms.dll', '/win32icon:' + str(STAGE / 'public/radaz.ico'),
+                    '/out:' + str(STAGE / 'runtime/RadazStart.exe'), str(ROOT / 'installer/DesktopStart.cs')], check=True)
     manifest = {file.relative_to(STAGE).as_posix():hashlib.sha256(file.read_bytes()).hexdigest()
                 for file in sorted(STAGE.rglob('*')) if file.is_file() and file.name != 'SHA256SUMS.json'}
     (STAGE / 'SHA256SUMS.json').write_text(json.dumps(manifest, indent=2))

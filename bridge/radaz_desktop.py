@@ -588,20 +588,9 @@ def run_hidden(args, root, extra_env=None):
     with (logs / 'desktop.log').open('ab', buffering=0) as log:
         return subprocess.Popen(args, cwd=root, env={**environment(root), **(extra_env or {})}, stdin=subprocess.DEVNULL, stdout=log, stderr=log, creationflags=NO_WINDOW)
 
-def powershell(script, *args):
-    system = Path(os.environ.get('SystemRoot', 'C:/Windows')) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
-    return [str(system), '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(script), *map(str, args)]
-
-
 def runtime_processes(root, action, target=None):
-    args = ['-InstallRoot', root, '-Action', action]
-    if target: args += ['-Version', target]
-    args += ['-Port', os.environ.get('RADAZ_PORT', '5173')]
-    result = subprocess.run(powershell(SOURCE / 'scripts/desktop-processes.ps1', *args),
-                            creationflags=NO_WINDOW, capture_output=True, timeout=45)
-    if result.returncode:
-        raise RuntimeError('Desktop process ownership: ' + result.stderr.decode('utf-8', errors='replace')[-2000:])
-    if action in ('Owner','InUse'): return json.loads(result.stdout.decode('utf-8-sig'))
+    import radaz_desktop_processes as processes
+    return processes.manage(root, action, target, int(os.environ.get('RADAZ_PORT', '5173')))
 
 
 def verify_activation(root,target):
@@ -715,6 +704,83 @@ def open_app(root, build):
     # No alternate user-data directory: existing IndexedDB and user settings stay accessible.
     return run_hidden(command, root)
 
+def start_services(root, folder, target, launch_id):
+    import radaz_desktop_processes as processes
+
+    web_port = int(os.environ.get('RADAZ_PORT', '5173'))
+    archive_port = int(os.environ.get('RADAZ_ARCHIVE_PORT', '8766'))
+    if web_port == archive_port or not all(0 < value < 65536 for value in (web_port, archive_port)):
+        raise ValueError('RADAZ listener ports are invalid')
+    gateway = processes.owner(root, web_port, 'gateway') if processes.listeners(web_port) else None
+    url = f'http://127.0.0.1:{archive_port}'
+    path = [str(folder / 'runtime' / name) for name in ('node', 'python', 'ffmpeg')]
+    env = {'PATH': os.pathsep.join([*path, os.environ.get('PATH', '')]),
+           'RADAZ_LAUNCH_ID': launch_id, 'RADAZ_STARTUP_CONTROLLER': str(os.getpid())}
+    archive_ready = False
+    if processes.listeners(archive_port):
+        status = get_json(url + '/status', 3)
+        if status.get('version') != 1:
+            raise RuntimeError('Another application is using the RADAZ archive port')
+        if not status.get('desktopManaged'):
+            archive_ready = True  # The pre-desktop archive has no managed stop protocol.
+        else:
+            processes.owner(root, archive_port, 'archive', status.get('appVersion'))
+            archive_ready = status.get('appVersion') == target
+            if not archive_ready:
+                request = Request(url + '/_desktop/stop', data=b'', headers={
+                    'X-RADAZ-Desktop': (root / 'control-token').read_text().strip()})
+                try:
+                    with local_or_remote_open(request, timeout=20):
+                        pass
+                except HTTPError as error:
+                    if error.code == 409:
+                        raise ArchiveBusy('DICOM archive is receiving images') from error
+                    raise
+                except (OSError, HTTPException):
+                    if processes.listeners(archive_port):
+                        raise
+                until = time.monotonic() + 15
+                while processes.listeners(archive_port):
+                    if time.monotonic() >= until:
+                        raise RuntimeError('Previous archive is still listening')
+                    time.sleep(.2)
+    if not archive_ready:
+        command = [str(folder / 'runtime/python/python.exe'), str(folder / 'bridge/radaz_archive.py'),
+                   '--http-port', str(archive_port)]
+        if os.environ.get('RADAZ_ARCHIVE_DATA'):
+            command += ['--data-dir', os.environ['RADAZ_ARCHIVE_DATA']]
+        archive = run_hidden(command, root, env)
+        until = time.monotonic() + 30
+        try:
+            while time.monotonic() < until:
+                if archive.poll() is not None:
+                    raise RuntimeError(f'RADAZ archive exited with code {archive.returncode}. See logs/desktop.log')
+                try:
+                    status = get_json(url + '/status', 1)
+                except (OSError, HTTPException):
+                    status = {}
+                if status.get('version') == 1 and status.get('appVersion') == target:
+                    owned, _ = processes.owner(root, archive_port, 'archive', target)
+                    if owned.pid != archive.pid:
+                        raise RuntimeError('Archive listener changed during startup')
+                    break
+                time.sleep(.2)
+            else:
+                raise RuntimeError('RADAZ archive startup timed out. See logs/desktop.log')
+        except Exception:
+            if archive.poll() is None:
+                archive.terminate()
+                archive.wait(timeout=10)
+            raise
+
+    if gateway:
+        old, old_version = gateway
+        # An updater can be a child of this exact gateway; stop only its listener and workers.
+        processes.stop_checked(root, old, old_version, 'gateway')
+        stop_runtime(root, old_version)
+    return run_hidden([str(folder / 'runtime/node/node.exe'), str(folder / 'scripts/start-release.mjs')], root, env)
+
+
 def open_version(root, target):
     folder = version_dir(root, target)
     identity = read_json(folder / 'dist/server/radaz-build.json')
@@ -743,6 +809,9 @@ def open_version(root, target):
             if not health.get('ready') or health.get('buildId') != build:
                 raise RuntimeError('Client resources not healthy for build ' + build)
         owner = runtime_processes(root, 'Owner', target)
+        if receiver.get('desktopManaged') and receiver.get('appVersion') == target:
+            import radaz_desktop_processes as processes
+            processes.owner(root, int(os.environ.get('RADAZ_ARCHIVE_PORT', '8766')), 'archive', target)
         if served.get('pid') is not None and served['pid'] != owner['pid']:
             raise RuntimeError('Runtime listener changed during health check')
         with local_or_remote_open(base + '/', timeout=3) as response:
@@ -754,14 +823,13 @@ def open_version(root, target):
     (root / f'startup-error-{target}.json').unlink(missing_ok=True)
     launch_id = secrets.token_hex(24)
     atomic_json(root / 'runtime-launch.json', {'version': target, 'launchId': launch_id, 'controllerPid': os.getpid()})
-    child = run_hidden(powershell(folder / 'scripts/start-radaz.ps1', '-NoBrowser'), root,
-                       {'RADAZ_LAUNCH_ID': launch_id, 'RADAZ_STARTUP_CONTROLLER': str(os.getpid())})
+    child = start_services(root, folder, target, launch_id)
     until = time.monotonic() + 120
     last_error = 'No health response'
     try:
         while time.monotonic() < until:
             if child.poll() == 17: raise ArchiveBusy('Archive is receiving images; apply the update on a later launch')
-            if child.poll() not in (None, 0): raise RuntimeError(f'RADAZ launcher exited ({child.returncode}); last health failure: {last_error}. See logs/desktop.log')
+            if child.poll() is not None: raise RuntimeError(f'RADAZ launcher exited ({child.returncode}); last health failure: {last_error}. See logs/desktop.log')
             try:
                 if healthy(): return build
             except Exception as error: last_error = f'{type(error).__name__}: {error}'
@@ -828,6 +896,30 @@ def launch(root, no_browser=False):
         if not no_browser:
             open_app(root, build)
 
+def ensure_native_launcher(root, folder, create_shortcuts=False):
+    source = folder / 'runtime/RadazStart.exe'
+    if not source.is_file():
+        return  # Rollback releases predating the stable executable.
+    destination = root / 'RADAZ-Start.exe'
+    payload = source.read_bytes()
+    if not destination.is_file() or destination.read_bytes() != payload:
+        temporary = root / ('RADAZ-Start-' + secrets.token_hex(8) + '.tmp')
+        try:
+            temporary.write_bytes(payload)
+            try:
+                os.replace(temporary, destination)
+            except PermissionError:
+                if not destination.is_file():
+                    raise
+                # Windows may still have the verified, compatible launcher open.
+                # The next healthy watch retries once the shortcut has exited.
+                return
+        finally:
+            temporary.unlink(missing_ok=True)
+    command = '--shortcuts' if create_shortcuts else '--migrate-shortcuts'
+    subprocess.run([str(destination), command], check=True, creationflags=NO_WINDOW, timeout=20)
+
+
 def initialize(root, shortcuts=True):
     (root/'uninstalling.json').unlink(missing_ok=True)
     target = read_json(SOURCE / 'public/product.json')['version']
@@ -843,9 +935,7 @@ def initialize(root, shortcuts=True):
         state(root, 'current', 'Yeni versiyalar yoxlanılır. Yükləmə yalnız təsdiqinizlə başlayır.')
     shutil.copyfile(SOURCE / 'installer/launcher.ps1', root / 'launcher.ps1')
     shutil.copyfile(SOURCE / 'public/radaz.ico', root / 'radaz.ico')
-    if shortcuts:
-        result = subprocess.run(powershell(SOURCE / 'scripts/desktop-shortcuts.ps1', '-InstallRoot', root), creationflags=NO_WINDOW)
-        if result.returncode: raise RuntimeError('Desktop shortcut creation failed')
+    ensure_native_launcher(root, SOURCE, shortcuts)
     return current is None
 
 def install(root, shortcuts=True):
@@ -960,8 +1050,9 @@ def watch(root):
                 runtime_processes(root, 'RetireWatch', own_version)
                 try:
                     verify_activation(root,own_version)
+                    ensure_native_launcher(root, SOURCE)
                     cleanup_versions(root)
-                except (OSError,ValueError,KeyError,RuntimeError): pass  # Cleanup never blocks a healthy runtime.
+                except (OSError,ValueError,KeyError,RuntimeError,subprocess.SubprocessError): pass  # Cleanup never blocks a healthy runtime.
         with lock(root, 'update'):
             while True:
                 active = read_json(root / 'active.json')['version']
@@ -1012,8 +1103,9 @@ def watch(root):
                         try:
                             with lock(root,'launch'):
                                 verify_activation(root,own_version)
+                                ensure_native_launcher(root, SOURCE)
                                 cleanup_versions(root)
-                        except (OperationBusy,OSError,ValueError,KeyError,RuntimeError):pass
+                        except (OperationBusy,OSError,ValueError,KeyError,RuntimeError,subprocess.SubprocessError):pass
                     if tick % 10: continue
                     try:
                         served = get_json(f'http://127.0.0.1:{os.environ.get("RADAZ_PORT", "5173")}/radaz-runtime.json', 3)

@@ -23,7 +23,7 @@ explicit=['package.json','pnpm-lock.yaml','pnpm-workspace.yaml','README.md','DIS
  'scripts/start-radaz.ps1','scripts/stop-web-server.ps1','scripts/start-release.mjs','scripts/setup-release.ps1','scripts/start-archive.ps1','scripts/wait-release-browser.ps1','scripts/desktop-shortcuts.ps1','installer/launcher.ps1','bridge/radaz_desktop.py','bridge/radaz_archive.py','bridge/radaz_pacs_bridge.py','bridge/radaz_output.py','bridge/radaz_product.py','bridge/radaz_trial.py','bridge/radaz_commerce.py','bridge/radaz_disc.ps1','bridge/README.md','public/license-public.json']
 explicit.extend(['bridge/radaz_removable.py','bridge/radaz_windows.py'])
 explicit.extend(['bridge/radaz_online_license.py','public/online-license-public.json'])
-explicit.extend(['bridge/radaz_send.py', 'bridge/radaz_update_tls.py'])
+explicit.extend(['bridge/radaz_send.py', 'bridge/radaz_update_tls.py', 'bridge/radaz_desktop_processes.py'])
 explicit.append('scripts/release-health.mjs')
 explicit.append('scripts/desktop-processes.ps1')
 explicit.extend(['scripts/release-signature.mjs','public/update-public.pem'])
