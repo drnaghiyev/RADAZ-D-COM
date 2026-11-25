@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED
 from urllib.request import Request, urlopen
@@ -111,6 +112,9 @@ if __name__ == '__main__':
     # Deployed 0.2.40-43 controllers understand only a direct base->target delta.
     # Publish cumulative deltas so skipping releases never omits their changes.
     if args.previous_release:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'bridge'))
+        from radaz_desktop import authenticate_release
+
         for patch_number in range(40,int(base.split('.')[-1])):
             compatibility=f'0.2.{patch_number}'
             prior=compatibility_release(repo,compatibility)
@@ -118,10 +122,7 @@ if __name__ == '__main__':
             if prior['tag_name']!='v'+compatibility:raise ValueError('Wrong compatibility release')
             entries=prior.get('distribution',{}).get('files')
             if entries:
-                import importlib.util
-                spec=importlib.util.spec_from_file_location('compat_desktop',Path(__file__).resolve().parents[1]/'bridge/radaz_desktop.py')
-                desktop=importlib.util.module_from_spec(spec);spec.loader.exec_module(desktop)
-                desktop.authenticate_release(prior)
+                authenticate_release(prior)
                 build_delta_manifest(compatibility,{f['path']:f['sha256'] for f in entries},args.current,args.output)
             else:
                 name=f'RADAZ-{compatibility}-Windows-x64.zip'
