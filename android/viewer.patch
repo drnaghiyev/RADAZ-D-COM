@@ -186,28 +186,6 @@
 + {state?<fieldset disabled={busy} key={section==='settings'?target.profile:state.clinic||'-'} className="dn-fields">
   {settings&&target.profile==='private'&&(section==='settings'||section==='people')&&<article><h3>Klinikadan həkimlərin kompüterlərinə göndəriş</h3>
     <button onClick={()=>{setSection('settings');switchNetwork('internet');}}>RADAZ İnternet · həkim və kompüter qoş</button></article>}
---- a/components/toolbar-workspace.tsx
-+++ b/components/toolbar-workspace.tsx
-@@ -8,4 +8,8 @@
- type Layout = Record<string, Position>;
- type Registry = Record<string, number>;
-+const tabletDefaultLayout=(scope:string):Layout=>scope==='viewer'?{
-+  help:{side:'right',order:0},window:{side:'right',order:1},output:{side:'right',order:2},rotation:{side:'right',order:3},
-+}:{};
-+
- const Context=createContext<{
-   secondRow: HTMLDivElement|null; rows:1|2; groupRows:Record<string,1|2>; layout: Layout; drag: string|null; dock: HTMLDivElement|null; overflow: string[]; popup: HTMLDivElement|null;
-@@ -43,8 +47,8 @@
-         if(value&&['top','right'].includes(value.side)&&Number.isFinite(value.order))next[id]=value;
-     } catch {}
--    setLayout(next);setLoaded(scope);
-+    setLayout(Object.keys(next).length?next:tabletDefaultLayout(scope));setLoaded(scope);
-   },[scope]);
-   useEffect(()=>{if(loaded===scope)try{localStorage.setItem(`radaz-toolbar-v1:${scope}`,JSON.stringify(layout));}catch{}},[layout,loaded,scope]);
--  useEffect(()=>{const reset=(event:Event)=>{if((event as CustomEvent).detail===scope)setLayout({});};window.addEventListener('radaz-toolbar-reset',reset);return()=>window.removeEventListener('radaz-toolbar-reset',reset);},[scope]);
-+  useEffect(()=>{const reset=(event:Event)=>{if((event as CustomEvent).detail===scope)setLayout(tabletDefaultLayout(scope));};window.addEventListener('radaz-toolbar-reset',reset);return()=>window.removeEventListener('radaz-toolbar-reset',reset);},[scope]);
-   const register=useRef((id:string,order:number)=>{
-     setRegistry(current=>({...current,[id]:order}));
 --- a/lib/locales/ui.ts
 +++ b/lib/locales/ui.ts
 @@ -1802,7 +1802,7 @@

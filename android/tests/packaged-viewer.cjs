@@ -161,7 +161,7 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
     }
     async function assertDock(count){
       await page.waitForFunction(n=>{
-        const host=document.querySelector('.right-tool-dock [data-item-group="rotation"]');
+        const host=document.querySelector('.right-tool-dock .flat-toolbar-right');
         if(!host)return false;
         const boxes=[...host.querySelectorAll(':scope > .toolbar-portable > button')].map(b=>b.getBoundingClientRect()).filter(b=>b.width>0);
         if(boxes.length<3)return false;
@@ -197,7 +197,7 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
     await page.setViewportSize({width:1200,height:800});await assertDock(2);
     suite.rightDock='one/two columns, persisted, portrait/landscape';
     console.log('Both toolbar layouts passed.',suite.clinicConnections||'');
-    assert.equal(await page.locator('[data-toolbar-group="cd"],.cd-import-command').count(),0);
+    assert.equal(await page.locator('[data-tool-home="cd"],.cd-import-command').count(),0);
     await command(page,'Qovluq aç');
     assert.equal(picker,'folder');
     await page.evaluate(s=>window.radazTabletReceive(s,false),folderTicket);

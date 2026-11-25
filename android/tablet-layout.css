@@ -1,14 +1,9 @@
-/* The main viewer and its detached windows share one touch-friendly side dock. */
-html:not([data-tablet-columns="1"]) .toolbar-workspace {--tablet-columns:2;--tablet-cell:max(43px,var(--command-size));--dock-width:calc(2 * var(--tablet-cell) + 36px)}
-html[data-tablet-columns="1"] .toolbar-workspace {--tablet-columns:1;--tablet-cell:max(43px,var(--command-size));--dock-width:calc(var(--tablet-cell) + 32px)}
-body .toolbar-workspace .right-tool-dock .toolbar-item-host {
-  display:grid!important;grid-template-columns:repeat(var(--tablet-columns),minmax(0,1fr));width:100%;
-  grid-auto-flow:row;grid-template-rows:none;grid-auto-rows:auto;gap:4px;justify-items:center;align-items:center
-}
-body .toolbar-workspace .right-tool-dock .toolbar-portable {min-width:0;max-width:100%}
-body .toolbar-workspace .right-tool-dock .toolbar-portable:has(.workspace-split,.cine-controls,input[type=range],.mpr-thickness,.volume-simple-controls){grid-column:1/-1}
-body .toolbar-workspace .right-tool-dock .toolbar-portable>button:not(.toolbar-drag-handle) {min-height:42px!important;min-width:var(--tablet-cell)!important}
-body .toolbar-workspace .right-tool-dock .toolbar-portable:has(.cine-controls) .cine-controls {flex-wrap:wrap}
-body .toolbar-workspace .right-tool-dock .dockable-tool-group[data-group-deleted]{display:none!important}
+/* One continuous grid keeps buttons adjacent across their former group boundaries. */
+html:not([data-tablet-columns="1"]) .toolbar-workspace {--tablet-columns:2;--tablet-cell:max(43px,var(--command-size));--dock-width:calc(2 * var(--tablet-cell) + 14px)}
+html[data-tablet-columns="1"] .toolbar-workspace {--tablet-columns:1;--tablet-cell:max(43px,var(--command-size));--dock-width:calc(var(--tablet-cell) + 10px)}
+body .toolbar-workspace .flat-toolbar-right {grid-template-columns:repeat(var(--tablet-columns),minmax(0,1fr));gap:4px}
+body .toolbar-workspace .flat-toolbar-right .flat-toolbar-tool {min-width:0;max-width:100%}
+body .toolbar-workspace .flat-toolbar-right .flat-toolbar-tool:has(.workspace-split,input[type=range],.mpr-thickness,.volume-simple-controls){grid-column:1/-1}
+body .toolbar-workspace .flat-toolbar-right .flat-toolbar-tool>button {min-height:42px!important;min-width:var(--tablet-cell)!important}
 body .toolbar-workspace .header-control.tablet-import-options {width:26px!important;min-width:26px!important;flex-basis:26px!important}
-body .toolbar-workspace .dockable-tool-group .tablet-folder-command {display:inline-flex;align-items:center}
+body .toolbar-workspace .flat-toolbar-tool .tablet-folder-command {display:inline-flex;align-items:center}

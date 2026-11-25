@@ -1,0 +1,34 @@
+/* Each strip lays out individual controls; splits keep their own menu arrows. */
+.flat-toolbar-workspace .flat-toolbar-strip {display:flex;align-items:center;gap:4px;min-width:0}
+.flat-toolbar-workspace .flat-toolbar-top {flex:1 1 0;order:10;min-height:var(--command-size);position:relative}
+.flat-toolbar-workspace .flat-toolbar-bottom {flex:1 0 100%;order:1000;overflow-x:auto;min-height:var(--command-size)}
+.flat-toolbar-workspace .flat-toolbar-bottom[hidden],.flat-toolbar-workspace .flat-toolbar-tool[hidden] {display:none!important}
+body .flat-toolbar-workspace .topbar:has(.flat-toolbar-top),body .flat-toolbar-workspace main.workstation.grouped-workstation .topbar:has(.flat-toolbar-top),
+body .flat-toolbar-workspace .records-header:has(.flat-toolbar-top) {padding-right:6px!important;column-gap:5px!important}
+body .flat-toolbar-workspace .records-header.records-unified-header {display:grid!important;grid-template-columns:auto minmax(0,1fr)!important}
+.flat-toolbar-workspace .records-header .flat-toolbar-top {grid-row:1;grid-column:2}
+.flat-toolbar-workspace .records-header .flat-toolbar-bottom {grid-row:3;grid-column:1/-1}
+body .flat-toolbar-workspace .flat-toolbar-strip .flat-toolbar-tool {display:inline-flex!important;align-items:center;flex:0 0 auto!important;gap:0!important;width:auto!important;min-width:0!important;max-width:none!important;margin:0!important;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important}
+body .flat-toolbar-workspace .flat-toolbar-strip .flat-toolbar-tool[hidden]{display:none!important}
+.flat-toolbar-workspace .flat-toolbar-right {display:grid;grid-template-columns:minmax(0,1fr);align-content:start;justify-items:center;row-gap:4px}
+.flat-toolbar-workspace .flat-toolbar-right .flat-toolbar-tool {flex-direction:column}
+.flat-toolbar-workspace .flat-toolbar-right .flat-toolbar-tool:has(input[type=range]) {max-width:100%!important}
+.flat-toolbar-workspace .flat-toolbar-right input[type=range] {min-width:0;max-width:100%}
+.flat-toolbar-workspace .flat-toolbar-strip.toolbar-overflow-popup {align-content:start;justify-content:flex-start;gap:4px}
+.flat-toolbar-workspace .flat-toolbar-tool :is(button,a){min-width:var(--command-size);height:var(--command-size);display:inline-flex;align-items:center;justify-content:center;border-radius:5px;color:inherit}
+.flat-toolbar-workspace .flat-toolbar-tool :is(button,a)>svg {width:var(--command-icon);height:var(--command-icon);flex-shrink:0}
+.flat-toolbar-workspace .flat-toolbar-tool button>span,.flat-toolbar-workspace .flat-toolbar-tool a>span {display:none}
+.flat-toolbar-workspace .flat-toolbar-tool .workspace-options {width:12px!important;min-width:12px!important;flex-basis:12px!important;padding:0!important}
+body .flat-toolbar-workspace .flat-toolbar-tool .workspace-options svg {width:8px!important;height:8px!important}
+.flat-toolbar-workspace .flat-toolbar-tool .workspace-split{display:flex;align-items:center;gap:1px}
+.flat-toolbar-workspace .flat-toolbar-tool button[aria-pressed=true]{box-shadow:inset 0 -2px #4dc7ed}
+body .flat-toolbar-workspace .flat-toolbar-tool button>svg+svg {position:absolute;right:1px;bottom:1px;width:8px!important;height:8px!important}
+.flat-toolbar-workspace .flat-toolbar-tool button:has(>svg+svg){position:relative}
+.flat-toolbar-divider{display:block;flex:none;width:1px;height:1.4em;margin-inline:4px;background:#6b8796;pointer-events:none}
+.flat-toolbar-right .flat-toolbar-divider{height:1px;width:var(--command-size);margin:4px 0}
+.flat-toolbar-reset,.toolbar-reset-flat {display:inline-flex;gap:6px;align-items:center}
+.flat-toolbar-editor-zone h3 {font-size:14px;color:#aec9d7;margin:16px 0 5px}
+.toolbar-editor .flat-toolbar-editor-item {grid-template-columns:minmax(80px,1fr) minmax(80px,150px) repeat(3,36px)}
+.flat-toolbar-editor-item button {min-height:34px;display:grid;place-items:center}
+.flat-toolbar-editor-item button[aria-pressed=true] {background:#215c70}
+@media(max-width:540px){.toolbar-editor .flat-toolbar-editor-item{grid-template-columns:minmax(55px,1fr) 80px repeat(3,29px);gap:3px}}

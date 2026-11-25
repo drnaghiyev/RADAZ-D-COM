@@ -1,163 +1,87 @@
 'use client';
-import {Children,Fragment,createContext,isValidElement,useContext,useEffect,useRef,useState,type ReactNode,type ReactElement,type DragEvent} from 'react';
+import {Children,Fragment,createContext,isValidElement,useContext,useEffect,useRef,useState,type ReactElement,type ReactNode} from 'react';
 import {createPortal} from 'react-dom';
-import {Settings2,Plus,X,RotateCcw,ArrowUp,ArrowDown} from 'lucide-react';
+import {ArrowDown,ArrowUp,Columns2,RotateCcw,Settings2,X} from 'lucide-react';
+import type {Dock,Position,Tool} from '@/lib/toolbar-layout';
 
-type Placement={group:string;order:number};
-type Saved={names?:Record<string,string>;removed?:string[];rows?:1|2;groupRows?:Record<string,1|2>;itemRows?:Record<string,1|2>;groups:{id:string;name:string}[];items:Record<string,Placement>};
-type Item={home:string;label:string;menu:boolean;order:number};
-const mime='application/x-radaz-toolbar-item';
-const empty=():Saved=>({groups:[],items:{}});
-const Context=createContext<{
-  saved:Saved; editing:boolean;setEditing:(v:boolean)=>void; items:Record<string,Item>;
-  groups:Record<string,{label:string;host:HTMLElement}>;
-  register:(id:string,item:Item)=>()=>void;registerGroup:(id:string,label:string,host:HTMLElement)=>()=>void;
-  move:(id:string,group:string,before?:string)=>void;save:(value:Saved|((value:Saved)=>Saved))=>void;
+export type ToolHosts={top:HTMLElement|null;bottom:HTMLElement|null;right:HTMLElement|null;overflow:HTMLElement|null};
+export const FlatToolbarContext=createContext<{
+  hosts:ToolHosts; overflow:Set<string>; tools:Record<string,Tool>; all:Record<string,Position>; dividers:string[];
+  register:(id:string,tool:Tool)=>()=>void;move:(id:string,dock:Dock,before?:string)=>void;
+  toggleDivider:(id:string)=>void;reset:()=>void;
 }|null>(null);
-const GroupContext=createContext('');
-export const useToolbarHome=()=>useContext(GroupContext);
-
-export function ToolbarCustomization({scope,children}:{scope:string;children:ReactNode}){
-  const [saved,save]=useState<Saved>(empty),[loaded,setLoaded]=useState(''),[editing,setEditing]=useState(false);
-  const [items,setItems]=useState<Record<string,Item>>({}),[groups,setGroups]=useState<Record<string,{label:string;host:HTMLElement}>>({});
-  useEffect(()=>{
-    let value=empty();
-    try{const data=JSON.parse(localStorage.getItem(`radaz-toolbar-items-v1:${scope}`)||'null');
-      if(Array.isArray(data?.groups)&&data.groups.length<=40&&data.items&&typeof data.items==='object'){
-        value.removed=Array.isArray(data.removed)?data.removed.filter((id:unknown)=>typeof id==='string'):[];value.names=Object.fromEntries(Object.entries(data.names||{}).filter(([,v])=>typeof v==='string'&&v.length<=80)) as Record<string,string>;
-        value.rows=data.rows===2?2:1;value.groupRows=Object.fromEntries(Object.entries(data.groupRows||{}).filter(([,r])=>r===1||r===2)) as Record<string,1|2>;
-        value.itemRows=Object.fromEntries(Object.entries(data.itemRows||{}).filter(([,r])=>r===1||r===2)) as Record<string,1|2>;
-        value.groups=data.groups.filter((g:{id:string;name:string})=>/^custom-[a-z0-9-]+$/.test(g?.id)&&typeof g.name==='string'&&g.name.length<=80);
-        for(const [id,p] of Object.entries(data.items) as [string,Placement][])if(id.length<300&&p&&typeof p.group==='string'&&Number.isFinite(p.order))value.items[id]=p;
-      }
-    }catch{}save(value);setLoaded(scope);
-  },[scope]);
-  useEffect(()=>{if(loaded===scope)try{localStorage.setItem(`radaz-toolbar-items-v1:${scope}`,JSON.stringify(saved));}catch{}},[saved,scope,loaded]);
-  const register=useRef((id:string,item:Item)=>{setItems(current=>({...current,[id]:item}));return()=>setItems(current=>{const next={...current};delete next[id];return next;});}).current;
-  const registerGroup=useRef((id:string,label:string,host:HTMLElement)=>{setGroups(current=>({...current,[id]:{label,host}}));return()=>setGroups(current=>{const next={...current};delete next[id];return next;});}).current;
-  const move=(id:string,group:string,before?:string)=>{
-    if(!items[id]||(group!=='menu'&&group!=='pool'&&!groups[group]))return;
-    save(current=>{
-      const peers=Object.keys(items).filter(key=>key!==id&&(current.items[key]?.group||(items[key].menu?'menu':items[key].home))===group)
-        .sort((a,b)=>(current.items[a]?.order??items[a].order)-(current.items[b]?.order??items[b].order));
-      const index=before?peers.indexOf(before):-1;peers.splice(index<0?peers.length:index,0,id);
-      const next={...current,items:{...current.items}};peers.forEach((key,order)=>next.items[key]={group,order});return next;
-    });
-  };
-  return <Context.Provider value={{saved,editing,setEditing,items,groups,register,registerGroup,move,save}}>{children}</Context.Provider>;
-}
-
-function labelOf(node:ReactNode):string{
+const Home=createContext({home:'',groupOrder:0,className:''});
+export const useToolbarHome=()=>useContext(Home).home;
+export function toolbarLabel(node:ReactNode):string{
   if(typeof node==='string'||typeof node==='number')return String(node);
-  if(Array.isArray(node))return node.map(labelOf).filter(Boolean).join(' ');
-  if(!isValidElement(node))return '';
+  if(Array.isArray(node))return node.map(toolbarLabel).filter(Boolean).join(' ');
+  if(!isValidElement(node)||node.type==='kbd')return '';
   const props=node.props as Record<string,any>;
-  if(node.type==='kbd')return '';
-  return props['aria-label']||props.title||labelOf(props.children);
+  return props['aria-label']||props.title||toolbarLabel(props.children);
 }
 function primaryLabel(node:ReactNode):string{
-  if(!isValidElement(node))return labelOf(node);
+  if(!isValidElement(node))return toolbarLabel(node);
   const props=node.props as Record<string,any>;
   return props['aria-label']||props.title||Children.toArray(props.children).map(primaryLabel).find(Boolean)||'';
 }
 function flattened(children:ReactNode):ReactElement[]{
   return Children.toArray(children).flatMap(node=>isValidElement(node)?node.type===Fragment?flattened((node.props as {children:ReactNode}).children):[node]:[]);
 }
-function start(event:DragEvent,id:string){event.stopPropagation();event.dataTransfer.setData(mime,id);event.dataTransfer.effectAllowed='move';}
-function accept(event:DragEvent){if(event.dataTransfer.types.includes(mime)){event.preventDefault();event.stopPropagation();event.dataTransfer.dropEffect='move';}}
-
-export function CustomizableGroup({id,label,children}:{id:string;label:string;children:ReactNode}){
-  const context=useContext(Context),[host,setHost]=useState<HTMLDivElement|null>(null);
-  const register=context?.registerGroup;
-  useEffect(()=>host?register?.(id,label,host):undefined,[id,label,host,register]);
-  return <GroupContext.Provider value={id}><div ref={setHost} className="toolbar-item-host" data-item-group={id} data-item-rows={context?.saved.itemRows?.[id]||1}
-    onDragOver={accept} onDrop={event=>{if(!event.dataTransfer.types.includes(mime))return;event.preventDefault();event.stopPropagation();context?.move(event.dataTransfer.getData(mime),id);}}>
-    {flattened(children).map((child,index)=><PortableItem key={child.key||index} id={`${id}/${child.key||index}`} home={id} label={primaryLabel(child)||`${label} ${index+1}`} order={index}>{child}</PortableItem>)}
-    {context?.editing&&!Children.count(children)&&<span className="toolbar-empty-group">{label}</span>}
-  </div></GroupContext.Provider>;
+// The old source IDs also identify pinned menu commands in saved layouts.
+export function ToolSource({home,groupOrder=0,className='',label,children}:{home:string;groupOrder?:number;className?:string;label:string;children?:ReactNode}){
+  return <Home.Provider value={{home,groupOrder,className}}>{flattened(children).map((child,index)=>
+    <PortableItem key={child.key||index} id={home+'/'+(child.key||index)} order={index} label={primaryLabel(child)||label}>{child}</PortableItem>)}</Home.Provider>;
 }
-
-function PortableItem({id,home,label,order,menu=false,children,command}:{id:string;home:string;label:string;order:number;menu?:boolean;children:ReactNode;command?:ReactNode}){
-  const context=useContext(Context),register=context?.register;
-  useEffect(()=>register?.(id,{home,label,menu,order}),[register,id,home,label,menu,order]);
+function PortableItem({id,order,menu=false,label,children,command}:{id:string;order:number;menu?:boolean;label:string;children:ReactNode;command?:ReactNode}){
+  const source=useContext(Home),context=useContext(FlatToolbarContext),register=context?.register;
+  useEffect(()=>register?.(id,{home:source.home,groupOrder:source.groupOrder,order,label,menu}),[id,register,source.home,source.groupOrder,order,label,menu]);
   if(!context)return children;
-  const savedDestination=context.saved.items[id]?.group||(context.saved.removed?.includes(home)?'pool':menu?'menu':home);
-  // A moved dropdown keeps its commands even after its original group is deleted.
-  // Older layouts pooled these nested commands together with the empty group.
-  const destination=menu&&(savedDestination==='pool'||context.saved.removed?.includes(savedDestination))?'menu':savedDestination;
-  const position=context.saved.items[id]?.order??order;
-  const target=destination==='menu'?null:context.groups[destination]?.host;
-  const isHome=destination===(menu?'menu':home)||!target;
-  const dragProps={draggable:context.editing,onDragStart:(event:DragEvent)=>start(event,id),onDragOver:accept,onDrop:(event:DragEvent)=>{
-    if(!event.dataTransfer.types.includes(mime))return;event.preventDefault();event.stopPropagation();context.move(event.dataTransfer.getData(mime),destination,id);
-  }};
-  const element=<div className={`toolbar-portable ${menu&&isHome?'toolbar-menu-item':''} ${context.editing?'toolbar-item-editing':''}`} data-toolbar-item={id} style={{order:position,display:destination==='pool'?'none':undefined}} {...dragProps}>{menu&&!isHome?command:children}</div>;
-  return isHome?element:createPortal(element,target!,id);
+  const placement=context.all[id]||{dock:menu?'menu':'top',order};
+  if(placement.dock==='menu')return children;
+  const pooled=placement.dock==='pool';
+  const dock=placement.dock==='pool'?'top':placement.dock;
+  const host=context.hosts[dock==='top'&&context.overflow.has(id)?'overflow':dock];
+  if(!host)return null;
+  return createPortal(<div className={'flat-toolbar-tool toolbar-portable '+source.className} data-toolbar-item={id}
+      data-tool-home={source.home} data-toolbar-divider={context.dividers.includes(id)||undefined} data-tool-dock={dock}
+      hidden={pooled} style={{order:placement.order}}>
+    {context.dividers.includes(id)&&<span role="separator" className="flat-toolbar-divider" aria-orientation={dock==='right'?'horizontal':'vertical'}/>}
+    {menu?command:children}
+  </div>,host,id);
 }
-
-/** Menu content remains mounted so pinned commands always use current React state. */
 export function PortableMenuItem({id,label,children,command}:{id?:string;label:string;children:ReactNode;command:ReactNode}){
   const home=useToolbarHome();
-  if(!home)return children;
-  return <PortableItem id={`${home}/menu:${id||label}`} home={home} label={label} order={100} menu command={command}>{children}</PortableItem>;
+  return home?<PortableItem id={home+'/menu:'+(id||label)} order={100} label={label} menu command={command}>{children}</PortableItem>:children;
 }
-export function useToolbarGroupConfig(id:string){
-  const c=useContext(Context),host=c?.groups[id]?.host;
-  const [visible,setVisible]=useState(true);
-  // A closed overflow popup inherits visibility:hidden; its tools still exist.
-  // Empty/pooled controls, unlike that popup, have no layout rectangles.
-  const controlRoot=()=>host?.closest<HTMLElement>('[data-toolbar-group]')||host;
-  // Some 3D tools are portalled directly into the group, outside the item host.
-  const hasControls=()=>Array.from(controlRoot()?.querySelectorAll<HTMLElement>('button,input,select,textarea,a,[role="button"]')||[])
-    .some(el=>!el.matches('.toolbar-drag-handle,.toolbar-empty-delete')&&el.getClientRects().length>0);
-  useEffect(()=>{
-    if(!host)return;
-    const update=()=>setVisible(hasControls());
-    const observer=new MutationObserver(update);observer.observe(controlRoot()!,{childList:true,subtree:true,attributes:true});
-    const resize=new ResizeObserver(update);resize.observe(controlRoot()!);update();
-    return()=>{observer.disconnect();resize.disconnect();};
-  },[host]);
-  const isEmpty=(saved:Saved)=>!Object.entries(c?.items||{}).some(([key,item])=>
-    (saved.items[key]?.group||(saved.removed?.includes(item.home)?'pool':item.menu?'menu':item.home))===id);
-  return {hidden:!!c?.saved.removed?.includes(id),name:c?.saved.names?.[id],empty:!!c&&(host?!visible:isEmpty(c.saved)),
-    removeEmpty:()=>c?.save(current=>{
-      if(hasControls())return current;
-      // Empty React wrappers can still be registered. Preserve their commands
-      // in the editor pool so future conditional controls are not lost.
-      const items={...current.items};
-      for(const [key,item] of Object.entries(c.items))if((current.items[key]?.group||item.home)===id)items[key]={group:'pool',order:item.order};
-      return {...current,items,removed:[...new Set([...(current.removed||[]),id])]};
-    })};
-}
-export function useToolbarRows(){
-  const context=useContext(Context);
-  return {rows:context?.saved.rows||1,groupRows:context?.saved.groupRows||{},setRow:(id:string,row:1|2)=>context?.save(current=>current.groupRows?.[id]===row?current:({...current,groupRows:{...current.groupRows,[id]:row}}))};
-}
-export const toolbarLabel=labelOf;
-export function useCustomToolbarGroups(){return useContext(Context)?.saved.groups||[];}
-
-export function ToolbarCustomizeButton({onReset}:{onReset:()=>void}){
-  const context=useContext(Context),[open,setOpen]=useState(false),[name,setName]=useState('');
+const docks:Record<Dock,string>={top:'Üst panel',bottom:'İkinci sıra',right:'Sağ panel',menu:'Menyuda',pool:'Gizli'};
+const mime='application/x-radaz-toolbar-tool';
+export function ToolbarCustomizeButton(){
+  const context=useContext(FlatToolbarContext),[open,setOpen]=useState(false);
+  const trigger=useRef<HTMLButtonElement>(null);
   if(!context)return null;
-  const {saved,save,items,groups,move,editing,setEditing}=context;
-  const names=(id:string)=>saved.names?.[id]||saved.groups.find(g=>g.id===id)?.name||groups[id]?.label||id;
-  const options=[...new Set([...Object.keys(groups),...saved.groups.map(g=>g.id)])].filter(id=>!saved.removed?.includes(id));
-  const ordered=Object.keys(items).sort((a,b)=>(saved.items[a]?.order??items[a].order)-(saved.items[b]?.order??items[b].order));
-  return <><button className="toolbar-customize-trigger" title="Alət panelini fərdiləşdir" aria-label="Alət panelini fərdiləşdir" onClick={()=>setOpen(true)}><Settings2/></button>
-    {editing&&<button className="toolbar-edit-done" onClick={()=>setEditing(false)}>Təsdiq ✓</button>}
-    {open&&createPortal(<div className="toolbar-editor-backdrop" onClick={event=>{if(event.target===event.currentTarget)setOpen(false);}}><section role="dialog" aria-modal="true" aria-label="Alət panelinin düzülüşü" className="toolbar-editor" onKeyDown={event=>{if(event.key==='Escape')setOpen(false);}}>
-      <header><h2>Alət panelinin düzülüşü</h2><button onClick={()=>{setEditing(false);setOpen(false);}}>Təsdiq</button><button aria-label="Bağla" onClick={()=>setOpen(false)}><X/></button></header>
-      <p>Düymələri və menyu alətlərini qruplar arasında sürüşdürün. Qrupun sağ tutacağı onu üst və alt sıraya daşıyır. Qrup daxilində “Düymələr: alt-alta” seçimi düymələri cüt-cüt şaquli yerləşdirir. Dəyişikliklər avtomatik saxlanılır.</p>
-      <label>Sıra sayı <select aria-label="Alət panelinin sıra sayı" value={saved.rows||1} onChange={e=>save({...saved,rows:Number(e.target.value) as 1|2,groupRows:Number(e.target.value)===2?Object.fromEntries(options.map((id,index)=>[id,saved.groupRows?.[id]||(index%2?2:1)])):saved.groupRows})}><option value={1}>Bir sıra</option><option value={2}>Alt-alta iki sıra</option></select></label>
-      {saved.rows===2&&<div className="toolbar-row-options">{options.map(id=><label key={id}>{names(id)}<select aria-label={`${names(id)} sırası`} value={saved.groupRows?.[id]||1} onChange={e=>save({...saved,groupRows:{...saved.groupRows,[id]:Number(e.target.value) as 1|2}})}><option value={1}>Üst sıra</option><option value={2}>Alt sıra</option></select></label>)}</div>}
-      <div className="toolbar-editor-actions"><button onClick={()=>{setEditing(true);setOpen(false);}}>Sürüşdürərək düzəlt</button><button onClick={()=>{save(empty());onReset();}}><RotateCcw/>Standart düzülüşü bərpa et</button></div>
-      <form onSubmit={event=>{event.preventDefault();if(!name.trim()||saved.groups.length>=40)return;save({...saved,groups:[...saved.groups,{id:`custom-${crypto.randomUUID()}`,name:name.trim().slice(0,80)}]});setName('');}}><input aria-label="Yeni qrupun adı" value={name} maxLength={80} onChange={e=>setName(e.target.value)} placeholder="Yeni qrupun adı"/><button type="submit"><Plus/>Qrup yarat</button></form>
-      {options.map(id=><div className="toolbar-editor-custom" key={id}><input aria-label={`${names(id)} qrupunun adı`} value={names(id)} maxLength={80} onChange={event=>save({...saved,names:{...saved.names,[id]:event.target.value}})}/><select aria-label={`${names(id)} daxilində düzülüş`} value={saved.itemRows?.[id]||1} onChange={e=>save({...saved,itemRows:{...saved.itemRows,[id]:Number(e.target.value) as 1|2}})}><option value={1}>Düymələr: bir sıra</option><option value={2}>Düymələr: alt-alta</option></select><button aria-label={`${names(id)} qrupunu sil`} onClick={()=>save({...saved,removed:[...(saved.removed||[]),id],items:{...saved.items,...Object.fromEntries(Object.entries(items).filter(([key,item])=>(saved.items[key]?.group||item.home)===id).map(([key],order)=>[key,{group:'pool',order}]))}})}><X/></button></div>)}
-      <div className="toolbar-editor-list">{ordered.map(id=>{
-        const item=items[id],destination=saved.items[id]?.group||(saved.removed?.includes(item.home)?'pool':item.menu?'menu':item.home);
-        const peers=ordered.filter(key=>(saved.items[key]?.group||(items[key].menu?'menu':items[key].home))===destination),index=peers.indexOf(id);
-        return <div className="toolbar-editor-item" key={id} draggable onDragStart={event=>start(event,id)} onDragOver={accept} onDrop={event=>{if(!event.dataTransfer.types.includes(mime))return;event.preventDefault();move(event.dataTransfer.getData(mime),destination,id);}}><span>{item.label}</span><select aria-label={`${item.label} qrupu`} value={destination} onChange={event=>move(id,event.target.value)}><option value="pool">Yerləşdirilməmiş alətlər</option>{item.menu&&<option value="menu">Əsas menyu</option>}{options.map(group=><option value={group} key={group}>{names(group)}</option>)}</select><button disabled={index<1} aria-label={`${item.label} əvvələ`} onClick={()=>move(id,destination,peers[index-1])}><ArrowUp/></button><button disabled={index===peers.length-1} aria-label={`${item.label} sonraya`} onClick={()=>move(id,destination,peers[index+2])}><ArrowDown/></button></div>;
-      })}</div>
-    </section></div>,document.body)}
+  const {tools,all,move,dividers,toggleDivider,reset}=context;
+  const close=()=>{setOpen(false);trigger.current?.focus();};
+  return <><button type="button" ref={trigger} className="toolbar-customize-trigger" aria-label="Alət panelini fərdiləşdir" title="Alət panelini fərdiləşdir" onClick={()=>setOpen(true)}><Settings2/></button>
+    {open&&createPortal(<div className="toolbar-editor-backdrop" onClick={e=>{if(e.target===e.currentTarget)close();}}><section role="dialog" aria-modal="true" aria-label="Alət panelinin düzülüşü" className="toolbar-editor" onKeyDown={e=>{if(e.key==='Escape')close();}}>
+      <header><h2>Alət panelinin düzülüşü</h2><button type="button" onClick={close}>Təsdiq</button><button type="button" aria-label="Bağla" onClick={close}><X/></button></header>
+      <button type="button" className="toolbar-reset-flat" onClick={reset}><RotateCcw size={16}/> Standart düzülüşü bərpa et</button>
+      {(Object.keys(docks) as Dock[]).map(dock=>{
+        const peers=Object.keys(all).filter(id=>all[id].dock===dock).sort((a,b)=>all[a].order-all[b].order);
+        return peers.length>0&&<section key={dock} className="flat-toolbar-editor-zone"><h3>{docks[dock]}</h3>{peers.map((id,index)=>{
+          const item=tools[id],change=(next:Dock)=>move(id,next);
+          return <div key={id} className="toolbar-editor-item flat-toolbar-editor-item" draggable onDragStart={e=>{e.dataTransfer.setData(mime,id);e.dataTransfer.effectAllowed='move';}}
+              onDragOver={e=>{if(e.dataTransfer.types.includes(mime))e.preventDefault();}} onDrop={e=>{
+                const other=e.dataTransfer.getData(mime);
+                if(!tools[other]||(dock==='menu'&&!tools[other].menu)||(dock==='pool'&&tools[other].home==='toolbar-settings'))return;
+                e.preventDefault();move(other,dock,id);
+              }}>
+            <span>{item.label}</span><select aria-label={item.label+' yerləşməsi'} value={dock} onChange={e=>change(e.target.value as Dock)}>{(Object.keys(docks) as Dock[]).filter(key=>(key!=='menu'||item.menu)&&(key!=='pool'||item.home!=='toolbar-settings')).map(key=><option key={key} value={key}>{docks[key]}</option>)}</select>
+            <button type="button" title="Əvvələ" aria-label={item.label+' əvvələ'} disabled={index===0||dock==='menu'} onClick={()=>move(id,dock,peers[index-1])}><ArrowUp/></button>
+            <button type="button" title="Sonraya" aria-label={item.label+' sonraya'} disabled={index===peers.length-1||dock==='menu'} onClick={()=>move(id,dock,peers[index+2])}><ArrowDown/></button>
+            <button type="button" title="Düymədən əvvəl ayırıcı" aria-label={item.label+' düyməsindən əvvəl ayırıcı'} disabled={dock==='menu'||dock==='pool'} aria-pressed={dividers.includes(id)} onClick={()=>toggleDivider(id)}><Columns2/></button>
+          </div>;
+        })}</section>;
+      })}
+    </section></div>,trigger.current?.ownerDocument.body||document.body)}
   </>;
 }
