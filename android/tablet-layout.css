@@ -7,3 +7,8 @@ body .toolbar-workspace .flat-toolbar-right .flat-toolbar-tool:has(.workspace-sp
 body .toolbar-workspace .flat-toolbar-right .flat-toolbar-tool>button {min-height:42px!important;min-width:var(--tablet-cell)!important}
 body .toolbar-workspace .header-control.tablet-import-options {width:26px!important;min-width:26px!important;flex-basis:26px!important}
 body .toolbar-workspace .flat-toolbar-tool .tablet-folder-command {display:inline-flex;align-items:center}
+/* Menu triggers with a second icon must stay inside the same touch cell. */
+body .flat-toolbar-workspace .flat-toolbar-right .flat-toolbar-tool > button {
+  box-sizing:border-box;width:var(--tablet-cell)!important;max-width:100%!important;
+  flex:0 0 auto!important;position:relative;padding-inline:3px!important;
+}
