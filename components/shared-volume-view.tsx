@@ -1,56 +1,52 @@
 'use client';
-import {useEffect,useMemo,useState} from 'react';
-import {getSeriesVolume,tabletDisplayVolume} from '@/lib/cornerstone';
+import {useEffect,useState} from 'react';
+import {tabletDisplayVolume} from '@/lib/cornerstone';
 import {gpuCapabilities} from '@/lib/gpu-capabilities';
 import {sampleAnatomyPlane,type AnatomyVolumeResult} from '@/lib/anatomy-volume';
+import {VrCloseButton} from './vr-close-button';
 import {SmartVolumeSurface} from './smart-volume-surface';
-type Props={series?:{id:string;imageIds:string[];modality:string};anatomy?:AnatomyVolumeResult|null;onClose:()=>void};
-export function SharedVolumeView(props:Props){
- return typeof window!=='undefined' && location.origin==='https://appassets.androidplatform.net'
-   ? <TabletVolumeView {...props}/> : <DesktopVolumeView {...props}/>;
+
+type Series={id:string;imageIds:string[];modality:string;loading?:boolean;discovered?:number};
+type Props={series?:Series;anatomy?:AnatomyVolumeResult|null;onClose:()=>void};
+type Display=Awaited<ReturnType<typeof tabletDisplayVolume>>;
+type Loaded={data:Display;geometry:AnatomyVolumeResult;preview:boolean};
+
+function geometryFor(data:Display, source:Series, anatomy:Props['anatomy']):AnatomyVolumeResult {
+  const {dimensions,spacing,origin,direction}=data;
+  return {dimensions,spacing,origin,direction,modality:source.modality==='MR'?'MR':'CT',mask:new Uint8Array(0),
+    classes:anatomy?.classes||{},sourceKey:source.id,task:'context',device:'local',seconds:0,modelSpacingMm:null,experimental:true};
 }
-function TabletVolumeView({series,anatomy,onClose}:Props){
- const [volume,setVolume]=useState<{data:Awaited<ReturnType<typeof tabletDisplayVolume>>;result:AnatomyVolumeResult}|null>(null);
- const [percent,setPercent]=useState(0),[error,setError]=useState('');
- useEffect(()=>{
-   const controller=new AbortController();setPercent(0);setError('');setVolume(null);
-   if(!series){setError('3D üçün KT və ya MRT seriyası seçin.');return;}
-   const build=async()=>{
-     const caps=gpuCapabilities(),low=caps.tier==='low';
-     const data=await tabletDisplayVolume(series.imageIds,Math.min(caps.max3DTextureSize,low?192:256),(low?12:24)*1024**2,controller.signal,setPercent);
-     const {dimensions,spacing,origin,direction}=data;
-     const result:AnatomyVolumeResult={dimensions,spacing,origin,direction,modality:series.modality==='MR'?'MR':'CT',classes:anatomy?.classes||{},mask:new Uint8Array(0),sourceKey:series.id,task:'context',device:'local',seconds:0,modelSpacingMm:null,experimental:true};
-     if(anatomy?.mask.length){
-       const [width,height,depth]=dimensions;
-       result.mask=new Uint8Array(width*height*depth);
-       const point=(x:number,y:number,z:number)=>origin.map((n,i)=>n+x*spacing[0]*direction[i]+y*spacing[1]*direction[3+i]+z*spacing[2]*direction[6+i]) as typeof origin;
-       for(let z=0;z<depth;z++){
-         controller.signal.throwIfAborted();
-         result.mask.set(sampleAnatomyPlane(anatomy,point(0,0,z),point(1,0,z),point(0,1,z),width,height),z*width*height);
-         if(z%8===0)await new Promise(r=>setTimeout(r,0));
-       }
-     }
-     if(!controller.signal.aborted)setVolume({data,result});
-   };
-   void build().catch(e=>{if(!controller.signal.aborted)setError(String(e.message||e));});
-   return ()=>controller.abort();
- },[series?.id,series?.imageIds.length,anatomy]);
- if(!volume)return <section className="shared-volume-loading"><button onClick={onClose}>Bağla</button><p role="status">{error||`3D hazırlanır… ${percent}%`}</p></section>;
- return <SmartVolumeSurface result={volume.result} colors={{}} sourceValues={volume.data.values} range={volume.data.range} sourceSlices={volume.data.sourceSlices} title="3D həcm görüntüləmə" onClose={onClose}/>;
-}
-function DesktopVolumeView({series,anatomy,onClose}:Props){
- const [loaded,setLoaded]=useState<Awaited<ReturnType<typeof getSeriesVolume>>|null>(null),[error,setError]=useState('');
- useEffect(()=>{let cancelled=false;setLoaded(null);setError('');if(!series)return;
-  void (async()=>{const v=await getSeriesVolume(series.imageIds,{maxDimension:gpuCapabilities().max3DTextureSize,budgetBytes:Infinity,preserveSlices:true});
-   const deadline=Date.now()+180000;while(!v.volume.loadStatus?.loaded){if(cancelled)return;if(Date.now()>deadline)throw Error('Seriyanın yüklənməsi tamamlanmadı.');await new Promise(r=>setTimeout(r,30));}
-   if(!cancelled)setLoaded(v);
-  })().catch(e=>{if(!cancelled)setError(String(e.message||e));});return()=>{cancelled=true;};
- },[series?.id,series?.imageIds.length]);
- const geometry=useMemo<AnatomyVolumeResult|null>(()=>{
-  if(!loaded||!series)return null;if(anatomy)return anatomy;const v=loaded.volume;
-  return {dimensions:[...v.dimensions],spacing:[...v.spacing],origin:[...v.origin],direction:[...v.direction],modality:series.modality==='MR'?'MR':'CT',mask:new Uint8Array(0),classes:{},sourceKey:series.id,task:'context',device:'local',seconds:0,modelSpacingMm:null,experimental:true};
- },[loaded,anatomy,series?.id,series?.modality]);
- if(!loaded||!series||!geometry)return <section className="shared-volume-loading"><button onClick={onClose}>Bağla</button><p role="status">{error||'3D hazırlanır…'}</p></section>;
- const v=loaded.volume;
- return <SmartVolumeSurface key={loaded.volumeId} result={geometry} colors={{}} source={v} range={loaded.range} title="3D həcm görüntüləmə" onClose={onClose}/>;
+
+export function SharedVolumeView({series,anatomy,onClose}:Props){
+  const [loaded,setLoaded]=useState<Loaded|null>(null),[percent,setPercent]=useState(0),[error,setError]=useState('');
+  const tablet=typeof location!=='undefined' && location.origin==='https://appassets.androidplatform.net';
+  useEffect(()=>{
+    const controller=new AbortController(),{signal}=controller;
+    setLoaded(null);setPercent(0);setError('');
+    if(!series){setError('3D üçün KT və ya MRT seriyası seçin.');return;}
+    if(!tablet && series.loading)return;
+    async function open(source:Series){
+      let limit=256,budget=24;
+      try{const gpu=gpuCapabilities();limit=Math.min(gpu.max3DTextureSize,tablet?384:1536);
+        budget=tablet?(gpu.tier==='low'?20:48):(gpu.tier==='low'?64:gpu.tier==='high'?320:160);}catch{/* A bounded CPU volume is available without WebGL. */}
+      const showPreview=(data:Display)=>{
+        if(!signal.aborted)setLoaded({data,geometry:geometryFor(data,source,anatomy),preview:true});
+      };
+      const data=await tabletDisplayVolume(source.imageIds,limit,budget*1024**2,signal,setPercent,true,tablet?undefined:showPreview);
+      const geometry=geometryFor(data,source,anatomy);
+      if(anatomy?.mask.length){
+        const {dimensions,origin,direction,spacing}=geometry;
+        const [w,h,d]=dimensions;geometry.mask=new Uint8Array(w*h*d);
+        const at=(x:number,y:number,z:number)=>origin.map((n,i)=>n+x*spacing[0]*direction[i]+y*spacing[1]*direction[3+i]+z*spacing[2]*direction[6+i]) as typeof origin;
+        for(let z=0;z<d;z++){signal.throwIfAborted();geometry.mask.set(sampleAnatomyPlane(anatomy,at(0,0,z),at(1,0,z),at(0,1,z),w,h),z*w*h);if(z%8===0)await new Promise(r=>setTimeout(r,0));}
+      }
+      if(!signal.aborted)setLoaded({data,geometry,preview:false});
+    }
+    void open(series).catch(e=>{if(!signal.aborted){setLoaded(null);setError(String(e.message||e));}});
+    return ()=>controller.abort();
+  },[series?.id,series?.imageIds,series?.loading,anatomy,tablet]);
+  if(!tablet && series?.loading)return <section className="shared-volume-loading"><VrCloseButton loading onClose={onClose}/><p role="status">Seriya oxunur · {series.imageIds.length}{series.discovered?` / ${series.discovered}`:''} kəsik</p></section>;
+  if(!loaded)return <section className="shared-volume-loading"><VrCloseButton loading onClose={onClose}/><p role="status">{error||`3D hazırlanır… ${percent}%`}</p></section>;
+  return <SmartVolumeSurface key={loaded.geometry.sourceKey} sourceValues={loaded.data.values} result={loaded.geometry} colors={{}} range={loaded.data.range} sourceSlices={loaded.data.sourceSlices} cpuOnly={loaded.data.cpuOnly}
+    progressiveDesktop={!tablet} previewPercent={loaded.preview?percent:undefined} title="3D həcm görüntüləmə" onClose={onClose}/>;
 }

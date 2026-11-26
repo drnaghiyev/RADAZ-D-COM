@@ -6,8 +6,9 @@ import type { ImageGeometry, Point3 } from './localizer';
 import { themedMeasurement, installMeasurementTheme } from './measurement-tools';
 import { yieldToBrowser } from './work-progress';
 import { viewerPerformance } from './viewer-performance';
+import {buildDisplayPlanes} from './vr/display-planes';
 import { describeVolume } from './volume-geometry';
-import { areaWeights, resamplePlane, volumeDimensions } from './volume-resampling';
+import { areaWeights, desktopDisplayDimensions, displayPlaneSampler, resamplePlane, volumeDimensions } from './volume-resampling';
 import { parseDicomFile } from './dicom-file';
 import { frameMetadata } from './dicom-frame-metadata';
 import {anatomyAutoError, type AnatomyPixels} from './anatomy-auto';
@@ -526,6 +527,7 @@ export function sampleLocalDicom(imageId: string, world: readonly number[]): num
 
 export function releaseLocalDicoms(imageIds: string[]) {
   releaseSeriesVolumes(imageIds);
+  if(displayCache){const removed=new Set(imageIds);if(displayCache.ids.some(id=>removed.has(id)))displayCache=null;}
   for (const imageId of imageIds) {
     derived.delete(imageId);
     geometryOverrides.delete(imageId);
@@ -577,34 +579,132 @@ async function readDisplayPlane(id:string,signal:AbortSignal):Promise<RecordItem
   finally{records.delete(temporary);}
 }
 
+type DisplayTexture={dimensions:Point3;spacing:Point3;origin:Point3;direction:ReturnType<typeof seriesGeometry>['direction'];values:Float32Array;range:[number,number];sourceSlices:number;cpuOnly?:boolean};
+let displayCache:{ids:string[];limit:number;budget:number;desktop:boolean;data:DisplayTexture}|null=null;
+
+type DisplayGeometry = ReturnType<typeof seriesGeometry>;
+
+function displayGeometry(source: DisplayGeometry, dimensions: Point3) {
+  const scale = source.dimensions.map((n,i) => n / dimensions[i]);
+  const spacing = source.spacing.map((n,i) => n * scale[i]) as Point3;
+  const origin = source.origin.map((value,axis) => value + scale.reduce((sum,ratio,i) =>
+    sum + source.direction[i*3+axis] * source.spacing[i] * (ratio-1) / 2, 0)) as Point3;
+  return {dimensions,spacing,origin,direction:source.direction,sourceSlices:source.dimensions[2]};
+}
+
+/** Nearest-neighbour display preview, sampled in calibrated patient coordinates. */
+async function desktopVolumePreview(source: DisplayGeometry, signal: AbortSignal, getPlane: (z:number)=>Promise<RecordItem>): Promise<DisplayTexture> {
+  const [columns,rows,slices] = source.dimensions;
+  const dimensions:Point3 = [Math.min(columns,144),Math.min(rows,144),Math.min(slices,64)];
+  const [width,height,depth] = dimensions;
+  const sampleIndices = (input:number, output:number) =>
+    Uint32Array.from({length:output}, (_,i) => Math.min(input-1,Math.floor((i+.5)*input/output)));
+  const xs = sampleIndices(columns,width), ys = sampleIndices(rows,height), zs = sampleIndices(slices,depth);
+  const values = new Float32Array(width*height*depth);
+  let minimum = Infinity, maximum = -Infinity;
+  for(let start=0; start<depth; start+=4){
+    signal.throwIfAborted();
+    const planes = await Promise.all(Array.from(zs.subarray(start,start+4),getPlane));
+    signal.throwIfAborted();
+    for(let j=0;j<planes.length;j++){
+      const record=planes[j];
+      if(record.color || record.pixels.length !== columns*rows)throw Error('3D üçün monoxrom KT və ya MRT seriyası seçin.');
+      let at=(start+j)*width*height;
+      for(let y=0;y<height;y++){
+        const row=ys[y]*columns;
+        for(let x=0;x<width;x++){
+          const value=record.pixels[row+xs[x]];
+          values[at++]=value;
+          if(value<minimum)minimum=value;
+          if(value>maximum)maximum=value;
+        }
+      }
+    }
+  }
+  return {...displayGeometry(source,dimensions),values,range:[minimum,Math.max(minimum+1,maximum)]};
+}
+
 /** Bounded display texture. Its voxel centres and physical extent match the acquisition. */
-export async function tabletDisplayVolume(imageIds:string[], maxDimension:number,budgetBytes:number,signal:AbortSignal,progress:(percent:number)=>void) {
+export async function tabletDisplayVolume(imageIds:string[], maxDimension:number,budgetBytes:number,signal:AbortSignal,progress:(percent:number)=>void,cacheForReopen=false,onPreview?:(data:DisplayTexture)=>void):Promise<DisplayTexture> {
+  signal.throwIfAborted();
+  if(cacheForReopen && displayCache?.limit===maxDimension && displayCache.budget===budgetBytes && displayCache.desktop===!!onPreview &&
+    displayCache.ids.length===imageIds.length && imageIds.every((id,i)=>id===displayCache!.ids[i])){
+    progress(100);return displayCache.data;
+  }
+  if(cacheForReopen)displayCache=null;
   const source=seriesGeometry(imageIds);
-  const dimensions=volumeDimensions(source.dimensions,maxDimension,budgetBytes,4);
-  const scale=source.dimensions.map((n,i)=>n/dimensions[i]);
-  const spacing=source.spacing.map((value,i)=>value*scale[i]) as Point3;
-  const origin=source.origin.map((value,axis)=>value+scale.reduce((sum,ratio,i)=>sum+source.direction[i*3+axis]*source.spacing[i]*(ratio-1)/2,0)) as Point3;
+  const dimensions=onPreview?desktopDisplayDimensions(source.dimensions,maxDimension,budgetBytes):volumeDimensions(source.dimensions,maxDimension,budgetBytes,4);
+  const geometry=displayGeometry(source,dimensions);
+  // Only retain borrowed/deferred preview slices up to a fixed memory budget.
+  const previewPlanes=new Map<number,RecordItem>();
+  if(onPreview && dimensions[0]*dimensions[1]*dimensions[2]>=16*1024**2){
+    let retainedBytes=0;
+    const preview=await desktopVolumePreview(source,signal,async z=>{
+      const id=source.imageIds[z], record=await readDisplayPlane(id,signal);
+      if(record!==records.get(id) && retainedBytes+record.pixels.byteLength<=16*1024**2){
+        previewPlanes.set(z,record);retainedBytes+=record.pixels.byteLength;
+      }
+      return record;
+    });
+    signal.throwIfAborted();
+    onPreview(preview);
+  }
   const weights=source.dimensions.map((size,i)=>areaWeights(size,dimensions[i]));
   const planeSize=dimensions[0]*dimensions[1];
   const values=new Float32Array(planeSize*dimensions[2]);
-  let last=-1,plane:Float32Array<ArrayBufferLike>=new Float32Array(0),minimum=Infinity,maximum=-Infinity;
+  const samePlane=dimensions[0]===source.dimensions[0]&&dimensions[1]===source.dimensions[1];
+  const getSourcePlane=(z:number)=>{
+    const saved=previewPlanes.get(z);previewPlanes.delete(z);
+    return saved?Promise.resolve(saved):readDisplayPlane(source.imageIds[z],signal);
+  };
+  const finish=(range:[number,number])=>{
+    signal.throwIfAborted();
+    const data={...geometry,values,range,cpuOnly:dimensions[2]>maxDimension};
+    if(cacheForReopen && imageIds.every(id=>records.has(id)))displayCache={ids:[...imageIds],limit:maxDimension,budget:budgetBytes,desktop:!!onPreview,data};
+    return data;
+  };
+  if(onPreview && !samePlane && dimensions[2]===source.dimensions[2] && values.length>=16*1024**2){
+    const range=await buildDisplayPlanes([source.dimensions[0],source.dimensions[1],dimensions[0],dimensions[1]],values,dimensions[2],async z=>{
+      const record=await getSourcePlane(z);
+      if(record.color || record.pixels.length!==source.dimensions[0]*source.dimensions[1])throw Error('3D üçün monoxrom KT və ya MRT seriyası seçin.');
+      return record.pixels;
+    },signal,progress);
+    if(range)return finish(range);
+  }
+  const sample=samePlane?null:displayPlaneSampler(source.dimensions[0],source.dimensions[1],weights[0],weights[1],!!onPreview);
+  const pending=new Map<number,Promise<{value:RecordItem}|{error:unknown}>>();
+  const read=(index:number)=>{
+    let task=pending.get(index);
+    if(!task){
+      task=getSourcePlane(index).then(value=>({value}),error=>({error}));
+      pending.set(index,task);
+    }
+    return task;
+  };
+  let last=-1,plane:ArrayLike<number>=[],minimum=Infinity,maximum=-Infinity;
   let lastYield=performance.now();
   for(let z=0;z<dimensions[2];z++){
     const offset=z*planeSize;
+    let knownRange=false;
     for(const bin of weights[2][z]){
       signal.throwIfAborted();
       if(last!==bin.index){
-        const record=await readDisplayPlane(source.imageIds[bin.index],signal);
+        for(let next=bin.index;next<Math.min(source.imageIds.length,bin.index+4);next++)void read(next);
+        const item=await read(bin.index);pending.delete(bin.index);if('error' in item)throw item.error;
+        signal.throwIfAborted();
+        const record=item.value;
         if(record.color || record.pixels.length!==record.columns*record.rows)throw Error('3D üçün monoxrom KT və ya MRT seriyası seçin.');
-        plane=resamplePlane(record.pixels,record.columns,weights[0],weights[1]);last=bin.index;
+        plane=sample?sample(record.pixels):record.pixels;last=bin.index;
+        if(!sample && bin.weight===1){minimum=Math.min(minimum,record.min);maximum=Math.max(maximum,record.max);knownRange=true;}
       }
-      for(let i=0;i<planeSize;i++)values[offset+i]+=plane[i]*bin.weight;
+      if(bin.weight===1)values.set(plane,offset);
+      else for(let i=0;i<planeSize;i++)values[offset+i]+=plane[i]*bin.weight;
     }
-    for(let i=offset;i<offset+planeSize;i++){minimum=Math.min(minimum,values[i]);maximum=Math.max(maximum,values[i]);}
+    if(!knownRange)for(let i=offset;i<offset+planeSize;i++){minimum=Math.min(minimum,values[i]);maximum=Math.max(maximum,values[i]);}
     if(performance.now()-lastYield>20){progress(Math.round(100*(z+1)/dimensions[2]));await yieldToBrowser();lastYield=performance.now();}
   }
   signal.throwIfAborted();
-  return {dimensions,spacing,origin,direction:source.direction,values,range:[minimum,Math.max(minimum+1,maximum)] as [number,number],sourceSlices:source.dimensions[2]};
+  return finish([minimum,Math.max(minimum+1,maximum)]);
 }
 
 /** Stream a complete, geometry-validated CT/MR volume at the model's 3 mm scale.
@@ -954,12 +1054,49 @@ function sampleOblique(volume: ObliqueVolume, x: number, y: number, z: number): 
   return z0 === z1 ? first : first * (1 - dz) + interpolate(volume.source[z1]) * dz;
 }
 
+function createStackEngine(){
+  const next=new core.RenderingEngine('radiology-viewer');
+  if(!core.getShouldUseCPURendering() && core.getConfiguration().rendering?.renderingEngineMode===core.Enums.RenderingEngineModeEnum.ContextPool)preserveContextSizeOnRemoval(next);
+  return next;
+}
+
+let tabletStackUsingSoftwareFallback=false;
+
+/** Re-create the Android stack renderer after leaving its 3D workspace. */
+export function enableReturningTabletStack(previous:core.RenderingEngine|undefined,input:core.Types.PublicViewportInput){
+  // Cornerstone caches the implementation, while the Viewer owns its public wrapper.
+  if(previous && engine && core.getRenderingEngine(engine.id)===previous){
+    engine.destroy();
+    if(tabletStackUsingSoftwareFallback){
+      core.setUseCPURendering(false,false);
+      tabletStackUsingSoftwareFallback=false;
+    }
+    try{
+      engine=createStackEngine();
+      engine.enableElement(input);
+    }catch(error){
+      // vtk.js builds a Proxy around null when WebView refuses a new WebGL
+      // context. Allocation may happen in the constructor or on first resize.
+      if(core.getShouldUseCPURendering() || !(error instanceof Error) || !/proxy|webgl|opengl context/i.test(error.message))throw error;
+      core.getRenderingEngine('radiology-viewer')?.destroy();
+      core.setUseCPURendering(true,false);
+      tabletStackUsingSoftwareFallback=true;
+      engine=createStackEngine();
+      engine.enableElement(input);
+    }
+  }else{
+    engine!.enableElement(input);
+  }
+  return engine!;
+}
+
 export async function getViewer() {
   initialized ??= (async () => {
     // Each detached window owns an engine. Seven contexts per engine exhaust
     // Chromium's shared GPU-context budget with Viewer + MPR + 3D open.
     // ContextPool multiplexes any number of panes over these two contexts.
-    await core.init({...core.getConfiguration(),rendering:{...core.getConfiguration().rendering,webGlContextCount:2}});
+    const tablet=window.location.origin==='https://appassets.androidplatform.net';
+    await core.init({...core.getConfiguration(),rendering:{...core.getConfiguration().rendering,webGlContextCount:tablet?1:2}});
 
     // Cornerstone 5.10 starts an auxiliary cache promise without consuming its
     // rejection. Observe that branch; callers still receive the original image
@@ -977,8 +1114,7 @@ export async function getViewer() {
     [tools.WindowLevelTool, tools.PanTool, tools.ZoomTool, tools.TrackballRotateTool, tools.EraserTool].forEach(tools.addTool);
     [tools.LengthTool, tools.AngleTool, tools.CobbAngleTool, tools.EllipticalROITool].map(themedMeasurement).forEach(tool => tools.addTool(tool as any));
     installMeasurementTheme();
-    engine = new core.RenderingEngine('radiology-viewer');
-    if (!core.getShouldUseCPURendering() && core.getConfiguration().rendering?.renderingEngineMode === core.Enums.RenderingEngineModeEnum.ContextPool) preserveContextSizeOnRemoval(engine);
+    engine = createStackEngine();
   })();
   await initialized;
   return { core, tools, engine: engine! };

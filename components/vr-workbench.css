@@ -1,0 +1,23 @@
+.radaz-vr{position:fixed;inset:0;display:flex;flex-direction:column;min-height:0;min-width:0;background:#000;color:#e1edf0;font:14px system-ui,sans-serif;isolation:isolate;color-scheme:dark}
+.radaz-vr .vr-tools{z-index:2;display:flex;align-items:center;flex-wrap:wrap;gap:3px;padding:5px max(6px,env(safe-area-inset-right)) 5px max(6px,env(safe-area-inset-left));background:#13212a;border-bottom:1px solid #294251}.radaz-vr [hidden]{display:none!important}
+.radaz-vr button,.radaz-vr select,.radaz-vr input{font:inherit;color:inherit;box-sizing:border-box}
+.radaz-vr button{border:1px solid #344955;background:#1b2e39;border-radius:4px;min-height:33px;min-width:33px;display:inline-flex;align-items:center;justify-content:center;padding:5px;cursor:pointer}
+.radaz-vr button svg{width:18px;height:18px}.radaz-vr button[aria-pressed=true]{background:#176179;border-color:#57cbdc;color:white}
+.radaz-vr button:focus-visible,.radaz-vr select:focus-visible{outline:2px solid #72dae4}.radaz-vr button:disabled{opacity:.38;cursor:default}
+.radaz-vr .vr-stage{position:relative;min-height:0;flex:1 1 auto;overflow:hidden;background:#000;touch-action:none;user-select:none;-webkit-user-select:none}
+.radaz-vr .vr-raster,.radaz-vr .vr-overlay,.radaz-vr .vr-raster canvas,.radaz-vr .vr-raster>div{position:absolute;inset:0;width:100%!important;height:100%!important;display:block}.radaz-vr .vr-raster{z-index:0}.radaz-vr .vr-overlay{pointer-events:none;z-index:1}
+.radaz-vr .vr-orientation{position:absolute;inset:0;z-index:2;pointer-events:none;color:#f4f4eb;font:14px system-ui,sans-serif;line-height:1.2;text-shadow:0 1px 2px #000}
+.vr-orientation>span{position:absolute;white-space:pre}
+.vr-dir-top,.vr-dir-bottom{left:50%;transform:translateX(-50%)}.vr-dir-top{top:6px}.vr-dir-bottom,.vr-windowing{bottom:6px}
+.vr-dir-left,.vr-dir-right{top:50%;transform:translateY(-50%)}.vr-dir-left,.vr-windowing{left:12px}.vr-dir-right{right:12px}
+.vr-orientation>svg{position:absolute;right:0;top:0;width:min(94px,20%);height:auto;max-height:30%}
+.radaz-vr .vr-stage[data-tool=pan]{cursor:grab}.radaz-vr .vr-stage[data-tool=zoom]{cursor:zoom-in}.radaz-vr .vr-stage:is([data-tool=cut],[data-tool=length],[data-tool=arrow]){cursor:crosshair}
+.radaz-vr .vr-tools{padding-inline-end:calc(54px + env(safe-area-inset-right,0px))}.radaz-vr .vr-close{position:absolute;inset-block-start:3px;inset-inline-end:max(5px,env(safe-area-inset-right));z-index:5;min-width:40px;min-height:36px;touch-action:manipulation}
+@media(pointer:coarse){.radaz-vr .vr-close{min-width:44px;min-height:44px}.radaz-vr .vr-tools{min-height:38px}}
+.radaz-vr .vr-menu{position:absolute;inset-inline-end:8px;top:49px;z-index:3;display:flex;flex-direction:column;align-items:stretch;gap:6px;width:min(270px,calc(100vw - 16px));max-height:calc(100% - 94px);overflow:auto;box-sizing:border-box;padding:10px;background:#14252ff2;border:1px solid #3f5967;border-radius:5px}
+.radaz-vr .vr-menu strong{padding:7px 34px 5px 2px}.radaz-vr .vr-menu>button:not(.vr-dismiss){justify-content:flex-start;padding-inline:9px}
+.radaz-vr .vr-menu .vr-dismiss{position:absolute;right:6px;top:5px}.radaz-vr .vr-menu label{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.radaz-vr .vr-menu select,.radaz-vr .vr-menu input[type=number]{min-width:0;max-width:100%;background:#0e1b23;border:1px solid #44606f;border-radius:3px;padding:4px}.radaz-vr .vr-menu input[type=number]{width:74px}.radaz-vr .vr-menu input[type=range]{width:100%}.radaz-vr .vr-shot{display:flex;align-items:center;justify-content:space-between;gap:4px}
+.radaz-vr footer{min-height:24px;background:#101c23;color:#b6c9cf;display:flex;align-items:center;justify-content:space-between;padding:2px 8px;font-size:12px;gap:10px}.radaz-vr .vr-unhide{position:absolute;left:5px;top:5px;z-index:3}
+.vr-print-image{display:none}@media print{body:has(>.vr-print-image)>:not(.vr-print-image){display:none!important}body>.vr-print-image{display:block!important;width:100%;height:auto;max-height:96vh;object-fit:contain}}
+@media(max-width:890px){.radaz-vr .vr-tools{gap:2px}.radaz-vr .vr-tools button{min-width:32px;min-height:34px}.radaz-vr .vr-menu{top:83px;max-height:calc(100% - 113px)}}

@@ -1,5 +1,14 @@
 --- a/app/page.tsx
 +++ b/app/page.tsx
+@@ -236,5 +236,8 @@
+           const center = vp.canvasToWorld([bounds.width / 2, bounds.height / 2]);
+           const direction = (x: number, y: number) => {
+             const point = vp.canvasToWorld([x,y]);
++            // The software stack announces its image before the transform exists.
++            // The next IMAGE_RENDERED event fills in the orientation labels.
++            if (!center || !point) return '';
+             const vector = point.map((value,i) => value - center[i]);
+             const length = Math.hypot(...vector);
 @@ -539,5 +539,5 @@
    const importPending=useRef(0);
    const [importQueue, setImportQueue] = useState<ImportSource[]>([]);

@@ -35,6 +35,8 @@ public final class ViewerActivity extends Activity {
     private WebView home, active, archiveWindow, chooserWindow, saveWindow;
     private ValueCallback<Uri[]> chooser;
     private boolean pickingTree;
+    private boolean volumeVisible;
+    private Runnable removeVolumeBack;
     private String saveId;
     private OutputStream saving;
     private DocumentImports imports;
@@ -117,6 +119,7 @@ public final class ViewerActivity extends Activity {
                 return null;
             }
             @Override public void onPageStarted(WebView view,String url,android.graphics.Bitmap favicon) {
+                if(view==home && volumeVisible){volumeVisible=false;updateVolumeBack();}
                 initialized.remove(view);clinics.navigate(view,url);
                 if(!"about:blank".equals(url) && !url.startsWith("blob:") && !TabletAssets.isLocal(Uri.parse(url)))view.stopLoading();
             }
@@ -146,6 +149,12 @@ public final class ViewerActivity extends Activity {
             String answer="ok";
             try {
                 switch(command.substring("radaz-tablet/".length())) {
+                    case "volume":
+                        if(web!=home || !("open".equals(value) || "closed".equals(value))){answer="denied";break;}
+                        volumeVisible="open".equals(value);
+                        updateVolumeBack();
+                        if(!volumeVisible && active==web)refreshHomeAfterVolume(web);
+                        break;
                     case "updates": if(web==active)web.post(()->updater.check(true));else answer="denied";break;
                     case "network": answer=clinics.request(web,url,value);break;
                     case "inbox": answer=web==home?receiver.request(web,url,value):"denied";break;
@@ -204,7 +213,7 @@ public final class ViewerActivity extends Activity {
     private void show(WebView view){
         if(view==null || !windows.contains(view))return;
         if(active!=null && active!=view)active.setVisibility(View.GONE);
-        active=view;view.setVisibility(View.VISIBLE);view.bringToFront();view.requestFocus();updateChildBar();
+        active=view;view.setVisibility(View.VISIBLE);view.bringToFront();view.requestFocus();updateChildBar();updateVolumeBack();
     }
     private void updateChildBar(){
         boolean child=active!=null&&active!=home;
@@ -221,7 +230,45 @@ public final class ViewerActivity extends Activity {
         initialized.remove(web);windows.remove(web);clinics.navigate(web,null);stage.removeView(web);web.destroy();
         if(active==web){active=null;show(windows.get(previous));}
     }
-    @Override public void onBackPressed(){if(active!=null&&active.canGoBack())active.goBack();else if(active!=null && active!=home)close(active);else super.onBackPressed();}
+    private void refreshHomeAfterVolume(WebView web) {
+        web.post(()->{
+            if(web!=home || active!=web || volumeVisible || isFinishing())return;
+            web.requestLayout();
+            web.postInvalidateOnAnimation();
+            web.postVisualStateCallback(0,new WebView.VisualStateCallback(){
+                @Override public void onComplete(long requestId){
+                    if(web==home && active==web && !volumeVisible)web.postInvalidateOnAnimation();
+                }
+            });
+        });
+    }
+    private boolean dismissVolume() {
+        if(!volumeVisible || active!=home || home==null)return false;
+        home.evaluateJavascript("window.dispatchEvent(new Event('radaz:close-volume'))",null);
+        return true;
+    }
+    private void updateVolumeBack() {
+        boolean needed=volumeVisible && active==home && home!=null;
+        if(!needed && removeVolumeBack!=null){removeVolumeBack.run();removeVolumeBack=null;}
+        if(needed && removeVolumeBack==null && Build.VERSION.SDK_INT>=33){
+            removeVolumeBack=VolumeBack.register(this);
+        }
+    }
+    @android.annotation.TargetApi(33)
+    private static final class VolumeBack {
+        static Runnable register(ViewerActivity activity) {
+            android.window.OnBackInvokedDispatcher dispatcher=activity.getOnBackInvokedDispatcher();
+            android.window.OnBackInvokedCallback callback=()->activity.dismissVolume();
+            dispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,callback);
+            return ()->dispatcher.unregisterOnBackInvokedCallback(callback);
+        }
+    }
+    @Override public void onBackPressed(){
+        if(dismissVolume())return;
+        if(active!=null&&active.canGoBack())active.goBack();
+        else if(active!=null && active!=home)close(active);
+        else super.onBackPressed();
+    }
 
     private boolean pick(WebView web,String mode,ValueCallback<Uri[]> callback) {
         if(chooserWindow!=null){if(callback!=null)callback.onReceiveValue(null);return false;}
@@ -294,6 +341,7 @@ public final class ViewerActivity extends Activity {
         return ok;
     }
     @Override protected void onDestroy(){
+        volumeVisible=false;updateVolumeBack();
         endSave();reader.shutdownNow();if(clinics!=null)clinics.destroy();
         if(receiver!=null)receiver.close();
         if(chooser!=null)chooser.onReceiveValue(null);

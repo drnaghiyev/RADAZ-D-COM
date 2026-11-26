@@ -1,9 +1,9 @@
 'use client';
+import {SmartDetachedWindow} from '@/components/smart-detached-window';
 import {SharedVolumeView} from '@/components/shared-volume-view';
+import {captureTabletStacks,restoreStackProperties,type TabletStackRecovery} from '@/lib/tablet-stack-return';
 import {MeasurementCopies} from '@/components/measurement-copies';
 import {CineControls} from '@/components/cine-controls';
-import {workstationSettings} from '@/lib/volume-workstation';
-import {VolumeDisplayControls} from '@/components/volume-display-controls';
 import {ToolbarWorkspace, ToolbarGroup, ToolbarOverflow} from '@/components/toolbar-workspace';
 import {bindPresentationSync} from '@/lib/presentation-sync';
 import {bindProjectionPresentation,isProjection,synchronizedSlice,type ImagePresentation} from '@/lib/viewer-navigation';
@@ -15,7 +15,6 @@ import {useTranslation as useUiTranslation,translate as tr} from '@/lib/i18n';
 import { dicomSeriesName, paneId, paneIndex } from '@/lib/dicom-description';
 import { DicomInfoButton } from '@/components/dicom-info';
 import { importFromRadazSite } from '@/lib/site-import';
-import { VolumeRenderControls } from '@/components/volume-render-controls';
 import { WorkProgress } from '@/components/work-progress';
 import { type WorkProgress as LoadingProgress, yieldToBrowser } from '@/lib/work-progress';
 import {cancelMeasurementInteraction, annotationBelongsToPane} from '@/lib/measurement-tools';
@@ -35,7 +34,7 @@ import type {AnatomyLabel} from '@/lib/anatomy-atlas';
 import {BookOpen} from 'lucide-react';
 import {ArrowCommentEditor} from '@/components/arrow-comment-editor';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -44,8 +43,6 @@ import { ViewerDisplayControls } from '@/components/viewer-display-controls';
 import { ViewerOutputControls } from '@/components/viewer-output-controls';
 import { MeasurementOverlay, type LocalMark } from '@/components/measurement-overlay';
 import { LocalizerOverlay } from '@/components/localizer-overlay';
-import { VolumePreview, type VolumeRenderSettings } from '@/components/volume-preview';
-import { volumeStyles, type VolumePreset, type VolumeQuality } from '@/lib/volume-presets';
 import { ArrowUpRight, Pencil, MoveVertical, Eye, EyeOff, Download, PanelLeftClose, Activity, Box, ChevronDown, CircleDot, Crosshair, Database, Disc3, Eraser, FileArchive, FileText, Focus, Grid2X2, Hand, Layers3, MoveDiagonal2, RotateCcw, Ruler, ScanLine, ScanSearch, ServerCog, Settings2, SlidersHorizontal, SunMoon, Trash2, FolderOpen, Triangle, Waypoints } from 'lucide-react';
 import { addLocalDicom, registerDiskDicom, getOriginalDicom, getDiskDicomSource, registerLocalDicom, registerLocalDicomFrames, shareLocalDicoms, borrowLocalDicoms, getSeriesVolume, createMprStacks, createObliqueMprStacks, getDefaultWindow, getLocalizerGeometry, getMprOrientations, getViewer, releaseLocalDicoms, rotateMprOrientation, representativeThumbnail, type MprOrientations, type MprMode, type MprSettings } from '@/lib/cornerstone';
 import { closestSlice, sameCoordinateSpace, normalOf, planeLabel, intersectPlanes, type Point3 } from '@/lib/localizer';
@@ -126,7 +123,7 @@ function age(birth: string, study: string) {
 // Reusing a panel ID must wait for its previous viewport's in-flight setStack.
 const paneStackLoads = new Map<string, Promise<void>>();
 
-export function ViewportPane({ onHover, projectionViews, anatomyControl, anatomyVolume, anatomyVolumeVisible, anatomyVolumeOpacity, anatomyLabel, windowLevels, windowingSourceId, cursor, onCursor, hideText, id, series, initialImageId, selected, tool, preset, resetToken, clearToken, ready, marks, selectedMarkId, localizers, otherImages, reconstruction, viewAnchor, expanded, concealed, onImageChange, onMoveSource, onMoveIntersection, loadingProgress, onRotateSource, onRotateStart, onPreviewRotateSource, onAddMark, onUpdateMark, onRemoveMark, onSelectMark, onClearImage, onSelect, onToggleMaximize, onDropSeries }: {
+export function ViewportPane({ tabletRecovery,onHover, projectionViews, anatomyControl, anatomyVolume, anatomyVolumeVisible, anatomyVolumeOpacity, anatomyLabel, windowLevels, windowingSourceId, cursor, onCursor, hideText, id, series, initialImageId, selected, tool, preset, resetToken, clearToken, ready, marks, selectedMarkId, localizers, otherImages, reconstruction, viewAnchor, expanded, concealed, onImageChange, onMoveSource, onMoveIntersection, loadingProgress, onRotateSource, onRotateStart, onPreviewRotateSource, onAddMark, onUpdateMark, onRemoveMark, onSelectMark, onClearImage, onSelect, onToggleMaximize, onDropSeries }: {
   onHover?: () => void;
   projectionViews?: Map<string,ImagePresentation>;
   anatomyControl?:ReturnType<typeof useAnatomyVolume>; anatomyVolume?: AnatomyVolumeResult|null; anatomyVolumeVisible?:boolean; anatomyVolumeOpacity?:number;
@@ -135,6 +132,7 @@ export function ViewportPane({ onHover, projectionViews, anatomyControl, anatomy
   cursor: CursorPosition | null; onCursor: (position: CursorPosition) => void; hideText: boolean;
   id: string; series?: Series; selected: boolean; tool: Tool; preset: Preset; resetToken: number; ready: boolean;
   initialImageId?: string;
+  tabletRecovery?: TabletStackRecovery;
   clearToken: number; marks: LocalMark[]; selectedMarkId: string | null; localizers: boolean; otherImages: { panel: string; imageId: string }[];
   reconstruction?: { mode: MprMode; thickness: number };
   viewAnchor?: Point3 | null; expanded?: boolean; concealed?: boolean;
@@ -202,7 +200,9 @@ export function ViewportPane({ onHover, projectionViews, anatomyControl, anatomy
       viewer = await getViewer();
       await paneStackLoads.get(id);
       if (disposed) return;
-      viewer.engine.enableElement({ viewportId, element, type: viewer.core.Enums.ViewportType.STACK });
+      const input={viewportId,element,type:viewer.core.Enums.ViewportType.STACK};
+      if(tabletRecovery)viewer.engine=tabletRecovery.enable(input);
+      else viewer.engine.enableElement(input);
       group = viewer.tools.ToolGroupManager.createToolGroup(`group-${id}`);
       groupRef.current = group;
       [viewer.tools.WindowLevelTool, viewer.tools.PanTool, viewer.tools.ZoomTool, viewer.tools.LengthTool,
@@ -310,7 +310,9 @@ export function ViewportPane({ onHover, projectionViews, anatomyControl, anatomy
       if (!vp || token !== requestRef.current) return;
       const extending = stackSeries.current === series.id && !!vp.getCurrentImageId();
       const current = vp.getCurrentImageId();
-      const initialIndex = series.imageIds.indexOf((series.initialImageId || (extending && current && series.imageIds.includes(current) ? current : initialImageId)) || '');
+      const saved=tabletRecovery?.views.get(viewportId);
+      const recoveredImage=saved && series.imageIds.includes(saved.image)?saved.image:undefined;
+      const initialIndex = series.imageIds.indexOf((recoveredImage || series.initialImageId || (extending && current && series.imageIds.includes(current) ? current : initialImageId)) || '');
       const camera = extending ? vp.getCamera() : null;
       const presentation = extending && reconstruction ? vp.getViewPresentation() : null;
       const anchorCanvas = camera && viewAnchor ? vp.worldToCanvas(viewAnchor) : null;
@@ -325,7 +327,8 @@ export function ViewportPane({ onHover, projectionViews, anatomyControl, anatomy
       stackSeries.current = series.id;
       if (properties) {
         const { voiRange: _previousImageWindow, ...presentationProperties } = properties;
-        vp.setProperties(presentationProperties);
+        if(tabletRecovery)restoreStackProperties(vp,presentationProperties);
+        else vp.setProperties(presentationProperties);
       }
       if (camera && presentation) {
         // Keep screen scale/pan while accepting the NEW reconstructed plane's
@@ -339,6 +342,10 @@ export function ViewportPane({ onHover, projectionViews, anatomyControl, anatomy
             focalPoint:nextCamera.focalPoint!.map((v,i)=>v+delta[i]) as Point3});
         }
       } else if (camera && !isProjection(series.modality)) vp.setCamera(camera);
+      if(saved && vp.getCurrentImageId()===saved.image){
+        restoreStackProperties(vp,saved.properties);vp.setViewPresentation(saved.presentation);vp.setCamera(saved.camera);
+        tabletRecovery?.views.delete(viewportId);
+      }
       vp.render(); setSlice(vp.getCurrentImageIdIndex());
       const currentImageId = vp.getCurrentImageId() || '';
       setImageId(currentImageId); onImageChange(id, currentImageId); setError('');
@@ -474,7 +481,6 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
   const anatomyVolume=useAnatomyVolume();
   const anatomyRef=useRef(anatomyVolume);useEffect(()=>{anatomyRef.current=anatomyVolume;},[anatomyVolume]);
   const [smartVolumeSource,setSmartVolumeSource]=useState<{id:string;imageIds:string[];modality:string}|null>(null);
-  const [anatomyFocus,setAnatomyFocus]=useState<Point3|null>(null);
   const [seriesList, setSeriesList] = useState<Series[]>([]);
   const projectionViews = useRef(new Map<string,ImagePresentation>()).current;
   const [syncScroll,setSyncScroll]=useState(false);
@@ -513,7 +519,15 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
   const [maximizedPane, setMaximizedPane] = useState<string | null>(null);
   const [maximizedMprPane, setMaximizedMprPane] = useState<string | null>(null);
   const [datasetVersion, setDatasetVersion] = useState(0);
+  const desktopVrWindow=useRef<Window|null>(null);
+  const [desktopVolumeId,setDesktopVolumeId]=useState<string|null>(null);
   const [tabletVolumeId,setTabletVolumeId]=useState<string|null>(null);
+  const [tabletRecovery,setTabletRecovery]=useState<(TabletStackRecovery&{generation:number})>();
+  const tabletStacks=useRef<ReturnType<typeof captureTabletStacks>>(undefined);
+  const closeTabletVolume=useCallback(()=>{
+    tabletStacks.current?.restore();tabletStacks.current=undefined;setTabletVolumeId(null);
+  },[]);
+  useEffect(()=>()=>tabletStacks.current?.dispose(),[]);
   const [workspace, setWorkspace] = useState<'viewer' | 'mpr' | '3d'>(detachedMode || 'viewer');
   useEffect(()=>{if(limited){setTool('scroll');setLayout({rows:1,columns:1});setActive('A');setMaximizedPane(null);setLocalizers(false);setSelectedMarkId(null);setWorkspace('viewer');}},[limited]);
   const [mprSettings, setMprSettings] = useState<MprSettings>(newMprSettings);
@@ -527,11 +541,6 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
       setAnatomyLabel(null);if(tool==='anatomy')setTool('wl');
     }
   },[tool,workspace,active,currentImages,limited,anatomyLabel]);
-  const [volumePreset, setVolumePreset] = useState<VolumePreset>('bone');
-  const [volumeThreshold, setVolumeThreshold] = useState(volumeStyles[0].threshold);
-  const [volumeOpacity, setVolumeOpacity] = useState(volumeStyles[0].opacity);
-  const [volumeSettings, setVolumeSettings] = useState<VolumeRenderSettings>(workstationSettings('bone'));
-  const [volumeResetToken, setVolumeResetToken] = useState(0);
   const [mprError, setMprError] = useState('');
   const [importOpen, setImportOpen] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
@@ -1046,17 +1055,25 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
 
   useEffect(()=>{
     if(location.origin!=='https://appassets.androidplatform.net')return;
-    const back=()=>setTabletVolumeId(history.state?.radazTabletVolume||null);
-    window.addEventListener('popstate',back);return ()=>window.removeEventListener('popstate',back);
-  },[]);
+    if(!tabletVolumeId)return;
+    tabletStacks.current?.suspend();
+    const close=closeTabletVolume;
+    window.addEventListener('radaz:close-volume',close);
+    window.dispatchEvent(new CustomEvent('radaz:volume-visible',{detail:true}));
+    return ()=>{
+      window.removeEventListener('radaz:close-volume',close);
+      window.dispatchEvent(new CustomEvent('radaz:volume-visible',{detail:false}));
+    };
+  },[tabletVolumeId,closeTabletVolume]);
 
   const openDetached = (mode: DetachedMode | 'stitch') => {
     const source=listRef.current.find(s=>s.id===selectedIdRef.current);
     if(!source){setStatus('Əvvəlcə seriya seçin');return;}
     if(mode==='3d' && location.origin==='https://appassets.androidplatform.net'){
-      history.pushState({...history.state,radazTabletVolume:source.id},'','#volume');
+      tabletStacks.current?.dispose();tabletStacks.current=captureTabletStacks(recovery=>setTabletRecovery(old=>({...recovery,generation:(old?.generation||0)+1})));
       setTabletVolumeId(source.id);return;
     }
+    if(mode==='3d'){if(desktopVolumeId===source.id&&desktopVrWindow.current&&!desktopVrWindow.current.closed)desktopVrWindow.current.focus();else setDesktopVolumeId(source.id);return;}
     const key=`${mode}:${source.id}`;
     const existing=detachedWindows.current.get(key);
     if(existing&&!existing.closed){existing.focus();existing.dispatchEvent(new Event('radaz-maximize-window'));return;}
@@ -1285,14 +1302,6 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
       }
     }).catch(error=>setStatus(`Sync Scroll: ${String(error)}`));
   },[syncScroll,syncEligible,currentImages,assigned,layout,seriesList]);
-  const ctVolume = volumeSeries?.modality === 'CT';
-  const availableVolumeStyles = volumeStyles.filter(style => ctVolume ? style.key !== 'mr' : ['mr','mip','minip'].includes(style.key));
-  useEffect(() => {
-    if (!volumeSeries) return;
-    const style = volumeStyles.find(item => item.key === (volumeSeries.modality === 'CT' ? 'bone' : 'mr'))!;
-    setVolumePreset(style.key); setVolumeThreshold(style.threshold); setVolumeOpacity(style.opacity);
-    setVolumeSettings(current => ({...workstationSettings(style.key), quality:current.quality}));
-  }, [volumeSeries?.modality]);
   const buildMpr = async (source: Series, settings: MprSettings, orientations: MprOrientations | null, pivot: Point3 | null, center = false, onlyPlane?: 'SAG'|'COR'|'AX') => {
     const epoch = ++mprBuildEpoch.current;
     const previousData = mprDataRef.current;
@@ -1497,7 +1506,7 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
  <DropdownMenuItem toolbarId="mpr-window" onSelect={()=>openDetached('mpr')}>MPR</DropdownMenuItem>
  {(['COR','SAG','AX'] as const).map(plane=><DropdownMenuItem toolbarId={`mpr-${plane}`} key={plane} onSelect={()=>void reformatPane(plane)}>{{AX:'Axial',COR:'Coronal',SAG:'Sagittal'}[plane]}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu></div>
         <div className="workspace-split" key="3d"><button type="button" disabled={limited} title={tr('ui.3d_volume_rendering_8b54e')} aria-label={tr('ui.3d_volume_rendering_8b54e')} onClick={()=>openDetached('3d')}><b className="mode-letter-icon">3D</b></button><DropdownMenu><DropdownMenuTrigger asChild><button className="workspace-options" aria-label="3D açılış seçimləri" disabled={limited}><ChevronDown/></button></DropdownMenuTrigger><DropdownMenuContent>
- <DropdownMenuItem toolbarId="3d-main" onSelect={()=>{setRecordsPage(null);setInlinePlanes(null);setWorkspace('3d');}}>Əsas viewer-də aç</DropdownMenuItem>
+ <DropdownMenuItem toolbarId="3d-main" onSelect={()=>{if(location.origin==='https://appassets.androidplatform.net'){openDetached('3d');return;}setRecordsPage(null);setInlinePlanes(null);setWorkspace('3d');}}>Əsas viewer-də aç</DropdownMenuItem>
  <DropdownMenuItem toolbarId="3d-window" onSelect={()=>openDetached('3d')}>Ayrı pəncərədə aç</DropdownMenuItem>
 </DropdownMenuContent></DropdownMenu></div>
         <button type="button" disabled={limited} title={tr('ui.ai_assistant_eb79d')} aria-label={tr('ui.ai_assistant_eb79d')} onClick={openReport}><Sparkles size={18}/><span>{tr('ui.ai_assistant_eb79d')}</span></button>
@@ -1507,21 +1516,13 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
       </ToolbarGroup>}
         {!limited && detachedMode !== '3d' && <ViewerOutputControls panes={Object.entries(currentImages).map(([panel, imageId]) => ({ panel, imageId, series: [...seriesList, ...(mprData?.planes || [])].find(item => item.imageIds.includes(imageId)) }))} panel={workspace === 'mpr' ? mprActive : active} imageId={currentImages[workspace === 'mpr' ? mprActive : active]} series={workspace === 'mpr' ? mprData?.planes.find(item => item.imageIds.includes(currentImages[mprActive])) : currentSeries} allSeries={seriesList} datasetVersion={datasetVersion} onStatus={setStatus}/>}
       </div>
-      {workspace === 'mpr' && <>
+      {workspace === 'mpr' && !tabletVolumeId && <>
         <div className="mode-identity" title={tr('ui.mpr_reconstruction_9bcc7')}><strong><Layers3 size={17}/><span>{tr('ui.mpr_reconstruction_9bcc7')}</span></strong><span title={seriesList.find(s => s.id === mprData?.sourceId)?.name || ''}>{seriesList.find(s => s.id === mprData?.sourceId)?.name || currentSeries?.name || 'Seriya seçin'}</span></div>
         <ToolbarGroup className="mode-controls mpr-header-controls" groupId="mpr-modes" order={30}>
           <div className="mpr-modes" role="group" aria-label={tr('ui.active_mpr_pane_mode_5965d')}>{(['MPR','MIP','MinIP','Avg'] as const).map(mode => <button key={mode} title={mode} aria-label={mode} type="button" className={mprSettings[panePlane[mprActive as keyof typeof panePlane] || 'AX'].mode === mode ? 'current' : ''} onClick={() => changeMprSetting({ mode })}><b className="mpr-mode-label">{mode}</b></button>)}</div>
           <label className="mpr-thickness"><span>{tr('ui.thickness_1a60e')}</span><input type="range" min="1" max="50" step="1" aria-label={tr('ui.active_mpr_slab_thickness_af500')} value={mprSettings[panePlane[mprActive as keyof typeof panePlane] || 'AX'].thickness} onChange={e => changeMprSetting({ thickness: Number(e.currentTarget.value) })}/><output>{mprSettings[panePlane[mprActive as keyof typeof panePlane] || 'AX'].thickness} mm</output></label>
           <button className="mpr-reset" type="button" onClick={resetMprLines} title={tr('ui.restore_initial_mpr_lines_8cc74')} aria-label={tr('ui.reset_mpr_lines_92ff9')}><RotateCcw size={15}/><span>{tr('ui.reset_lines_fb045')}</span></button>
         </ToolbarGroup>
-      </>}
-      {workspace === '3d' && <>
-        <div className="mode-identity"><strong><Box size={17}/> 3D VR</strong><span title={volumeSeries?.name || ''}>{volumeSeries ? `${volumeSeries.name} · ${volumeSeries.imageIds.length} kəsit` : 'Seriya seçin'}</span></div>
-        <ToolbarGroup className="mode-controls volume-header-controls" groupId="volume-display" order={30}>
-          <div className="volume-simple-controls"><VolumeDisplayControls modality={ctVolume?'CT':'MR'} preset={volumePreset} onPreset={key=>{const style=volumeStyles.find(s=>s.key===key)!;setVolumePreset(key);setVolumeThreshold(style.threshold);setVolumeSettings(current=>({...workstationSettings(style.key),sourceQuality:current.sourceQuality||'auto'}));}} quality={volumeSettings.sourceQuality||'auto'} onQuality={sourceQuality=>setVolumeSettings(current=>({...current,sourceQuality}))} brightness={volumeSettings.ambient} onBrightness={ambient=>setVolumeSettings(current=>({...current,ambient}))} opacity={volumeOpacity} onOpacity={setVolumeOpacity}/></div>
-                    <details className="volume-workstation-settings"><summary aria-label="3D render ayarları" title="3D render ayarları">⚙</summary><div className="volume-workstation-settings-panel"><label>HU threshold <output>{volumeThreshold}</output><input aria-label="HU threshold" type="range" min={-1000} max={1400} step={1} value={volumeThreshold} onChange={e=>setVolumeThreshold(+e.target.value)}/></label><VolumeRenderControls preset={volumePreset} settings={volumeSettings} onChange={setVolumeSettings} ct={ctVolume}/></div></details><button className="mpr-reset volume-reset" type="button" onClick={() => { const style = volumeStyles.find(item => item.key === (ctVolume ? 'bone' : 'mr'))!; setVolumePreset(style.key); setVolumeThreshold(style.threshold); setVolumeOpacity(1); setVolumeSettings(workstationSettings(style.key)); setVolumeResetToken(value => value+1); }} title={tr('ui.reset_3d_view_lighting_opacity_rotation_zoom_628ef')} aria-label={tr('ui.reset_3d_view_24960')}><RotateCcw size={15}/><span>{tr('ui.reset_82c50')}</span></button>
-        </ToolbarGroup>
-        <ToolbarGroup id="volume-edit-toolbar" className="toolbar-group volume-edit-toolbar" role="group" aria-label="3D redaktə alətləri" groupId="volume-edit" order={40}/>
       </>}
       <div className="top-actions">
 
@@ -1604,8 +1605,8 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
       <section className="main-area">{recordsPage&&<section className="embedded-records" aria-label={recordsPage==='archive'?'Local arxiv':'PACS'}><button className="embedded-close" onClick={()=>setRecordsPage(null)}>Viewer-ə qayıt ×</button>{recordsPage==='archive'?<ArchivePage embedded/>:<PacsPage embedded/>}</section>}
         {smartVolumeSource&&<SmartVolume key={smartVolumeSource.id} source={smartVolumeSource} sources={seriesList.filter(s=>['CT','MR'].includes(s.modality))} onSourceChange={s=>setSmartVolumeSource({id:s.id,imageIds:[...s.imageIds],modality:s.modality})} onClose={()=>setSmartVolumeSource(null)}/> }
         {anatomyLabel&&tool==='anatomy'&&<div className="anatomy-placement" role="status"><Crosshair size={18}/><span><strong>{anatomyLabel.text.split('\n')[0]}</strong> {tr('ui._pane_b5c88')}{anatomyLabel.panel}{tr('ui._click_the_structure_once_44e32')}</span><button onClick={()=>{setAnatomyLabel(null);setTool('wl');}}>{tr('ui.cancel_esc_bd665')}</button></div>}
-        {workspace === 'viewer' && <div className="viewport-grid" style={{ gridTemplateColumns: `repeat(${maximizedPane ? 1 : layout.columns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${maximizedPane ? 1 : layout.rows}, minmax(0, 1fr))` }}>
-          {Array.from({ length: layout.rows * layout.columns }, (_, index) => paneId(index)).filter(id => !maximizedPane || id === maximizedPane).map(id => { const otherImages = id !== active && assigned[active] && currentImages[active] ? [{ panel: active, imageId: currentImages[active] }] : []; return <ViewportPane onHover={()=>{syncSource.current=id;}} projectionViews={projectionViews} anatomyControl={anatomyVolume} anatomyVolume={volumeResultFor(seriesList.find(s=>s.id===assigned[id]))} anatomyVolumeVisible={anatomyVolume.visible} anatomyVolumeOpacity={anatomyVolume.opacity} anatomyLabel={anatomyLabel?.panel===id?anatomyLabel:null} windowLevels={windowLevels} key={`${id}-${datasetVersion}`} id={id} initialImageId={currentImages[id]} series={seriesList.find(s => s.id === assigned[id])} selected={active === id} tool={limited ? 'scroll' : tool} cursor={cursor} onCursor={onCursor} hideText={hideText} preset={preset} resetToken={resetToken} clearToken={clearToken} ready={ready} marks={marks} selectedMarkId={selectedMarkId} localizers={localizers && id !== active} otherImages={otherImages} onImageChange={onImageChange} onMoveSource={onMoveSource} onAddMark={onAddMark} onUpdateMark={onUpdateMark} onRemoveMark={onRemoveMark} onSelectMark={markId => { setActive(id); setSelectedMarkId(markId); }} onClearImage={onClearImage} onSelect={() => { setActive(id); setSelectedMarkId(null); }} onToggleMaximize={() => { setActive(id); setMaximizedPane(current => current === id ? null : id); }} onDropSeries={sid => place(sid, id, true)}/>; })}
+        {workspace === 'viewer' && !tabletVolumeId && <div className="viewport-grid" style={{ gridTemplateColumns: `repeat(${maximizedPane ? 1 : layout.columns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${maximizedPane ? 1 : layout.rows}, minmax(0, 1fr))` }}>
+          {Array.from({ length: layout.rows * layout.columns }, (_, index) => paneId(index)).filter(id => !maximizedPane || id === maximizedPane).map(id => { const otherImages = id !== active && assigned[active] && currentImages[active] ? [{ panel: active, imageId: currentImages[active] }] : []; return <ViewportPane onHover={()=>{syncSource.current=id;}} projectionViews={projectionViews} anatomyControl={anatomyVolume} anatomyVolume={volumeResultFor(seriesList.find(s=>s.id===assigned[id]))} anatomyVolumeVisible={anatomyVolume.visible} anatomyVolumeOpacity={anatomyVolume.opacity} anatomyLabel={anatomyLabel?.panel===id?anatomyLabel:null} windowLevels={windowLevels} tabletRecovery={tabletRecovery} key={`${id}-${datasetVersion}-${tabletRecovery?.generation||0}`} id={id} initialImageId={currentImages[id]} series={seriesList.find(s => s.id === assigned[id])} selected={active === id} tool={limited ? 'scroll' : tool} cursor={cursor} onCursor={onCursor} hideText={hideText} preset={preset} resetToken={resetToken} clearToken={clearToken} ready={ready} marks={marks} selectedMarkId={selectedMarkId} localizers={localizers && id !== active} otherImages={otherImages} onImageChange={onImageChange} onMoveSource={onMoveSource} onAddMark={onAddMark} onUpdateMark={onUpdateMark} onRemoveMark={onRemoveMark} onSelectMark={markId => { setActive(id); setSelectedMarkId(markId); }} onClearImage={onClearImage} onSelect={() => { setActive(id); setSelectedMarkId(null); }} onToggleMaximize={() => { setActive(id); setMaximizedPane(current => current === id ? null : id); }} onDropSeries={sid => place(sid, id, true)}/>; })}
         </div>}
         {workspace === 'mpr' && <>
           {mprError && <div className="mpr-error-notice" role="alert">{mprError}</div>}
@@ -1613,16 +1614,15 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
             {(inlinePlanes||(['SAG','COR','AX'] as const)).map(plane=>({plane,index:{SAG:0,COR:1,AX:2}[plane],id:{SAG:'MS',COR:'MC',AX:'MA'}[plane]})).map(({plane,index,id})=>{
               const shown=mprData?.planes[index] || (plane==='AX'?mprPreview:undefined);
               const progress=index===0 && !shown?.imageIds.length ? mprProgress || sourceLoading : null;
-              return <ViewportPane onHover={()=>{syncSource.current=id;}} projectionViews={projectionViews} anatomyControl={anatomyVolume} anatomyVolume={volumeResultFor(seriesList.find(s=>s.id===mprData?.sourceId))} anatomyVolumeVisible={anatomyVolume.visible} anatomyVolumeOpacity={anatomyVolume.opacity} windowLevels={windowLevels} windowingSourceId={mprData?.sourceId || mprPreview?.id} key={`${id}-${mprData?.sourceId || mprPreview?.id || 'waiting'}`} id={id} initialImageId={currentImages[id]} series={shown} loadingProgress={progress} reconstruction={mprSettings[plane]} viewAnchor={mprData?.pivot} expanded={maximizedMprPane===id} concealed={!!maximizedMprPane&&maximizedMprPane!==id} selected={mprActive===id} tool={limited?'scroll':tool} cursor={cursor} onCursor={onCursor} hideText={hideText} preset={preset} resetToken={resetToken} clearToken={clearToken} ready={ready} marks={marks} selectedMarkId={selectedMarkId} localizers={localizers}
+              return <ViewportPane onHover={()=>{syncSource.current=id;}} projectionViews={projectionViews} anatomyControl={anatomyVolume} anatomyVolume={volumeResultFor(seriesList.find(s=>s.id===mprData?.sourceId))} anatomyVolumeVisible={anatomyVolume.visible} anatomyVolumeOpacity={anatomyVolume.opacity} windowLevels={windowLevels} windowingSourceId={mprData?.sourceId || mprPreview?.id} tabletRecovery={tabletRecovery} key={`${id}-${mprData?.sourceId || mprPreview?.id || 'waiting'}-${tabletRecovery?.generation||0}`} id={id} initialImageId={currentImages[id]} series={shown} loadingProgress={progress} reconstruction={mprSettings[plane]} viewAnchor={mprData?.pivot} expanded={maximizedMprPane===id} concealed={!!maximizedMprPane&&maximizedMprPane!==id} selected={mprActive===id} tool={limited?'scroll':tool} cursor={cursor} onCursor={onCursor} hideText={hideText} preset={preset} resetToken={resetToken} clearToken={clearToken} ready={ready} marks={marks} selectedMarkId={selectedMarkId} localizers={localizers}
                 otherImages={(['MS','MC','MA']).filter(other=>other!==id).map(other=>({panel:other,imageId:currentImages[other] || ''})).filter(item=>item.imageId)}
                 onImageChange={onImageChange} onMoveSource={moveMprSource} onMoveIntersection={moveMprIntersection} onRotateSource={rotateMprSource} onRotateStart={beginMprRotation} onPreviewRotateSource={(source,target,radians)=>updateMprRotation(source,target,radians)}
                 onAddMark={onAddMark} onUpdateMark={onUpdateMark} onRemoveMark={onRemoveMark} onClearImage={onClearImage} onSelectMark={markId=>{setMprActive(id);setSelectedMarkId(markId);}} onSelect={()=>{setMprActive(id);setSelectedMarkId(null);}} onToggleMaximize={()=>{setMprActive(id);setMaximizedMprPane(current=>current===id?null:id);}} onDropSeries={sid=>place(sid,'A')}/>;
             })}
           </div>
         </>}
-        {workspace === '3d' && <VolumePreview focusPoint={anatomyFocus} anatomy={volumeResultFor(volumeSeries)} anatomyAppearance={anatomyVolume.appearance} series={volumeSeries} sourceProgress={sourceLoading} preset={volumePreset} threshold={volumeThreshold} opacity={volumeOpacity} settings={volumeSettings} resetToken={volumeResetToken} onThresholdChange={setVolumeThreshold} onOpacityChange={setVolumeOpacity} onSettingsChange={setVolumeSettings} />}
         <footer className="statusbar"><div><span className="viewer-version">v{releaseVersion}</span><span className="status-led"/> {ready ? 'Cornerstone3D hazırdır' : 'Görüntüləmə hazırlanır'} <span className="status-sep">/</span> <span>{workspace === 'mpr' ? `MPR · ${mprSettings[panePlane[mprActive as keyof typeof panePlane] || 'AX'].mode}` : workspace === '3d' ? '3D görünüş' : `Aktiv panel ${active}`}</span><span className="status-sep">/</span>{status}<span className="status-sep">/</span><span aria-label={tr('ui.licence_status_2eb16')}>{licenseStatus}</span></div></footer>
       </section>
     </div>
-  </main></ToolbarWorkspace>{tabletVolumeId&&<div className="tablet-volume-overlay" role="dialog" aria-modal="true" aria-label="3D həcm görüntüləmə"><SharedVolumeView series={seriesList.find(s=>s.id===tabletVolumeId)} anatomy={volumeResultFor(seriesList.find(s=>s.id===tabletVolumeId))} onClose={()=>{if(history.state?.radazTabletVolume)history.back();else setTabletVolumeId(null);}}/></div>}</>;
+  </main></ToolbarWorkspace>{desktopVolumeId&&<SmartDetachedWindow key={desktopVolumeId} windowRef={desktopVrWindow} title="RADAZ · 3D həcm görüntüləmə" onClose={()=>setDesktopVolumeId(null)}><SharedVolumeView series={seriesList.find(s=>s.id===desktopVolumeId)} anatomy={volumeResultFor(seriesList.find(s=>s.id===desktopVolumeId))} onClose={()=>setDesktopVolumeId(null)}/></SmartDetachedWindow>}{tabletVolumeId&&<div className="tablet-volume-overlay" role="dialog" aria-modal="true" aria-label="3D həcm görüntüləmə"><SharedVolumeView series={seriesList.find(s=>s.id===tabletVolumeId)} anatomy={volumeResultFor(seriesList.find(s=>s.id===tabletVolumeId))} onClose={closeTabletVolume}/></div>}</>;
 }

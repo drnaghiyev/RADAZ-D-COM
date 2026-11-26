@@ -10,6 +10,7 @@ p.add_argument('--output', type=Path, required=True)
 p.add_argument('--size', type=int, default=512)
 p.add_argument('--slices', type=int, default=128)
 p.add_argument('--oblique', action='store_true')
+p.add_argument('--plane-markers', action='store_true', help='Encode slice index in a small corner patch for 3D coverage tests.')
 a = p.parse_args(); a.output.mkdir(parents=True, exist_ok=True)
 y, x = np.mgrid[-1:1:complex(a.size), -1:1:complex(a.size)]
 for z in range(a.slices):
@@ -27,6 +28,9 @@ for z in range(a.slices):
     r = x*x+y*y+((z-a.slices/2)/a.slices)**2
     hu = np.where(r < .65, 40, -1000); hu = np.where((r > .38) & (r < .44), 1100, hu)
     hu = np.where((x*x+(y+.1)**2) < .035, 300, hu)
-    ds.PixelData = np.rint((hu+1024)/1.5).astype('<i2').tobytes()
+    pixels = np.rint((hu+1024)/1.5).astype('<i2')
+    if a.plane_markers:
+        pixels[:24, :24] = 128 + z
+    ds.PixelData = pixels.tobytes()
     ds.save_as(a.output/f'{z:04}.dcm', enforce_file_format=True)
 print(f'{a.slices} synthetic {a.size}x{a.size} slices: {a.output}')

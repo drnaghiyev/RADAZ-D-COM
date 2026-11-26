@@ -2,6 +2,9 @@
 (() => {
   'use strict';
   const call = (operation, value = '') => window.prompt('radaz-tablet/' + operation, value);
+  if (location.pathname === '/') {
+    window.addEventListener('radaz:volume-visible', event => call('volume', event.detail === true ? 'open' : 'closed'));
+  }
   const dockPreference = 'radaz-tablet-dock-columns';
   const applyDock = () => {
     document.documentElement.dataset.tabletColumns = localStorage.getItem(dockPreference) === '1' ? '1' : '2';
