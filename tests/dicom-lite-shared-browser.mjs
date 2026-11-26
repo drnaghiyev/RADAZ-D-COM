@@ -5,7 +5,8 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {deflateSync} from 'node:zlib';
-import {chromium} from '../outputs/browser-test-tools/node_modules/playwright/index.mjs';
+import {createRequire} from 'node:module';
+const {chromium}=createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE||'../outputs/browser-test-tools/node_modules/playwright');
 import {portableViewerHtml} from '../lib/dicom-lite-html.ts';
 test('CD Lite uses the main Viewer tools offline, with calibrated pixels and exclusive mouse actions',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'radaz-lite-shared-'));let browser;
@@ -20,6 +21,10 @@ test('CD Lite uses the main Viewer tools offline, with calibrated pixels and exc
   await page.goto(pathToFileURL(join(dir,'START.html')).href);
   try{await page.locator('[data-panel="LITE"][data-has-image="true"]').waitFor({timeout:20000});}catch(error){throw Error(JSON.stringify({errors,body:await page.locator('body').innerText()}));}
   const toolbar=page.getByRole('toolbar'),canvas=page.locator('.dicom-canvas');assert.ok(await toolbar.getByRole('button').count()>=17);
+  await toolbar.getByRole('button',{name:'Alət panelini fərdiləşdir'}).click();
+  await page.getByRole('dialog').getByRole('button',{name:/^Uzunluq.* əvvəl ayırıcı$/}).first().click();
+  await page.getByRole('dialog').getByRole('button',{name:'Təsdiq'}).click();
+  assert.equal(await toolbar.locator('[data-radaz-divider]').count(),1);
   await toolbar.getByRole('button',{name:/Uzunluq/}).click();const bounds=await canvas.boundingBox(),x=bounds.x+bounds.width*.5,y=bounds.y+bounds.height*.5;
   await page.mouse.move(x-70,y);await page.mouse.down();await page.mouse.move(x+70,y,{steps:6});await page.mouse.up();
   await page.waitForFunction(()=>!!document.querySelector('.dicom-canvas svg text'));assert.ok(await page.locator('.dicom-canvas svg text').count()>0);

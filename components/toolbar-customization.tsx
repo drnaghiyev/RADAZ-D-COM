@@ -2,13 +2,13 @@
 import {Children,Fragment,createContext,isValidElement,useContext,useEffect,useRef,useState,type ReactElement,type ReactNode} from 'react';
 import {createPortal} from 'react-dom';
 import {ArrowDown,ArrowUp,Columns2,RotateCcw,Settings2,X} from 'lucide-react';
-import type {Dock,Position,Tool} from '@/lib/toolbar-layout';
+import {ToolbarGrip} from './toolbar-grip';
+import {emptyLayout,placements,reorder,type Layout,type Legacy,type Dock,type Position,type Tool} from '@/lib/toolbar-layout';
 
 export type ToolHosts={top:HTMLElement|null;bottom:HTMLElement|null;right:HTMLElement|null;overflow:HTMLElement|null};
 export const FlatToolbarContext=createContext<{
   hosts:ToolHosts; overflow:Set<string>; tools:Record<string,Tool>; all:Record<string,Position>; dividers:string[];
-  register:(id:string,tool:Tool)=>()=>void;move:(id:string,dock:Dock,before?:string)=>void;
-  toggleDivider:(id:string)=>void;reset:()=>void;
+  register:(id:string,tool:Tool)=>()=>void;layout:Layout;apply:(value:Layout)=>void;legacy:Legacy;defaults:Legacy;
 }|null>(null);
 const Home=createContext({home:'',groupOrder:0,className:''});
 export const useToolbarHome=()=>useContext(Home).home;
@@ -54,27 +54,35 @@ export function PortableMenuItem({id,label,children,command}:{id?:string;label:s
   return home?<PortableItem id={home+'/menu:'+(id||label)} order={100} label={label} menu command={command}>{children}</PortableItem>:children;
 }
 const docks:Record<Dock,string>={top:'Üst panel',bottom:'İkinci sıra',right:'Sağ panel',menu:'Menyuda',pool:'Gizli'};
-const mime='application/x-radaz-toolbar-tool';
+
 export function ToolbarCustomizeButton(){
   const context=useContext(FlatToolbarContext),[open,setOpen]=useState(false);
   const trigger=useRef<HTMLButtonElement>(null);
+  const confirm=useRef<HTMLButtonElement>(null);
+  useEffect(()=>{if(open)confirm.current?.focus();},[open]);
+  const [draft,setDraft]=useState<Layout>(emptyLayout);
   if(!context)return null;
-  const {tools,all,move,dividers,toggleDivider,reset}=context;
+  const {tools}=context,all=placements(tools,draft,draft.ignoreLegacy?context.defaults:context.legacy);
+  const dividers=draft.dividers;
+  const move=(id:string,dock:Dock,before?:string)=>setDraft(reorder(draft,all,id,dock,before));
+  const toggleDivider=(id:string)=>setDraft({...draft,dividers:dividers.includes(id)?dividers.filter(k=>k!==id):[...dividers,id]});
+  const reset=()=>setDraft({...emptyLayout(),ignoreLegacy:true});
   const close=()=>{setOpen(false);trigger.current?.focus();};
-  return <><button type="button" ref={trigger} className="toolbar-customize-trigger" aria-label="Alət panelini fərdiləşdir" title="Alət panelini fərdiləşdir" onClick={()=>setOpen(true)}><Settings2/></button>
+  return <><button type="button" ref={trigger} className="toolbar-customize-trigger" aria-label="Alət panelini fərdiləşdir" title="Alət panelini fərdiləşdir" onClick={()=>{setDraft(context.layout);setOpen(true);}}><Settings2/></button>
     {open&&createPortal(<div className="toolbar-editor-backdrop" onClick={e=>{if(e.target===e.currentTarget)close();}}><section role="dialog" aria-modal="true" aria-label="Alət panelinin düzülüşü" className="toolbar-editor" onKeyDown={e=>{if(e.key==='Escape')close();}}>
-      <header><h2>Alət panelinin düzülüşü</h2><button type="button" onClick={close}>Təsdiq</button><button type="button" aria-label="Bağla" onClick={close}><X/></button></header>
+      <header><h2>Alət panelinin düzülüşü</h2><button type="button" ref={confirm} onClick={()=>{context.apply(draft);close();}}>Təsdiq</button><button type="button" aria-label="Bağla" onClick={close}><X/></button></header>
       <button type="button" className="toolbar-reset-flat" onClick={reset}><RotateCcw size={16}/> Standart düzülüşü bərpa et</button>
       {(Object.keys(docks) as Dock[]).map(dock=>{
         const peers=Object.keys(all).filter(id=>all[id].dock===dock).sort((a,b)=>all[a].order-all[b].order);
-        return peers.length>0&&<section key={dock} className="flat-toolbar-editor-zone"><h3>{docks[dock]}</h3>{peers.map((id,index)=>{
+        return <section key={dock} data-layout-zone={dock} className="flat-toolbar-editor-zone"><h3>{docks[dock]}</h3>{peers.map((id,index)=>{
           const item=tools[id],change=(next:Dock)=>move(id,next);
-          return <div key={id} className="toolbar-editor-item flat-toolbar-editor-item" draggable onDragStart={e=>{e.dataTransfer.setData(mime,id);e.dataTransfer.effectAllowed='move';}}
-              onDragOver={e=>{if(e.dataTransfer.types.includes(mime))e.preventDefault();}} onDrop={e=>{
-                const other=e.dataTransfer.getData(mime);
-                if(!tools[other]||(dock==='menu'&&!tools[other].menu)||(dock==='pool'&&tools[other].home==='toolbar-settings'))return;
-                e.preventDefault();move(other,dock,id);
-              }}>
+          return <div key={id} className="toolbar-editor-item flat-toolbar-editor-item" data-layout-id={id}>
+            <ToolbarGrip label={item.label} drop={(zone,target,after)=>{
+              const dest=zone as Dock;
+              if(target===id||!(dest in docks)||(dest==='menu'&&!item.menu)||(dest==='pool'&&item.home==='toolbar-settings'))return;
+              const list=Object.keys(all).filter(k=>k!==id&&all[k].dock===dest).sort((a,b)=>all[a].order-all[b].order);
+              move(id,dest,after&&target?list[list.indexOf(target)+1]:target);
+            }}/>
             <span>{item.label}</span><select aria-label={item.label+' yerləşməsi'} value={dock} onChange={e=>change(e.target.value as Dock)}>{(Object.keys(docks) as Dock[]).filter(key=>(key!=='menu'||item.menu)&&(key!=='pool'||item.home!=='toolbar-settings')).map(key=><option key={key} value={key}>{docks[key]}</option>)}</select>
             <button type="button" title="Əvvələ" aria-label={item.label+' əvvələ'} disabled={index===0||dock==='menu'} onClick={()=>move(id,dock,peers[index-1])}><ArrowUp/></button>
             <button type="button" title="Sonraya" aria-label={item.label+' sonraya'} disabled={index===peers.length-1||dock==='menu'} onClick={()=>move(id,dock,peers[index+2])}><ArrowDown/></button>

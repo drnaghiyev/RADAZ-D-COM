@@ -1,4 +1,5 @@
 'use client';
+import {ToolbarDividers} from './toolbar-dividers';
 import {useTranslation as useUiTranslation,translate as tr} from '@/lib/i18n';
 
 
@@ -59,17 +60,15 @@ export function ReportRichEditor({ html, onChange }: Props) {
       <select aria-label={tr('ui.font_size_ba51e')} value={size} onChange={event => { const next = Number(event.target.value); setSize(next); apply('fontSize', String(next)); }}>
         {reportSizes.map(item => <option key={item} value={item}>{item} pt</option>)}
       </select>
-      <span className="rich-divider"/>
       {([{ name: 'Qalın', command: 'bold', Icon: Bold }, { name: 'İtalik', command: 'italic', Icon: Italic },
         { name: 'Altıxətli', command: 'underline', Icon: Underline }] as const).map(({ name, command, Icon }) =>
         <button key={command} type="button" aria-label={name} title={name} onMouseDown={event => event.preventDefault()} onClick={() => apply(command)}><Icon size={16}/></button>)}
-      <span className="rich-divider"/>
       <button type="button" aria-label={tr('ui.align_left_0486f')} title={tr('ui.align_left_0486f')} onMouseDown={event => event.preventDefault()} onClick={() => apply('justifyLeft')}><AlignLeft size={16}/></button>
       <button type="button" aria-label={tr('ui.align_centre_0d1ef')} title={tr('ui.align_centre_0d1ef')} onMouseDown={event => event.preventDefault()} onClick={() => apply('justifyCenter')}><AlignCenter size={16}/></button>
       <button type="button" aria-label={tr('ui.align_right_1c707')} title={tr('ui.align_right_1c707')} onMouseDown={event => event.preventDefault()} onClick={() => apply('justifyRight')}><AlignRight size={16}/></button>
-      <span className="rich-divider"/>
       <button type="button" aria-label={tr('ui.bulleted_list_41fb0')} title={tr('ui.bulleted_list_41fb0')} onMouseDown={event => event.preventDefault()} onClick={() => apply('insertUnorderedList')}><List size={16}/></button>
       <button type="button" aria-label={tr('ui.numbered_list_15308')} title={tr('ui.numbered_list_15308')} onMouseDown={event => event.preventDefault()} onClick={() => apply('insertOrderedList')}><ListOrdered size={16}/></button>
+      <ToolbarDividers scope="rich-editor"/>
     </div>
     <div ref={editor} className="rich-content" role="textbox" aria-label={tr('ui.report_text_35f29')} aria-multiline="true" contentEditable suppressContentEditableWarning
       data-placeholder="Müayinə tapıntılarını və nəticəni daxil edin…" onInput={emit}

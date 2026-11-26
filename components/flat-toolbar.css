@@ -32,4 +32,9 @@ body .flat-toolbar-workspace .flat-toolbar-tool button>svg+svg {position:absolut
 .flat-toolbar-editor-item button {min-height:34px;display:grid;place-items:center}
 .flat-toolbar-editor-item button[aria-pressed=true] {background:#215c70}
 @media(max-width:540px){.toolbar-editor .flat-toolbar-editor-item{grid-template-columns:minmax(55px,1fr) 80px repeat(3,29px);gap:3px}}
+.toolbar-editor .flat-toolbar-editor-item{grid-template-columns:30px minmax(40px,1fr) minmax(65px,140px) repeat(3,32px)}
+.flat-toolbar-editor-zone{min-height:28px}
+body .flat-toolbar-workspace .flat-toolbar-strip .flat-toolbar-tool :is(button,a):not(.workspace-options){background:#1b2f3b!important;border:1px solid #344e5c!important;border-radius:4px!important;color:#e1edf2}
+body .flat-toolbar-workspace .flat-toolbar-strip .flat-toolbar-tool :is(button,a):is([aria-pressed=true],.active,.selected){background:#19596e!important;border-color:#49b8d3!important}
+body .flat-toolbar-workspace .flat-toolbar-strip .flat-toolbar-tool :is(button,a):hover{border-color:#6198ac!important}
 [data-radix-popper-content-wrapper]:has([data-toolbar-menu][data-state="open"]) {z-index:160!important}

@@ -3,7 +3,7 @@ import {useCallback,useEffect,useMemo,useRef,useState,type HTMLAttributes,type R
 import {createPortal} from 'react-dom';
 import {MoreHorizontal} from 'lucide-react';
 import {FlatToolbarContext,ToolbarCustomizeButton,ToolSource} from './toolbar-customization';
-import {emptyLayout,placements,readLayouts,reorder,type Dock,type Legacy,type Tool} from '@/lib/toolbar-layout';
+import {emptyLayout,placements,readLayouts,type Dock,type Legacy,type Tool} from '@/lib/toolbar-layout';
 import './flat-toolbar.css';
 
 const noLegacy:Legacy={items:{},groups:{}};
@@ -31,7 +31,7 @@ export function ToolbarWorkspace({scope,children}:{scope:string;children:ReactNo
     return ()=>setTools(prev=>{const next={...prev};delete next[id];return next;});
   },[]);
   const all=useMemo(()=>placements(tools,layout,layout.ignoreLegacy?defaults:legacy),[tools,layout,legacy,defaults]);
-  const move=(id:string,dock:Dock,before?:string)=>setLayout(current=>reorder(current,all,id,dock,before));
+
   const hasRight=Object.values(all).some(item=>item.dock==='right'),twoRows=Object.values(all).some(item=>item.dock==='bottom');
   useEffect(()=>{
     if(!header||!top||!popup)return;
@@ -79,9 +79,7 @@ export function ToolbarWorkspace({scope,children}:{scope:string;children:ReactNo
     doc.addEventListener('pointerdown',close);doc.addEventListener('keydown',key);
     return ()=>{doc.removeEventListener('pointerdown',close);doc.removeEventListener('keydown',key);};
   },[open,header,popup]);
-  return <FlatToolbarContext.Provider value={{hosts:{top,bottom,right,overflow:popup},overflow:new Set(overflow),tools,all,dividers:layout.dividers,register,move,
-    toggleDivider:id=>setLayout(s=>({...s,dividers:s.dividers.includes(id)?s.dividers.filter(k=>k!==id):[...s.dividers,id]})),
-    reset:()=>setLayout({...emptyLayout(),ignoreLegacy:true})}}>
+  return <FlatToolbarContext.Provider value={{hosts:{top,bottom,right,overflow:popup},overflow:new Set(overflow),tools,all,dividers:layout.dividers,register,layout,apply:setLayout,legacy,defaults}}>
     <div ref={root} className={'toolbar-workspace flat-toolbar-workspace'+(hasRight?' has-right-dock':'')} data-toolbar-scope={scope} data-toolbar-rows={twoRows?2:1}>
       {children}
       {header&&createPortal(<>
