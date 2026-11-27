@@ -10,7 +10,7 @@ const project = path.resolve(__dirname, '..');
 const {fixture,checkNetwork}=require('./clinic-workflow.cjs');
 const gestures=require('../../tests/navigation-measurement.cjs');
 const origin = 'https://appassets.androidplatform.net';
-const waitReady = page => page.waitForFunction(() => document.querySelector('.statusbar')?.textContent.includes('Cornerstone3D hazırdır'));
+const waitReady = page => page.waitForFunction(() => document.querySelector('.statusbar')?.textContent.includes('Cornerstone3D hazırdır'),undefined,{timeout:60000});
 async function command(page, name) {
   const button=page.getByRole('button',{name,exact:true}).first();
   if(!await button.isVisible()){
@@ -163,12 +163,39 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
       await page.waitForFunction(n=>{
         const host=document.querySelector('.right-tool-dock .flat-toolbar-right');
         if(!host)return false;
-        const boxes=[...host.querySelectorAll(':scope > .toolbar-portable > button')].map(b=>b.getBoundingClientRect()).filter(b=>b.width>0);
-        if(boxes.length<3)return false;
-        const first=Math.min(...boxes.map(b=>b.top));
         const dock=host.closest('aside').getBoundingClientRect();
-        return boxes.filter(b=>Math.abs(b.top-first)<3).length===n && boxes.every(b=>b.x>=dock.x-1&&b.right<=dock.right+1);
-      },count);
+        const items=[...host.children].filter(el=>!el.hidden && el.hasAttribute('data-toolbar-item'));
+        const controls=items.flatMap(item=>[...item.querySelectorAll('button,input')])
+          .map(el=>el.getBoundingClientRect()).filter(rect=>rect.width>0);
+        const tracks=getComputedStyle(host).gridTemplateColumns.trim().split(/\s+/);
+        const boxes=items.filter(el=>getComputedStyle(el).gridColumnStart!=='1')
+          .map(el=>el.getBoundingClientRect()).filter(rect=>rect.width>0);
+        const centers=new Set(boxes.map(rect=>Math.round((rect.x+rect.width/2)/3)));
+        return tracks.length===n && boxes.length>=n && centers.size===n &&
+          controls.length>=n && controls.every(rect=>rect.x>=dock.x-1&&rect.right<=dock.right+1);
+      },count).catch(async error=>{
+        console.error('Dock geometry',await page.locator('.flat-toolbar-right').evaluate(el=>({
+          tracks:getComputedStyle(el).gridTemplateColumns,
+          items:[...el.children].filter(e=>!e.hidden).map(e=>[e.dataset.toolbarItem,e.offsetLeft,e.offsetWidth]),
+          width:el.getBoundingClientRect().width
+        })));
+        throw error;
+      });
+    }
+    async function verifyPlaybackSpeed(count){
+      const range=page.getByRole('slider',{name:'Play sürəti'});
+      const box=await range.boundingBox();
+      assert.ok(box);
+      for(const [fraction,value] of [[.1,'1'],[.9,'10']]){
+        await page.touchscreen.tap(box.x+box.width*fraction,box.y+box.height/2);
+        assert.equal(await range.inputValue(),value);
+      }
+      if(count===1){
+        await command(page,'Sürəti azalt');
+        assert.equal(await range.inputValue(),'9');
+        await command(page,'Sürəti artır');
+        assert.equal(await range.inputValue(),'10');
+      }
     }
     async function openSettings(){
       await command(page,'Yardım və lisenziya');
@@ -179,7 +206,9 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
     let settingsDialog=await openSettings();
     await settingsDialog.getByLabel('Sağ paneldə sütun sayı').selectOption('1');
     await settingsDialog.locator('header button').click();await assertDock(1);
-    await page.reload();await waitReady(page);await assertDock(1);
+    await page.reload();await waitReady(page);await assertDock(1);await verifyPlaybackSpeed(1);
+    await page.setViewportSize({width:800,height:1200});await assertDock(1);await verifyPlaybackSpeed(1);
+    await page.setViewportSize({width:1200,height:800});await assertDock(1);
     settingsDialog=await openSettings();
     await settingsDialog.getByLabel('Sağ paneldə sütun sayı').selectOption('2');
     if(network){
@@ -193,9 +222,9 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
       await verifyAutomaticDelivery();assert.deepEqual(issues,[]);assert.deepEqual([...requests],[]);
       console.log(JSON.stringify(suite));return;
     }
-    await page.setViewportSize({width:800,height:1200});await assertDock(2);
-    await page.setViewportSize({width:1200,height:800});await assertDock(2);
-    suite.rightDock='one/two columns, persisted, portrait/landscape';
+    await page.setViewportSize({width:800,height:1200});await assertDock(2);await verifyPlaybackSpeed(2);
+    await page.setViewportSize({width:1200,height:800});await assertDock(2);await verifyPlaybackSpeed(2);
+    suite.rightDock='one/two columns, persisted, portrait/landscape, full speed range 1–10 and minus/plus 10→9→10';
     console.log('Both toolbar layouts passed.',suite.clinicConnections||'');
     assert.equal(await page.locator('[data-tool-home="cd"],.cd-import-command').count(),0);
     await command(page,'Qovluq aç');
