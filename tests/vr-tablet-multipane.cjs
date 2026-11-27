@@ -73,6 +73,7 @@ async function verifyTabletMultiPaneReturn(home, sources) {
   await require('./vr-tablet-return.cjs').discardCoveredCanvas(home,true);
   await home.evaluate(() => { window.testDenyNewGL = true; window.testDeniedContexts = 0; });
   await child.close();await home.bringToFront();
+  await home.waitForFunction(()=>window.testDeniedContexts>0 && window.testStackHash()?.lit>100);
   for (const pane of before) {
     await home.waitForFunction(expected=>{
       const returned=document.querySelector('[data-panel="'+expected.panel+'"]');

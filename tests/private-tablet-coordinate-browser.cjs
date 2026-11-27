@@ -27,8 +27,9 @@ withTablet(async({ctx,p,pane,errors})=>{
  await p.getByRole('button',{name:'3D həcm görüntüləmə',exact:true}).first().click();
  const volume=await opening;await volume.locator('.vr-raster[data-ready=true]').waitFor();
  await require('./vr-tablet-return.cjs').discardCoveredCanvas(p,true);
- await p.evaluate(()=>{window.testDenyNewGL=true;});await volume.close();await p.bringToFront();
+ await p.evaluate(()=>{window.testDeniedContexts=0;window.testDenyNewGL=true;});await volume.close();await p.bringToFront();
  await p.locator('.radaz-vr').waitFor({state:'detached'});await pane.locator('.bottom-right').filter({hasText:'/ 24'}).waitFor();await frame(p);
+ await p.waitForFunction(()=>window.testDeniedContexts>0 && window.testStackHash()?.lit>0);
  await anchor(p,'returned CPU');assert.ok(await count()>=initial,'annotations restored');
  async function pair(scale,dx,dy){const box=await canvas.boundingBox(),x=box.x+box.width/2,y=box.y+box.height/2;
  const send=(type,pts)=>cdp.send('Input.dispatchTouchEvent',{type,touchPoints:pts});
