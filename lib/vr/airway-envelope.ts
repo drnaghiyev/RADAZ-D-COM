@@ -12,9 +12,13 @@ export function airwayBodyRows(values: Float32Array, dimensions: readonly number
   for (let z = 0; z < slices; z++) {
     const base = z * width * height;
     for (let y = 0; y < rows; y++) {
+      const top = base + y * step * width, bottom = base + Math.min(height - 1, (y + 1) * step - 1) * width;
       const row = base + Math.min(height - 1, y * step + center) * width;
       for (let x = 0; x < cols; x++) {
-        labels[y * cols + x] = values[row + Math.min(width - 1, x * step + center)] > -450 ? -1 : 0;
+        const x0 = x * step, x1 = Math.min(width - 1, (x + 1) * step - 1);
+        const tissue = values[row + Math.min(width - 1, x0 + center)] > -450 ||
+          values[top + x0] > -450 || values[top + x1] > -450 || values[bottom + x0] > -450 || values[bottom + x1] > -450;
+        labels[y * cols + x] = tissue ? -1 : 0;
       }
     }
     let best = 0, bestArea = 0;
@@ -45,15 +49,22 @@ export function airwayBodyRows(values: Float32Array, dimensions: readonly number
       for (let i = 0; i < labels.length; i++) {
         if (labels[i] !== best) continue;
         const y = Math.floor(i / cols), x = (i % cols) * step;
-        left[y] = Math.min(left[y], x + center);
-        right[y] = Math.max(right[y], Math.min(width, x + center + 1));
+        left[y] = Math.min(left[y], x);
+        right[y] = Math.max(right[y], Math.min(width, x + step));
       }
     }
     for (let y = 0; y < height; y++) {
       const i = 2 * (z * height + y), row = Math.floor(y / step);
       // Unsure about this slice: leave it intact.
-      bounds[i] = best ? left[row] : 0;
-      bounds[i + 1] = best ? right[row] : width;
+      let x0 = best ? left[row] : 0, x1 = best ? right[row] : width;
+      if (best && x0 < x1) {
+        // Snap the full-resolution row to the actual skin. A coarse cell may straddle air.
+        const at = base + y * width;
+        while (x0 < x1 && !(values[at + x0] > -450)) x0++;
+        while (x1 > x0 && !(values[at + x1 - 1] > -450)) x1--;
+      }
+      bounds[i] = x0;
+      bounds[i + 1] = x1;
     }
   }
   return bounds;
