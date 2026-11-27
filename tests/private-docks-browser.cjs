@@ -8,6 +8,11 @@ try{for(const touch of [false,true]){
  const p=await ctx.newPage();p.setDefaultTimeout(9000);const err=[];p.on('pageerror',e=>err.push(e.message));
  await p.goto(url);const top=p.locator('.flat-toolbar-top'),right=p.locator('.flat-toolbar-right');
  await top.locator('[data-toolbar-item]').first().waitFor();await p.waitForTimeout(500);
+ const arrow=p.getByRole('button',{name:'MPR açılış seçimləri',exact:true}).first();
+ const width=await arrow.evaluate(b=>b.closest('.workspace-split').getBoundingClientRect().width);
+ const commandWidth=await p.locator('button.view-tool:visible').first().evaluate(b=>b.getBoundingClientRect().width);
+ assert.ok(Math.abs(width-commandWidth)<=2,'split cell '+width+' vs single '+commandWidth);
+ await arrow.click();await p.getByRole('menu').first().waitFor();await p.keyboard.press('Escape');
  const n=()=>top.locator('[data-toolbar-item]:visible').count(),before=await n();
  await p.setViewportSize({width:750,height:850});await p.waitForTimeout(450);const narrow=await n();
  assert.ok(narrow<before,'fewer top buttons on narrow display');assert.ok(await right.locator('[data-tool-dock=top]').count()>0);

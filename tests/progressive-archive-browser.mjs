@@ -51,4 +51,9 @@ try{
  {name:'bad.dcm',mimeType:'application/dicom',buffer:broken},{name:'good.dcm',mimeType:'application/dicom',buffer:files[0].body}]);
  await fresh.waitForFunction(()=>document.querySelector('[data-panel="A"][data-has-image="true"]')&&!document.querySelector('.statusbar .status-job-progress progress'),null,{timeout:30000});
  assert.equal(await fresh.locator('.series-card').count(),1);console.log('PASS damaged leading file does not replace the valid imported image');
+ async function transfer(progress,error){await fresh.evaluate(({progress,error})=>{const channel=new BroadcastChannel('radaz-viewer-open-v2');channel.postMessage({kind:'PROGRESS',target:window.name,progress,error});channel.close();},{progress,error});}
+ await transfer({done:3,total:8,label:'PACS QA'});const status=fresh.locator('.statusbar .status-job-progress');await status.filter({hasText:'37%'}).waitFor();
+ assert.match(await status.innerText(),/3 \/ 8/);assert.equal(await fresh.locator('.series-rail progress').count(),0);
+ await transfer(null,'PACS QA interrupted');await status.waitFor({state:'detached'});await fresh.locator('.statusbar').filter({hasText:'PACS QA interrupted'}).waitFor();
+ console.log('PASS PACS progress and error in status bar, no false completion');
 }finally{resume();resumeOther();await browser.close();}
