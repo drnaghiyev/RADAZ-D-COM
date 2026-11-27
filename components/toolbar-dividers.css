@@ -27,3 +27,5 @@ body .output-page-header .output-page-nav { border:none; box-shadow:none; backgr
 .toolbar-dividers-trigger {order:2147483646;}
 
 @media print { .toolbar-dividers-menu, .toolbar-dividers-trigger {display:none!important;} }
+
+[data-direct-item]{touch-action:none}[data-direct-strip][data-dragging-tools] [data-moving]{outline:2px solid #47c9dd}

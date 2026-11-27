@@ -39,7 +39,7 @@ body .flat-toolbar-workspace .flat-toolbar-strip .flat-toolbar-tool :is(button,a
 body .flat-toolbar-workspace .flat-toolbar-strip .flat-toolbar-tool :is(button,a):hover{border-color:#6198ac!important}
 [data-radix-popper-content-wrapper]:has([data-toolbar-menu][data-state="open"]) {z-index:160!important}
 
-.flat-toolbar-workspace [data-toolbar-item], [data-direct-item] {touch-action:manipulation}
+.flat-toolbar-workspace [data-toolbar-item], [data-direct-item] {touch-action:none}
 .flat-toolbar-workspace[data-dragging-tools] .right-tool-dock {display:block!important;min-height:70px;border:1px dashed #47c9dd}
 .flat-toolbar-workspace[data-dragging-tools] .flat-toolbar-right {min-height:100%}
 [data-moving=true]{outline:2px solid #47c9dd!important;opacity:.72}
@@ -67,3 +67,5 @@ body .flat-toolbar-workspace .flat-toolbar-tool :is(.workspace-options,.tablet-i
 .workstation .series-list .patient-group-heading{position:sticky;top:0;z-index:2;background:#142532}
 html:not([data-tablet-columns]) .workstation .series-rail .rail-heading{display:none}
 @media(max-width:800px){.workstation .statusbar:has(.status-job-progress){flex-wrap:wrap;height:auto}.status-job-progress small{display:none}}
+
+.viewport-grid.maximized{position:relative}.viewport-grid.maximized>.viewport[data-expanded=true]{position:absolute;inset:0;z-index:20}.viewport-grid.maximized>.viewport[aria-hidden=true]{visibility:hidden;pointer-events:none}

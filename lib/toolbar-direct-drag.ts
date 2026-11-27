@@ -2,11 +2,12 @@ type Drop=(item:HTMLElement,zone:HTMLElement,target:HTMLElement|null,after:boole
 export function bindToolbarDrag(root:HTMLElement, itemSelector:string, zoneSelector:string, drop:Drop) {
   const doc=root.ownerDocument, win=doc.defaultView!;
   let active:HTMLElement|null=null, target:HTMLElement|null=null,zone:HTMLElement|null=null;
+  let scrolling:HTMLElement|null=null, lastY=0;
   let source:HTMLElement|null=null, id=-1,x=0,y=0,timer=0,after=false,blockUntil=0;
   const clear=()=>{
     win.clearTimeout(timer);active?.removeAttribute('data-moving');target?.removeAttribute('data-drop-edge');
     if(active){root.removeAttribute('data-dragging-tools');if(active.hasPointerCapture(id))active.releasePointerCapture(id);}
-    active=source=target=zone=null;id=-1;
+    scrolling=null;active=source=target=zone=null;id=-1;
   };
   const arm=()=>{if(!source?.isConnected)return;active=source;active.dataset.moving='true';root.dataset.draggingTools='true';
     try{active.setPointerCapture(id);}catch{clear();}};
@@ -20,8 +21,13 @@ export function bindToolbarDrag(root:HTMLElement, itemSelector:string, zoneSelec
   };
   const move=(e:PointerEvent)=>{
     if(!source||id!==e.pointerId)return;
+    if(scrolling){scrolling.scrollTop+=lastY-e.clientY;lastY=e.clientY;return;}
     if(!active && Math.hypot(e.clientX-x,e.clientY-y)>6){
-      if(e.pointerType==='mouse')arm();else {clear();return;}
+      if(e.pointerType==='mouse')arm();else {
+        win.clearTimeout(timer);scrolling=source.closest<HTMLElement>('.right-tool-dock');
+        if(scrolling){lastY=e.clientY;scrolling.scrollTop+=y-e.clientY;}else clear();
+        return;
+      }
     }
     if(!active)return;
     e.preventDefault();e.stopImmediatePropagation();
@@ -34,6 +40,7 @@ export function bindToolbarDrag(root:HTMLElement, itemSelector:string, zoneSelec
     if(zone?.classList.contains('flat-toolbar-right')){const rail=zone.parentElement!,r=rail.getBoundingClientRect();if(e.clientY<r.top+25)rail.scrollTop-=14;else if(e.clientY>r.bottom-25)rail.scrollTop+=14;}
   };
   const up=(e:PointerEvent)=>{if(e.pointerId!==id)return;
+    if(scrolling)blockUntil=performance.now()+450;
     if(active){move(e);blockUntil=performance.now()+450;e.preventDefault();e.stopImmediatePropagation();
       if(active&&zone&&target!==active)drop(active,zone,target,after);}
     clear();
