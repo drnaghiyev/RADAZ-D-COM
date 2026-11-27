@@ -70,6 +70,7 @@ async function verifyTabletMultiPaneReturn(home, sources) {
   const child=await opening;
   const volume = child.locator('.radaz-vr');
   await volume.locator('.vr-raster[data-ready=true]').waitFor();
+  await require('./vr-tablet-return.cjs').discardCoveredCanvas(home,true);
   await home.evaluate(() => { window.testDenyNewGL = true; window.testDeniedContexts = 0; });
   await child.close();await home.bringToFront();
   for (const pane of before) {
@@ -88,4 +89,4 @@ async function verifyTabletMultiPaneReturn(home, sources) {
   console.log('PASS denied WebGL after 3D on the second of four series: both 2D panes recovered', after);
 }
 
-module.exports = { verifyTabletMultiPaneReturn };
+module.exports = { verifyTabletMultiPaneReturn, syntheticSeriesFile };

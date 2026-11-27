@@ -26,6 +26,7 @@ withTablet(async({ctx,p,pane,errors})=>{
  const opening=p.waitForEvent('popup');
  await p.getByRole('button',{name:'3D həcm görüntüləmə',exact:true}).first().click();
  const volume=await opening;await volume.locator('.vr-raster[data-ready=true]').waitFor();
+ await require('./vr-tablet-return.cjs').discardCoveredCanvas(p,true);
  await p.evaluate(()=>{window.testDenyNewGL=true;});await volume.close();await p.bringToFront();
  await p.locator('.radaz-vr').waitFor({state:'detached'});await pane.locator('.bottom-right').filter({hasText:'/ 24'}).waitFor();await frame(p);
  await anchor(p,'returned CPU');assert.ok(await count()>=initial,'annotations restored');

@@ -49,8 +49,8 @@ async function verifyVrControls({home,view,vr,stage,tablet,context}){
   for(let cycle=0;cycle<4;cycle++){
     await vr.locator('.vr-raster[data-ready="true"]').waitFor();
 
-    const lost=process.env.VR_TABLET_RETURN_TEST && await require('./vr-tablet-return.cjs').discardCoveredCanvas(home,cycle===2);
     const denied=process.env.VR_TABLET_GPU_DENIAL && cycle===3;
+    const lost=process.env.VR_TABLET_RETURN_TEST && await require('./vr-tablet-return.cjs').discardCoveredCanvas(home,cycle===2||!!denied);
     if(denied)await home.evaluate(()=>{window.testDeniedContexts=0;window.testDenyNewGL=true;});
     const start=Date.now();
     await view.close();await home.bringToFront();

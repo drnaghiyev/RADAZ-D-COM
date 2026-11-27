@@ -227,7 +227,7 @@ public final class ViewerActivity extends Activity {
         if(web==home || !windows.contains(web) || !closing.add(web))return;
         if(web==archiveWindow || web==pacsWindow){close(web);return;}
         // Browser-created windows must invalidate the opener's WindowProxy as well.
-        web.evaluateJavascript("window.close()",null);
+        web.evaluateJavascript("if(window.dispatchEvent(new Event('radaz:request-child-close',{cancelable:true})))window.close()",null);
         updateTimer.postDelayed(()->{if(closing.contains(web))close(web);},450);
     }
     private void close(WebView web) {

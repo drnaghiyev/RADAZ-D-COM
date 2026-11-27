@@ -43,9 +43,10 @@ async function rememberTabletFrame(home){
 async function discardCoveredCanvas(home,loseContext){
   return home.evaluate(lose=>{
     const canvas=window.testLastStackCanvas,gl=window.testStackOffscreen?.getContext('webgl2');
-    if(!canvas || canvas.isConnected)throw Error('The 2D stack still occupies the 3D workspace.');
+    if(!canvas?.isConnected)throw Error('3D detached the active 2D stack.');
     if(!gl)throw Error('Missing the independent stack WebGL context');
-    canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);
+    if(lose)canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);
+    window.testForcedLoss=lose;
     window.testOldStackGpu=gl;window.testOldStackCanvas=canvas;
     if(lose && !gl.isContextLost())gl.getExtension('WEBGL_lose_context').loseContext();
     return lose;
@@ -60,8 +61,8 @@ async function checkTabletReturn(home,checkScroll,denied=false){
     await home.waitForFunction(()=>window.testStackHash()?.hash===window.testOriginalFrame.hash,{}, {timeout:12000});
     assert.ok(await home.evaluate(()=>{
       const gl=window.testStackOffscreen?.getContext('webgl2');
-      return gl && gl!==window.testOldStackGpu && !gl.isContextLost() && window.testOldStackCanvas!==window.testLastStackCanvas;
-    }),'a newly created stack renderer drew the actual 2D frame');
+      return gl && !gl.isContextLost() && (window.testForcedLoss?gl!==window.testOldStackGpu:gl===window.testOldStackGpu) && (window.testForcedLoss?window.testOldStackCanvas!==window.testLastStackCanvas:window.testOldStackCanvas===window.testLastStackCanvas);
+    }),'retains the visible stack normally and recreates it only after genuine GPU loss');
   }
   const panel=home.locator('[data-panel="A"]');
   const expected=await home.evaluate(()=>window.testOriginalFrame);

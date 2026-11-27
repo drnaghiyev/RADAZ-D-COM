@@ -103,11 +103,13 @@ function trimDiskPixels(keep: string) {
 const sourceScope = crypto.randomUUID();
 const borrowedKeys = new Map<string,string>();
 const borrowedLoads = new Map<string,()=>Promise<void>>();
-export type SharedDicom = {key:string;record:RecordItem;resolve:()=>Promise<RecordItem>};
+const borrowedPlanes = new Map<string,(signal:AbortSignal)=>Promise<RecordItem>>();
+export type SharedDicom = {key:string;record:RecordItem;resolve:()=>Promise<RecordItem>;readPlane?:(signal:AbortSignal)=>Promise<RecordItem>};
 
 /** Same-origin child tabs borrow calibrated buffers, without cloning bytes or decoding again. */
-export function shareLocalDicoms(imageIds:string[]):SharedDicom[] {
-  return imageIds.map(id=>({key:`${sourceScope}/${id}`,record:records.get(id)!,resolve:async()=>{
+export function shareLocalDicoms(imageIds:string[],volumeOnly=false):SharedDicom[] {
+  return imageIds.map(id=>({key:`${sourceScope}/${id}`,record:records.get(id)!,
+    readPlane:volumeOnly?(signal:AbortSignal)=>readDisplayPlane(id,signal):undefined,resolve:async()=>{
     await decodeRegisteredDicom(id);
     const record=records.get(id);if(!record)throw Error('Mənbə müayinə artıq bağlıdır');return record;
   }}));
@@ -121,6 +123,7 @@ export function borrowLocalDicoms(images:SharedDicom[]):string[] {
     if(existing&&records.has(existing))return existing;
     const id=`localdicom:${serial++}`;borrowedKeys.set(image.key,id);records.set(id,localRecord(image.record));
     const source={used:performance.now(),promise:undefined as Promise<void>|undefined},resolve=image.resolve;
+    if(image.readPlane)borrowedPlanes.set(id,image.readPlane);
     borrowedUse.set(id,source);
     borrowedLoads.set(id,()=>source.promise??=(async()=>{
       try {
@@ -534,6 +537,7 @@ export function releaseLocalDicoms(imageIds: string[]) {
     pendingDicoms.delete(imageId);
     diskDicoms.delete(imageId);
     borrowedLoads.delete(imageId);
+    borrowedPlanes.delete(imageId);
     borrowedUse.delete(imageId);
     records.delete(imageId);
     if (core.cache.getImageLoadObject(imageId)) core.cache.removeImageLoadObject(imageId, { force: true });
@@ -558,6 +562,8 @@ async function readDisplayPlane(id:string,signal:AbortSignal):Promise<RecordItem
   const record=records.get(id);
   if(!record)throw Error('Seriya bağlanıb.');
   if(record.pixels.length)return record;
+  const readBorrowed=borrowedPlanes.get(id);
+  if(readBorrowed)return readBorrowed(signal);
   const pending=pendingDicoms.get(id), disk=diskDicoms.get(id);
   if(!pending&&!disk){
     await borrowedLoads.get(id)?.();

@@ -36,6 +36,8 @@ export function captureTabletStacks(onReturn:(recovery:TabletStackRecovery)=>voi
   }
   let done=false;
   return {
+    hasLostContext(){return engine.hasBeenDestroyed || [...contexts].some(gl=>gl.isContextLost());},
+    repaint(){if(!engine.hasBeenDestroyed)engine.render();},
     suspend(){
       // Pane cleanup has detached the renderers before this passive effect runs.
       if(done || engine.hasBeenDestroyed || engine.getViewports().length)return;

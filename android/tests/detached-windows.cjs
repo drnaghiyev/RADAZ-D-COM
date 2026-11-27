@@ -67,7 +67,7 @@ withTablet(async ({ctx, p, pane, errors}) => {
   };
   const first=await openVolume();
   const token=new URL(first.url()).searchParams.get('handoff');
-  await p.waitForFunction(()=>!document.querySelector('[data-panel=A]'));
+  await p.waitForFunction(()=>document.querySelector('[data-panel=A] .dicom-canvas canvas')?.isConnected);
   await p.evaluate(t=>dispatchEvent(new CustomEvent('radaz:child-closed',{detail:t})),token);
   await pane.locator('.bottom-right').filter({hasText:'/ 24'}).waitFor();
   const second=await openVolume();

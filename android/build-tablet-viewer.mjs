@@ -9,7 +9,7 @@ const project = path.dirname(fileURLToPath(import.meta.url));
 const checkout = path.resolve(process.argv[2]);
 const destination = path.resolve(process.argv[3]);
 const commit = execFileSync('git',['rev-parse','--verify','HEAD'],{cwd:checkout,encoding:'utf8'}).trim();
-const components = ['tablet-layout.tsx','tablet-layout.css','tablet-inbox.ts'];
+const components = ['tablet-layout.tsx','tablet-layout.css','tablet-inbox.ts','tablet-volume-window.tsx'];
 const inputs = ['viewer.patch','archive-incoming.ts',...components];
 const digest = createHash('sha256').update(commit).update(readFileSync(fileURLToPath(import.meta.url)));
 for (const input of inputs) digest.update(readFileSync(path.join(project,input)));
