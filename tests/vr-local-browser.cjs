@@ -89,6 +89,10 @@ const origin=tablet?'https://appassets.androidplatform.net':base;
   const initial=Date.now()-t;console.log('OPEN',initial,'ms',await vr.getAttribute('data-backend'),files.length);
   let raster=vr.locator('.vr-raster'),stage=vr.locator('.vr-stage');await raster.screenshot({path:path.join(resultDir,(tablet?'tablet':'desktop')+'-volume.png')});
   const b=await stage.boundingBox(),x=b.x+b.width*.45,y=b.y+b.height*.48,drag=async(dx,dy)=>{await view.mouse.move(x,y);await view.mouse.down();await view.mouse.move(x+dx,y+dy,{steps:4});await view.mouse.up();};
+  if(process.env.VR_AIRWAY_TEST){
+    await require('./vr-airway-browser.cjs').verifyAirway({view,vr,raster,drag,tablet,resultDir});
+    assert.deepEqual(errs,[]);return;
+  }
   if(process.env.VR_CONTROLS_TEST){
     view=await require('./vr-controls.cjs').verifyVrControls({home,view,vr,stage,tablet,context});
     vr=view.locator('.radaz-vr');raster=vr.locator('.vr-raster');stage=vr.locator('.vr-stage');

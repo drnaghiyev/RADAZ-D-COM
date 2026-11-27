@@ -9,6 +9,7 @@ p = argparse.ArgumentParser()
 p.add_argument('--output', type=Path, required=True)
 p.add_argument('--size', type=int, default=512)
 p.add_argument('--slices', type=int, default=128)
+p.add_argument('--airway', action='store_true', help='Chest phantom with bronchi, lung and external objects.')
 p.add_argument('--oblique', action='store_true')
 p.add_argument('--plane-markers', action='store_true', help='Encode slice index in a small corner patch for 3D coverage tests.')
 a = p.parse_args(); a.output.mkdir(parents=True, exist_ok=True)
@@ -28,6 +29,16 @@ for z in range(a.slices):
     r = x*x+y*y+((z-a.slices/2)/a.slices)**2
     hu = np.where(r < .65, 40, -1000); hu = np.where((r > .38) & (r < .44), 1100, hu)
     hu = np.where((x*x+(y+.1)**2) < .035, 300, hu)
+    if a.airway:
+        zz=(z-a.slices/2)/a.slices
+        body=(x/.78)**2+((y+.04)/.62)**2 < 1
+        hu=np.where(body,40,-1024)
+        lungs=(((abs(x)-.335)/.345)**2+((y+.04)/.42)**2+(zz/.59)**2 < 1)
+        hu=np.where(lungs,-906,hu)
+        bronchus=(abs(x)-max(0, .11-zz)*.6)**2+(y+.04)**2 < .08**2
+        hu=np.where(bronchus,-968,hu)
+        hu=np.where((y>.80)&(y<.86)&(abs(x)<.94),-906,hu)
+        hu=np.where((x<-.68)&(x>-.84)&(y<-.55)&(y>-.63),-941,hu)
     pixels = np.rint((hu+1024)/1.5).astype('<i2')
     if a.plane_markers:
         pixels[:24, :24] = 128 + z
