@@ -23,11 +23,10 @@ withTablet(async({ctx,p,pane,errors})=>{
  const annotations=await geometry();console.log('Measured tool types',annotations.map(a=>a[0]));
  for(const tool of ['Length','Angle','CobbAngle','EllipticalROI','hu','deviation','arch','arrow','pencil'])assert.ok(annotations.some(a=>a[0]===tool),'missing '+tool);
  const count=()=>pane.locator('svg [data-id]').count();const initial=await count();assert.ok(initial>0,'created annotations');
- const opening=p.waitForEvent('popup');
  await p.getByRole('button',{name:'3D həcm görüntüləmə',exact:true}).first().click();
- const volume=await opening;await volume.locator('.vr-raster[data-ready=true]').waitFor();
+ const volume=p.locator('.tablet-volume-dialog');await volume.locator('.vr-raster[data-ready=true]').waitFor();
  await require('./vr-tablet-return.cjs').discardCoveredCanvas(p,true);
- await p.evaluate(()=>{window.testDeniedContexts=0;window.testDenyNewGL=true;});await volume.close();await p.bringToFront();
+ await p.evaluate(()=>{window.testDeniedContexts=0;window.testDenyNewGL=true;});await volume.locator('.vr-close').tap();await volume.waitFor({state:'detached'});
  await p.locator('.radaz-vr').waitFor({state:'detached'});await pane.locator('.bottom-right').filter({hasText:'/ 24'}).waitFor();await frame(p);
  await p.waitForFunction(()=>window.testDeniedContexts>0 && window.testStackHash()?.lit>0);
  await anchor(p,'returned CPU');assert.ok(await count()>=initial,'annotations restored');

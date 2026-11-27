@@ -89,7 +89,7 @@ const origin=tablet?'https://appassets.androidplatform.net':base;
   }
   if(tablet && process.env.VR_TABLET_RETURN_TEST)await require('./vr-tablet-return.cjs').rememberTabletFrame(home);
   if(!tablet && process.env.VR_DESKTOP_LOADING_TEST)await require('./vr-desktop-loading.cjs').verifyDesktopLoading(home,context);
-  const pop=home.waitForEvent('popup');const t=Date.now();await home.getByRole('button',{name:'3D həcm görüntüləmə',exact:true}).first().click();view=await pop;
+  const pop=tablet?Promise.resolve(home):home.waitForEvent('popup');const t=Date.now();await home.getByRole('button',{name:'3D həcm görüntüləmə',exact:true}).first().click();view=await pop;
   let vr=view.locator('.radaz-vr');await vr.locator('.vr-raster[data-ready="true"]').waitFor();
   const initial=Date.now()-t;console.log('OPEN',initial,'ms',await vr.getAttribute('data-backend'),files.length);
   let raster=vr.locator('.vr-raster'),stage=vr.locator('.vr-stage');await raster.screenshot({path:path.join(resultDir,(tablet?'tablet':'desktop')+'-volume.png')});
@@ -130,7 +130,7 @@ const origin=tablet?'https://appassets.androidplatform.net':base;
    const movie=view.waitForEvent('download',{timeout:60000});await button('Videonu saxla').click();const video=await movie;await video.saveAs(path.join(resultDir,'vr-spin.webm'));assert.ok(fs.statSync(await video.path()).size>2000,'3D spin bytes '+fs.statSync(await video.path()).size);await button('Menyunu bağla').click();
    await view.keyboard.press('ArrowRight');await view.keyboard.press('k');await view.keyboard.press('F3');await vr.getByLabel('Görünüş 1 müddəti').fill('0.5');await button('Menyunu bağla').click();await view.keyboard.press('Control+F2');await vr.getByLabel('Kadr/s').selectOption('10');const advanced=view.waitForEvent('download',{timeout:60000});await button('Videonu saxla').click();const advancedFile=await advanced;await advancedFile.saveAs(path.join(resultDir,'vr-keyframes.webm'));assert.ok(fs.statSync(await advancedFile.path()).size>2000);await button('Menyunu bağla').click();
   }
-  if(tablet)await view.close();else await button('3D pəncərəni bağla').click();
+  await button('3D pəncərəni bağla').click();
   await home.bringToFront();await panel.waitFor();assert.equal(errs.length,0,errs.join('\n'));console.log('PASS viewer 3D tools, capture, cut history, projected marks and CPU/GPU');
  }catch(e){console.error('PAGE ERRORS',errs);console.error('VISIBLE',await view.locator('body').innerText().catch(()=>''));throw e;}finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

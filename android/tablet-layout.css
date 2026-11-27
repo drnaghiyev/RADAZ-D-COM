@@ -32,8 +32,21 @@ body .flat-toolbar-workspace :is(.topbar,.records-header):has(>[data-tablet-clos
   position:static!important;inset:auto!important;order:2147483646;flex:0 0 auto
 }
 button.tablet-close-floating {position:fixed;top:4px;right:4px;z-index:100}
-html[data-tablet-workspace="3d"] .radaz-vr .vr-tools>.vr-close {position:static;order:2147483647}
-html[data-tablet-workspace="3d"] .radaz-vr .vr-tools {padding-inline-end:5px}
+.tablet-volume-dialog {
+  position:fixed;inset:0;box-sizing:border-box;width:100%;max-width:none;height:100dvh;max-height:none;
+  margin:0;padding:0;border:0;background:#091824;color:inherit;overflow:hidden
+}
+.tablet-volume-dialog[open] {display:flex;flex-direction:column}
+.tablet-volume-dialog > :is(div,section) {flex:1;min-height:0}
+:is(.tablet-volume-dialog,html[data-tablet-workspace="3d"]) .radaz-vr .vr-tools {
+  position:relative;padding-inline-end:calc(52px + env(safe-area-inset-right,0px))
+}
+:is(.tablet-volume-dialog,html[data-tablet-workspace="3d"]) .vr-tools>.vr-close {
+  position:absolute;inset-block-start:50%;transform:translateY(-50%);inset-inline-end:max(4px,env(safe-area-inset-right));margin:0
+}
+:is(.tablet-volume-dialog,html[data-tablet-workspace="3d"]) .shared-volume-loading>button {
+  position:absolute;top:4px;right:max(4px,env(safe-area-inset-right));margin:0
+}
 body .flat-toolbar-workspace .flat-toolbar-tool .tablet-folder-command .tablet-import-options{width:13px!important;min-width:13px!important;flex-basis:13px!important}
 
 body .flat-toolbar-workspace .flat-toolbar-right .flat-toolbar-tool :is(.workspace-split,.tablet-folder-command){width:var(--tablet-cell);height:var(--tablet-cell)}

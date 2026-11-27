@@ -18,31 +18,31 @@ withTablet(async({ctx,p,pane,errors})=>{
   };
   const samples=[];
   for(let i=0;i<6;i++){
-    const opened=p.waitForEvent('popup'),start=Date.now();
+    const start=Date.now();
+    let token;
+    const bridge=async dialog=>{
+      if(dialog.message()==='radaz-tablet/volume-opened')token=dialog.defaultValue();
+      await dialog.accept('ok');
+    };
+    p.on('dialog',bridge);
     await p.getByRole('button',{name:'3D həcm görüntüləmə',exact:true}).first().click();
-    const child=await opened;child.on('pageerror',e=>rootErrors.push(e.message));
-    const close=child.getByRole('button',{name:'3D pəncərəni bağla',exact:true});
+    const volume=p.locator('dialog.tablet-volume-dialog:modal');
+    const close=volume.getByRole('button',{name:'3D pəncərəni bağla',exact:true});
     await close.waitFor();
-    if(i!==2)await child.locator('.vr-raster[data-ready=true]').waitFor();
-    assert.equal(await child.locator('[data-panel]').count(),0,'volume has no 2D stacks');
-    const residentPlanes=await p.evaluate(()=>{
-      const snapshot=[...window.radazDetachedSources.values()][0]();
-      const source=snapshot.series[0].images;
-      return {decoded:source.filter(i=>i.record.pixels.byteLength>0).length,total:source.length};
-    });
-    assert.ok(residentPlanes.decoded<residentPlanes.total,'3D retained every decoded source plane in main Viewer');
-    const ready=Date.now(),closed=child.waitForEvent('close');
-    if(i===4)await child.evaluate(()=>{window.dispatchEvent(new Event('radaz:request-child-close',{cancelable:true}));}).catch(e=>{if(!child.isClosed())throw e;});
-    else await close.click().catch(e=>{if(!child.isClosed())throw e;});
-    await closed;await p.bringToFront();
-    await p.waitForFunction(()=>window.radazDetachedSources?.size===0);
+    if(i!==2)await volume.locator('.vr-raster[data-ready=true]').waitFor();
+    assert.equal(ctx.pages().length,1,'no Android popup or second WebView is needed');
+    const ready=Date.now();
+    if(i===4)await p.evaluate(token=>dispatchEvent(new CustomEvent('radaz:volume-back',{detail:token,cancelable:true})),token);
+    else await close.click();
+    await volume.waitFor({state:'detached'});
+    p.off('dialog',bridge);
     await frame(p);
     assert.equal(ctx.pages().length,1,'only main page survives');
     assert.equal(await pane.locator('.pane-error').count(),0);
     const landmark=await anchor(p,'return '+(i+1));
     assert.deepEqual(landmark.expected,baseline.expected);
     const sample=await counts();samples.push(sample);
-    console.log(JSON.stringify({open:i+1,residentPlanes,readyMs:ready-start,returnMs:Date.now()-ready,...sample}));
+    console.log(JSON.stringify({open:i+1,readyMs:ready-start,returnMs:Date.now()-ready,...sample}));
   }
   const warm=samples[1],last=samples.at(-1);
   assert.ok(last.heap<warm.heap+12*1024*1024,'unexpected sustained main-heap growth');

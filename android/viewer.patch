@@ -1,6 +1,15 @@
 --- a/app/page.tsx
 +++ b/app/page.tsx
-@@ -249,4 +249,7 @@
+@@ -3,6 +3,7 @@
+ import {SharedVolumeView} from '@/components/shared-volume-view';
+ import {calibrateSoftwareStack} from '@/lib/tablet-stack-coordinates';
+ import {watchPaneDoubleTap} from '@/lib/tablet-double-tap';
++import {TabletVolumeDialog} from '@/components/tablet-volume-dialog';
+ import {captureTabletStacks,restoreStackProperties,type TabletStackRecovery} from '@/lib/tablet-stack-return';
+ import {MeasurementCopies} from '@/components/measurement-copies';
+ import {CineControls} from '@/components/cine-controls';
+@@ -248,6 +249,9 @@
+           const center = vp.canvasToWorld([bounds.width / 2, bounds.height / 2]);
            const direction = (x: number, y: number) => {
              const point = vp.canvasToWorld([x,y]);
 +            // The software stack announces its image before the transform exists.
@@ -8,45 +17,66 @@
 +            if (!center || !point) return '';
              const vector = point.map((value,i) => value - center[i]);
              const length = Math.hypot(...vector);
-@@ -538,5 +541,9 @@
+             return vector.map((value,i) => ({ magnitude: Math.abs(value) / (length || 1), letter: [['R','L'],['A','P'],['I','S']][i][value >= 0 ? 1 : 0] })).filter(item => item.magnitude > .2).sort((a,b) => b.magnitude-a.magnitude).map(item => item.letter).join('');
+@@ -536,9 +540,18 @@
+   const [tabletVolumeId,setTabletVolumeId]=useState<string|null>(null);
+   const [tabletRecovery,setTabletRecovery]=useState<(TabletStackRecovery&{generation:number})>();
    const tabletStacks=useRef<ReturnType<typeof captureTabletStacks>>(undefined);
-   const closeTabletVolume=useCallback(()=>{
+-  const closeTabletVolume=useCallback(()=>{
 -    tabletStacks.current?.restore();tabletStacks.current=undefined;setTabletVolumeId(null);
+-  },[]);
++  const closeTabletVolume=useCallback(()=>setTabletVolumeId(null),[]);
++  useEffect(()=>{
++    if(tabletVolumeId || !tabletStacks.current)return;
 +    const stack=tabletStacks.current;
-+    tabletStacks.current=undefined;
-+    if(stack?.hasLostContext())stack.restore();
-+    else {stack?.repaint();stack?.dispose();}
-+    setTabletVolumeId(null);
-   },[]);
++    const paint=requestAnimationFrame(()=>{
++      if(tabletStacks.current!==stack)return;
++      tabletStacks.current=undefined;
++      if(stack.hasLostContext())stack.restore();
++      else {stack.repaint();stack.dispose();}
++    });
++    return ()=>cancelAnimationFrame(paint);
++  },[tabletVolumeId]);
    useEffect(()=>()=>tabletStacks.current?.dispose(),[]);
-@@ -561,5 +568,5 @@
+   const [workspace, setWorkspace] = useState<'viewer' | 'mpr' | '3d'>(detachedMode || 'viewer');
+   useEffect(()=>{if(limited){setTool('scroll');setLayout({rows:1,columns:1});setActive('A');setMaximizedPane(null);setLocalizers(false);setSelectedMarkId(null);setWorkspace('viewer');}},[limited]);
+@@ -560,7 +573,7 @@
+   const importJobs=useRef(Promise.resolve());
    const importPending=useRef(0);
    const [importQueue, setImportQueue] = useState<ImportSource[]>([]);
 -  const [status, setStatus] = useState('DICOM faylı, CD/DVD və ya arxiv müayinəsi açın');
 +  const [status, setStatus] = useState('DICOM faylı, qovluq və ya arxiv müayinəsi açın');
    const fileRef = useRef<HTMLInputElement>(null);
    const folderRef = useRef<HTMLInputElement>(null);
-@@ -579,5 +586,5 @@
+   const zipRef = useRef<HTMLInputElement>(null);
+@@ -578,7 +591,7 @@
+   const mediaOrder = useRef(new Map<string, { id: string; n: number; sop: string }[]>());
    const preferredMediaSeries = useRef<string | undefined>(undefined);
    // Disc watching belongs to this Viewer; archive/PACS tabs must start with it off.
 -  const [mediaEnabled, setMediaEnabled] = useState(false);
 +  const mediaEnabled = false;
    const [mediaFilter, setMediaFilter] = useState<string[] | undefined>();
    const [mediaProgress, setMediaProgress] = useState<MediaProgress | null>(null);
-@@ -612,4 +619,5 @@
+   const [loadProgress, setLoadProgress] = useState<LoadingProgress | null>(null);
+@@ -611,6 +624,7 @@
+   },[projectionViews]);
    const channels = useRef<Map<string, BroadcastChannel>>(new Map());
    const detachedWindows=useRef(new Map<string,Window>());
 +  const tabletChildren=useRef(new Map<string,{key:string,tab:Window}>());
    const detachedSources=useRef(new Map<string,()=>void>());
    const selectedIdRef = useRef<string | undefined>(undefined);
-@@ -629,5 +637,5 @@
+   selectedIdRef.current=assigned[active];
+@@ -628,7 +642,7 @@
+         const selected=listRef.current.find(s=>s.id===seriesId);
          const sources=mode==='stitch'&&selected?listRef.current.filter(s=>s.studyId===selected.studyId&&['CR','DX','DR','RG','RF'].includes(s.modality)):(selected?[selected]:[]);
          return {revision:sources.map(s=>`${s.id}:${s.imageIds.join(',')}:${s.loading}`).join('|')||'empty',
 -          series:sources.map(s=>({...s,images:shareLocalDicoms(s.imageIds)})),preferredSeriesId:selected?.id,preferredImageId:mode==='stitch'?currentImages[active]:undefined,anatomy:selected&&anatomyRef.current.result?.sourceKey===volumeSourceKey(selected.imageIds)?anatomyRef.current.result:null};
 +          series:sources.map(s=>({...s,images:shareLocalDicoms(s.imageIds,mode==='3d')})),preferredSeriesId:selected?.id,preferredImageId:mode==='stitch'?currentImages[active]:undefined,anatomy:selected&&anatomyRef.current.result?.sourceKey===volumeSourceKey(selected.imageIds)?anatomyRef.current.result:null};
        }));
      }
-@@ -1067,24 +1075,29 @@
+     channels.current.get(key)?.close();
+@@ -1066,34 +1080,49 @@
+   }, [detachedMode, loadArchiveStudies]);
  
    useEffect(()=>{
 -    if(location.origin!=='https://appassets.androidplatform.net')return;
@@ -67,7 +97,6 @@
 +      detachedWindows.current.delete(entry.key);
 +      detachedSources.current.get(entry.key)?.();detachedSources.current.delete(entry.key);
 +      channels.current.get(entry.key)?.close();channels.current.delete(entry.key);
-+      if(entry.key.startsWith('3d:'))closeTabletVolume();
      };
 -  },[tabletVolumeId,closeTabletVolume]);
 +    const checkClosed=()=>{for(const [token,{tab}] of tabletChildren.current)if(tab.closed)finish(token);};
@@ -79,7 +108,7 @@
 +    window.addEventListener('focus',checkClosed);
 +    const timer=window.setInterval(checkClosed,400);
 +    return ()=>{window.clearInterval(timer);window.removeEventListener('radaz:child-closed',closed);window.removeEventListener('focus',checkClosed);};
-+  },[closeTabletVolume,detachedMode]);
++  },[detachedMode]);
  
    const openDetached = (mode: DetachedMode | 'stitch') => {
      const source=listRef.current.find(s=>s.id===selectedIdRef.current);
@@ -87,11 +116,17 @@
 -    if(mode==='3d' && location.origin==='https://appassets.androidplatform.net'){
 -      tabletStacks.current?.dispose();tabletStacks.current=captureTabletStacks(recovery=>setTabletRecovery(old=>({...recovery,generation:(old?.generation||0)+1})));
 -      setTabletVolumeId(source.id);return;
--    }
++    if(mode==='3d'){
++      tabletStacks.current?.dispose();
++      tabletStacks.current=captureTabletStacks(recovery=>setTabletRecovery(old=>({...recovery,generation:(old?.generation||0)+1})));
++      setTabletVolumeId(source.id);
++      return;
+     }
 -    if(mode==='3d'){if(desktopVolumeId===source.id&&desktopVrWindow.current&&!desktopVrWindow.current.closed)desktopVrWindow.current.focus();else setDesktopVolumeId(source.id);return;}
      const key=`${mode}:${source.id}`;
      const existing=detachedWindows.current.get(key);
-@@ -1093,6 +1106,16 @@
+     if(existing&&!existing.closed){existing.focus();existing.dispatchEvent(new Event('radaz-maximize-window'));return;}
+     const token=crypto.randomUUID();connectHandoff(mode,token,source.id);
      try { const entries=JSON.parse(sessionStorage.getItem('radaz-detached-handoffs-v2')||'[]').filter((e:any)=>`${e.mode}:${e.seriesId}`!==key);
        sessionStorage.setItem('radaz-detached-handoffs-v2',JSON.stringify([...entries,{mode,seriesId:source.id,token}])); } catch {}
 +    window.prompt('radaz-tablet/prepare-child',token);
@@ -100,23 +135,22 @@
 +    if(tab){
 +      detachedWindows.current.set(key,tab);
 +      tabletChildren.current.set(token,{key,tab});
-+      if(mode==='3d'){
-+        tabletStacks.current?.dispose();
-+        tabletStacks.current=captureTabletStacks(recovery=>setTabletRecovery(old=>({...recovery,generation:(old?.generation||0)+1})));
-+        setTabletVolumeId(source.id);
-+      }
 +      tab.focus();
 +    }
      else setStatus('Yeni pəncərə bloklandı. RADAZ üçün pəncərə açılmasına icazə verin.');
    };
-@@ -1488,5 +1511,5 @@
+ 
+@@ -1487,7 +1516,7 @@
+ 
    const sourceLoading: LoadingProgress | null = volumeSeries?.loading ? {label:'Seriya yüklənir',done:volumeSeries.imageIds.length,total:volumeSeries.discovered||0,indeterminate:!volumeSeries.discovered} : null;
    if(['3d'].includes(workspace))return <SharedVolumeView series={volumeSeries} anatomy={volumeResultFor(volumeSeries)} onClose={()=>{if(detachedMode)window.close();else setWorkspace('viewer');}}/>;
 -  return <><ToolbarWorkspace scope={workspace}><main inert={tabletVolumeId?true:undefined} className={`workstation grouped-workstation ${railHidden ? 'rail-hidden' : ''} ${detachedMode ? 'detached' : ''}`} data-mode={detachedMode || 'viewer'} style={measurementVariables as React.CSSProperties}
 +  return <><ToolbarWorkspace scope={workspace}><main className={`workstation grouped-workstation ${railHidden ? 'rail-hidden' : ''} ${detachedMode ? 'detached' : ''}`} data-mode={detachedMode || 'viewer'} style={measurementVariables as React.CSSProperties}
      onDragOverCapture={event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; } }}
      onDropCapture={event => {
-@@ -1500,5 +1523,7 @@
+       if (event.dataTransfer.types.includes('application/x-series-id') || !event.dataTransfer.types.includes('Files') || (event.target as HTMLElement).closest('.source-list')) return;
+@@ -1499,36 +1528,30 @@
+       <ToolbarOverflow/>
        {!detachedMode && <div className="brand"><RadazLogo size={34}/><span><strong>RADAZ</strong><RadazTagline/></span></div>}
        <div className="primary-command-row">
 -        {!detachedMode && <ToolbarGroup className="toolbar-group import-command" role="group" aria-label={tr('ui.dicom_import_48fa8')} groupId="import" order={10}><DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" className="header-control" title={tr('ui.dicom_import_e8ec8')} aria-label={tr('ui.dicom_import_e8ec8')} disabled={importBusy || limited}><FolderOpen size={17}/><span>{tr('ui.dicom_import_e8ec8')}</span><ChevronDown size={14}/></Button></DropdownMenuTrigger>
@@ -125,7 +159,8 @@
 +          <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" className="header-control tablet-import-options" title={tr('ui.dicom_import_e8ec8')} aria-label={tr('ui.dicom_import_e8ec8')} disabled={importBusy || limited}><ChevronDown size={14}/></Button></DropdownMenuTrigger>
            <DropdownMenuContent align="start" className="header-menu">
              <DropdownMenuItem onSelect={() => { setImportOpen(false); folderRef.current?.click(); }}><FolderOpen size={16}/> {tr('ui.open_folder_55722')}</DropdownMenuItem>
-@@ -1507,10 +1532,5 @@
+             <DropdownMenuItem onSelect={() => { setImportOpen(false); zipRef.current?.click(); }}><FileArchive size={16}/> {tr('ui.open_zip_rar_38098')}</DropdownMenuItem>
+             <DropdownMenuItem onSelect={() => fileRef.current?.click()}><ScanSearch size={16}/> {tr('ui.dicom_files_650bc')}</DropdownMenuItem>
              <DropdownMenuItem onSelect={() => setImportOpen(true)}><Grid2X2 size={16}/> {tr('ui.select_multiple_sources_e4aae')}</DropdownMenuItem>
            </DropdownMenuContent>
 -        </DropdownMenu></ToolbarGroup>}
@@ -137,7 +172,7 @@
 +        </DropdownMenu></div></ToolbarGroup>}
        {!detachedMode && <ToolbarGroup className="workspace-launch toolbar-group" role="group" aria-label={tr('ui.view_mode_a87b2')} groupId="workspace" order={20}>
          <button type="button" aria-label={tr('ui.2d_viewer_b2533')} onClick={() => {setWorkspace('viewer');setInlinePlanes(null);setRecordsPage(null);}}><ScanLine size={18}/></button>
-@@ -1518,12 +1538,9 @@
+         <div className="workspace-split" key="mpr"><button type="button" disabled={limited} title={tr('ui.mpr_reconstruction_9bcc7')} aria-label={tr('ui.mpr_reconstruction_9bcc7')} onClick={()=>openDetached('mpr')}><b className="mode-letter-icon">MPR</b></button><DropdownMenu><DropdownMenuTrigger asChild><button className="workspace-options" aria-label="MPR açılış seçimləri" disabled={limited}><ChevronDown/></button></DropdownMenuTrigger><DropdownMenuContent>
   <DropdownMenuItem toolbarId="mpr-window" onSelect={()=>openDetached('mpr')}>MPR</DropdownMenuItem>
   {(['COR','SAG','AX'] as const).map(plane=><DropdownMenuItem toolbarId={`mpr-${plane}`} key={plane} onSelect={()=>void reformatPane(plane)}>{{AX:'Axial',COR:'Coronal',SAG:'Sagittal'}[plane]}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu></div>
 -        <div className="workspace-split" key="3d"><button type="button" disabled={limited} title={tr('ui.3d_volume_rendering_8b54e')} aria-label={tr('ui.3d_volume_rendering_8b54e')} onClick={()=>openDetached('3d')}><b className="mode-letter-icon">3D</b></button><DropdownMenu><DropdownMenuTrigger asChild><button className="workspace-options" aria-label="3D açılış seçimləri" disabled={limited}><ChevronDown/></button></DropdownMenuTrigger><DropdownMenuContent>
@@ -153,44 +188,60 @@
 +        <div className="workspace-split" key="pacs"><button type="button" title={tr('ui.pacs_studies_d77a3')} aria-label={tr('ui.pacs_studies_d77a3')} onClick={async () => { if (!await openRecordsWindow('pacs')) setStatus('PACS vərəqəsi açıla bilmədi'); }}><ServerCog size={18}/><span>PACS</span></button></div>
        </ToolbarGroup>}
          {!limited && detachedMode !== '3d' && <ViewerOutputControls panes={Object.entries(currentImages).map(([panel, imageId]) => ({ panel, imageId, series: [...seriesList, ...(mprData?.planes || [])].find(item => item.imageIds.includes(imageId)) }))} panel={workspace === 'mpr' ? mprActive : active} imageId={currentImages[workspace === 'mpr' ? mprActive : active]} series={workspace === 'mpr' ? mprData?.planes.find(item => item.imageIds.includes(currentImages[mprActive])) : currentSeries} allSeries={seriesList} datasetVersion={datasetVersion} onStatus={setStatus}/>}
-@@ -1618,5 +1635,5 @@
+       </div>
+-      {workspace === 'mpr' && !tabletVolumeId && <>
++      {workspace === 'mpr' && <>
+         <div className="mode-identity" title={tr('ui.mpr_reconstruction_9bcc7')}><strong><Layers3 size={17}/><span>{tr('ui.mpr_reconstruction_9bcc7')}</span></strong><span title={seriesList.find(s => s.id === mprData?.sourceId)?.name || ''}>{seriesList.find(s => s.id === mprData?.sourceId)?.name || currentSeries?.name || 'Seriya seçin'}</span></div>
+         <ToolbarGroup className="mode-controls mpr-header-controls" groupId="mpr-modes" order={30}>
+           <div className="mpr-modes" role="group" aria-label={tr('ui.active_mpr_pane_mode_5965d')}>{(['MPR','MIP','MinIP','Avg'] as const).map(mode => <button key={mode} title={mode} aria-label={mode} type="button" className={mprSettings[panePlane[mprActive as keyof typeof panePlane] || 'AX'].mode === mode ? 'current' : ''} onClick={() => changeMprSetting({ mode })}><b className="mpr-mode-label">{mode}</b></button>)}</div>
+@@ -1617,7 +1640,7 @@
+       <section className="main-area">{recordsPage&&<section className="embedded-records" aria-label={recordsPage==='archive'?'Local arxiv':'PACS'}><button className="embedded-close" onClick={()=>setRecordsPage(null)}>Viewer-ə qayıt ×</button>{recordsPage==='archive'?<ArchivePage embedded/>:<PacsPage embedded/>}</section>}
          {smartVolumeSource&&<SmartVolume key={smartVolumeSource.id} source={smartVolumeSource} sources={seriesList.filter(s=>['CT','MR'].includes(s.modality))} onSourceChange={s=>setSmartVolumeSource({id:s.id,imageIds:[...s.imageIds],modality:s.modality})} onClose={()=>setSmartVolumeSource(null)}/> }
          {anatomyLabel&&tool==='anatomy'&&<div className="anatomy-placement" role="status"><Crosshair size={18}/><span><strong>{anatomyLabel.text.split('\n')[0]}</strong> {tr('ui._pane_b5c88')}{anatomyLabel.panel}{tr('ui._click_the_structure_once_44e32')}</span><button onClick={()=>{setAnatomyLabel(null);setTool('wl');}}>{tr('ui.cancel_esc_bd665')}</button></div>}
 -        {workspace === 'viewer' && !tabletVolumeId && <div className={'viewport-grid'+(maximizedPane?' maximized':'')} style={{ gridTemplateColumns: `repeat(${layout.columns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${layout.rows}, minmax(0, 1fr))` }}>
 +        {workspace === 'viewer' && <div className={'viewport-grid'+(maximizedPane?' maximized':'')} style={{ gridTemplateColumns: `repeat(${layout.columns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${layout.rows}, minmax(0, 1fr))` }}>
            {Array.from({ length: layout.rows * layout.columns }, (_, index) => paneId(index)).map(id => { const otherImages = id !== active && assigned[active] && currentImages[active] ? [{ panel: active, imageId: currentImages[active] }] : []; return <ViewportPane expanded={maximizedPane===id} concealed={!!maximizedPane&&maximizedPane!==id} onHover={()=>{syncSource.current=id;}} projectionViews={projectionViews} anatomyControl={anatomyVolume} anatomyVolume={volumeResultFor(seriesList.find(s=>s.id===assigned[id]))} anatomyVolumeVisible={anatomyVolume.visible} anatomyVolumeOpacity={anatomyVolume.opacity} anatomyLabel={anatomyLabel?.panel===id?anatomyLabel:null} windowLevels={windowLevels} tabletRecovery={tabletRecovery} key={`${id}-${datasetVersion}-${tabletRecovery?.generation||0}`} id={id} initialImageId={currentImages[id]} series={seriesList.find(s => s.id === assigned[id])} selected={active === id} tool={limited ? 'scroll' : tool} cursor={cursor} onCursor={onCursor} hideText={hideText} preset={preset} resetToken={resetToken} clearToken={clearToken} ready={ready} marks={marks} selectedMarkId={selectedMarkId} localizers={localizers && id !== active} otherImages={otherImages} onImageChange={onImageChange} onMoveSource={onMoveSource} onAddMark={onAddMark} onUpdateMark={onUpdateMark} onRemoveMark={onRemoveMark} onSelectMark={markId => { setActive(id); setSelectedMarkId(markId); }} onClearImage={onClearImage} onSelect={() => { setActive(id); setSelectedMarkId(null); }} onToggleMaximize={() => { setActive(id); if(layout.rows*layout.columns>1)setMaximizedPane(current => current === id ? null : id); }} onDropSeries={sid => place(sid, id, true)}/>; })}
          </div>}
-@@ -1637,4 +1654,4 @@
+         {workspace === 'mpr' && <>
+@@ -1636,5 +1659,5 @@
+         <footer className="statusbar"><div><span className="viewer-version">v{releaseVersion}</span><span className="status-led"/> {ready ? 'Cornerstone3D hazırdır' : 'Görüntüləmə hazırlanır'} <span className="status-sep">/</span> <span>{workspace === 'mpr' ? `MPR · ${mprSettings[panePlane[mprActive as keyof typeof panePlane] || 'AX'].mode}` : workspace === '3d' ? '3D görünüş' : `Aktiv panel ${active}`}</span><span className="status-sep">/</span>{status}<span className="status-sep">/</span><span aria-label={tr('ui.licence_status_2eb16')}>{licenseStatus}</span></div><WorkProgress className="status-job-progress" progress={jobProgress}/></footer>
        </section>
      </div>
 -  </main></ToolbarWorkspace>{desktopVolumeId&&<SmartDetachedWindow key={desktopVolumeId} windowRef={desktopVrWindow} title="RADAZ · 3D həcm görüntüləmə" onClose={()=>setDesktopVolumeId(null)}><SharedVolumeView series={seriesList.find(s=>s.id===desktopVolumeId)} anatomy={volumeResultFor(seriesList.find(s=>s.id===desktopVolumeId))} onClose={()=>setDesktopVolumeId(null)}/></SmartDetachedWindow>}{tabletVolumeId&&<div className="tablet-volume-overlay" role="dialog" aria-modal="true" aria-label="3D həcm görüntüləmə"><SharedVolumeView series={seriesList.find(s=>s.id===tabletVolumeId)} anatomy={volumeResultFor(seriesList.find(s=>s.id===tabletVolumeId))} onClose={closeTabletVolume}/></div>}</>;
-+  </main></ToolbarWorkspace>{desktopVolumeId&&<SmartDetachedWindow key={desktopVolumeId} windowRef={desktopVrWindow} title="RADAZ · 3D həcm görüntüləmə" onClose={()=>setDesktopVolumeId(null)}><SharedVolumeView series={seriesList.find(s=>s.id===desktopVolumeId)} anatomy={volumeResultFor(seriesList.find(s=>s.id===desktopVolumeId))} onClose={()=>setDesktopVolumeId(null)}/></SmartDetachedWindow>}</>;
++  </main></ToolbarWorkspace>{desktopVolumeId&&<SmartDetachedWindow key={desktopVolumeId} windowRef={desktopVrWindow} title="RADAZ · 3D həcm görüntüləmə" onClose={()=>setDesktopVolumeId(null)}><SharedVolumeView series={seriesList.find(s=>s.id===desktopVolumeId)} anatomy={volumeResultFor(seriesList.find(s=>s.id===desktopVolumeId))} onClose={()=>setDesktopVolumeId(null)}/></SmartDetachedWindow>}{tabletVolumeId&&<TabletVolumeDialog onClose={closeTabletVolume}><SharedVolumeView series={seriesList.find(s=>s.id===tabletVolumeId)} anatomy={volumeResultFor(seriesList.find(s=>s.id===tabletVolumeId))} onClose={closeTabletVolume}/></TabletVolumeDialog>}</>;
  }
 --- a/components/app-product.tsx
 +++ b/components/app-product.tsx
-@@ -19,5 +19,5 @@
+@@ -18,7 +18,7 @@
+ import {useTranslation} from '@/lib/i18n';
  import { AiSettings } from './ai-settings';
  import {NetworkSettingsLink} from './private-network/settings-link';
 -import {usePrivateDesktop} from './private-network/api';
 +import {TabletLayoutSettings} from './tablet-layout';
  
  type Product = { name:string;version:string;channel:string;owner:string;email:string;telegram:string;repository:string;updateRepository?:string;salesUrl:string;licenseRequired:boolean;currency:string;monthly:number|null;billingUrl?:string };
-@@ -58,5 +58,4 @@
+ type License = { modules?:Record<string,{valid:boolean;expiresAt:number}>;valid:boolean;required:boolean;deviceId:string;message:string;kind?:'owner'|'paid'|'trial'|'expired';trial?:{valid:boolean;startedAt?:number;expiresAt?:number;daysRemaining:number};claims?:{customer:string;plan:string;seats:number;expiresAt:number;licenseId:string;entitlement?:'owner'} };
+@@ -57,7 +57,6 @@
+ async function api<T>(path:string,body?:unknown):Promise<T> { const r=await fetch(`/local-archive-api/${path}`,body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{cache:'no-store'}); const d=await r.json() as T & {error?:string};if(!r.ok)throw new Error(d.error||'Lokal xidmətə qoşulmaq mümkün olmadı');return d; }
  export function AppHelpMenu({initial=''}:{initial?:Panel}) {
    useUiTranslation();
 -  const desktop=usePrivateDesktop();
    const {t}=useTranslation();
    const [panel,setPanel]=useState<Panel>(initial),[product,setProduct]=useState<Product|null>(null),[license,setLicense]=useState<License|null>(null),[update,setUpdate]=useState<Update|null>(null);
-@@ -85,5 +84,5 @@
+   const [key,setKey]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),[issue,setIssue]=useState('');
+@@ -84,7 +83,7 @@
+   {panel && typeof document!=='undefined' && createPortal(<dialog ref={dialog} className="product-dialog" onCancel={()=>setPanel('')} onClick={e=>{if(e.target===dialog.current)setPanel('');}} aria-label={title}>
      <header><RadazLogo size={42}/><div><small>RADAZ · {product?.version||'…'}</small><h2>{title}</h2></div><button type="button" onClick={()=>setPanel('')} aria-label={tr('ui.close_c1cf9')}><X size={20}/></button></header>
      <div className="product-dialog-body">
 -    {panel==='settings'&&<><LanguageSettings/>{desktop&&<fieldset className="language-settings"><legend>DICOM Network</legend><p>Cihaz bağlantısı, klinikalar, əməkdaşlar, növbələr və avtomatik göndərmə.</p><div className="product-actions"><NetworkSettingsLink/></div></fieldset>}<SmartVolumeSettings/></>}
 +    {panel==='settings'&&<><LanguageSettings/><TabletLayoutSettings/><fieldset className="language-settings"><legend>DICOM Network</legend><p>Klinikaya qoşulun və cihaz dəvətlərini idarə edin.</p><div className="product-actions"><NetworkSettingsLink/></div></fieldset><SmartVolumeSettings/></>}
      {panel==='ai'&&<AiSettings/>}
      {panel==='help'&&<><p>{tr('ui.load_a_dicom_file_or_folder_or_open_a_study_f_a9700')}</p><div className="help-cards"><article><b>{tr('ui.scroll_through_images_08ed8')}</b><p><strong>S</strong> {tr('ui.or_the_scroll_tool_drag_up_or_down_on_the_ima_4f08e')}</p></article><article><b>{tr('ui.printing_and_export_1ae88')}</b><p>{tr('ui.use_image_selection_to_build_a_print_list_cho_1a615')}</p></article><article><b>{tr('ui.ai_assistant_and_report_fd718')}</b><p>{tr('ui.all_series_from_the_active_study_open_in_the_e8828')}</p></article><article><b>{tr('ui.receive_dicom_from_a_device_7b268')}</b><p>{tr('ui.the_local_archive_shows_its_ae_title_ip_and_p_9c768')}</p></article></div><button onClick={()=>open('support')}>{tr('ui.contact_support_9352c')}</button></>}
+     {panel==='keys'&&<dl className="shortcut-list">{[['N','Neqativ / pozitiv'],['O','Ox'],['Q','Qələm'],['K','3D kursor'],['S','Listələ / barmaqla sürüşdür'],['W','Pəncərələmə'],['Orta düymə + sürüklə','Görüntünü daşı'],['Sağ düymə + sürüklə','Zoom'],['Sağ klik','Ölçmə üçün silmə menyusu'],['Ctrl+D','Cari kəsitdə bütün ölçüləri sil'],['Delete','Seçilmiş ölçünü sil'],['P','Görüntünü sürüşdür'],['Z','Yaxınlaşdır'],['Ctrl + siçan çarxı','Görüntünü böyüt / kiçilt'],['Siçan çarxı','Əvvəlki / növbəti kəsit'],['Ctrl+[ / Ctrl+]','90° sola / sağa fırlat'],['Ctrl+Shift+[ / ]','Üfüqi / şaquli çevir'],['F1','Ağciyər pəncərəsi'],['F2','Qarın pəncərəsi'],['F3','Sümük pəncərəsi'],['F4','Beyin pəncərəsi'],['1–4','Görüntü panellərinin sayı'],['F11','Siçan görüntü üzərindədirsə tam ekran'],['F10','Yardım'],['Ctrl+F10','Proqram haqqında']].map(([k,v])=><div key={k}><dt><kbd>{k}</kbd></dt><dd>{v}</dd></div>)}</dl>}
 --- a/components/private-network/api.ts
 +++ b/components/private-network/api.ts
-@@ -19,5 +19,7 @@
+@@ -18,7 +18,9 @@
+   deliveries?:Delivery[];sent?:Delivery[];history?:{time:number|string;actor:string;action:string;detail?:unknown}[];
    queue?:{id:string;clinic:string;study:string;state:string;error?:string;remote?:string}[];statuses?:{id:string;sender:string;recipient:string;state:string}[];localCoordinator?:boolean;syncClinic?:string;acceptMode?:string;clinicModes?:Record<string,string>;
  };
 -export function isPrivateDesktop(){return typeof window!=='undefined'&&['localhost','127.0.0.1','[::1]'].includes(window.location.hostname)&&/Windows NT/i.test(navigator.userAgent)&&/Electron\//i.test(navigator.userAgent);}
@@ -199,14 +250,18 @@
 +export function isPrivateDesktop(){return tabletSettings() || typeof window!=='undefined'&&['localhost','127.0.0.1','[::1]'].includes(window.location.hostname)&&/Windows NT/i.test(navigator.userAgent)&&/Electron\//i.test(navigator.userAgent);}
  const subscribeDesktop=()=>()=>{};
  export function usePrivateDesktop(){return useSyncExternalStore(subscribeDesktop,isPrivateDesktop,()=>false);}
-@@ -29,5 +31,5 @@
+ export type NetworkRequest=<T>(action:string,body?:Record<string,unknown>)=>Promise<T>;
+@@ -28,7 +30,7 @@
+   if(typeof window==='undefined')return 'private';
    if(!selectedProfile){
      const requested=new URLSearchParams(location.search).get('network');
 -    selectedProfile=(requested||localStorage.getItem('radaz-network-profile'))==='internet'?'internet':'private';
 +    selectedProfile=(requested||localStorage.getItem('radaz-network-profile')||'internet')==='internet'?'internet':'private';
    }
    return selectedProfile;
-@@ -41,4 +43,10 @@
+ }
+@@ -40,6 +42,12 @@
+   constructor(message:string,readonly code?:string){super(message);}
  }
  export async function networkCall<T>(action:string,body:Record<string,unknown>={},session?:string):Promise<T>{
 +  if(tabletSettings()){
@@ -217,9 +272,11 @@
 +  }
    if(!isPrivateDesktop())throw Error('Bu modul Windows RADAZ Desktop üçün nəzərdə tutulub.');
    const headers:Record<string,string>={'Content-Type':'application/json'};
+   if(session)headers['X-RADAZ-Settings-Session']=session;
 --- a/components/private-network/manage.tsx
 +++ b/components/private-network/manage.tsx
-@@ -14,6 +14,6 @@
+@@ -13,16 +13,12 @@
+  <label>Klinikanın adı<input name="name" required/></label><label>Klinika administratorunun hesab ID-si<input name="admin" required/></label><label>Administratorun adı<input name="adminName" required/></label><button>Klinika yarat</button></form></article>}</>;
  }
  export function NetworkConfig({state,act}:{state:NetworkState;act:Act}){
 - const [url,setUrl]=useState(state.url||''),[invite,setInvite]=useState(''),[name,setName]=useState(''),[mode,setMode]=useState(state.acceptMode||'manual'),[perClinic,setPerClinic]=useState(state.clinicModes||{}),[syncClinic,setSyncClinic]=useState(state.syncClinic||'');
@@ -228,7 +285,7 @@
 + return <>
   <article><h3>Cihaz və bağlantı</h3>{state.configured&&state.url&&<p>Şəbəkə xidmətinin ünvanı · {state.url}</p>}{state.user?.id&&<p>Hesab ID-si · {state.user.id}</p>}{state.deviceId&&<p>Cihaz ID-si · {state.deviceId}</p>}<form hidden={state.configured} onSubmit={async e=>{e.preventDefault();if(await act('register',{url,invite,name})){setInvite('');}}}>
   <label>Şəbəkə xidmətinin ünvanı<input type="url" required value={url} placeholder="https://…" onChange={e=>setUrl(e.target.value)}/></label><label>Cihazın adı<input value={name} required onChange={e=>setName(e.target.value)}/></label>
-@@ -21,8 +21,4 @@
+  <label>Birdəfəlik dəvət kodu<input required autoComplete="off" type="password" value={invite} onChange={e=>setInvite(e.target.value)}/></label><button>Qeydiyyata al</button></form>
   {state.configured&&!state.internet&&!state.superAdmin&&<form onSubmit={async e=>{e.preventDefault();if(await act('link_clinic',{invite}))setInvite('');}}><label>Başqa klinikaya qoşulmaq üçün dəvət kodu<input type="password" required autoComplete="off" value={invite} onChange={e=>setInvite(e.target.value)}/></label><button>Klinikaya qoşul</button></form>}
   {state.configured&&<button onClick={()=>act('configure',{enabled:!state.enabled})}>{state.enabled?'Bu cihazda modulu dayandır':'Bu cihazda modulu aktivləşdir'}</button>}</article>
 - {state.configured&&<article><h3>Qəbul ayarları</h3><form onSubmit={e=>{e.preventDefault();void act('configure',{enabled:state.enabled,acceptMode:mode,clinicModes:perClinic,syncClinic});}}>
@@ -240,7 +297,8 @@
  }
 --- a/components/private-network/internet.tsx
 +++ b/components/private-network/internet.tsx
-@@ -14,11 +14,11 @@
+@@ -13,29 +13,29 @@
+   const [note,setNote]=useState('');
    const id=state.deviceId||'';
    const code=id?'RD-'+(id.toUpperCase().match(/.{1,4}/g)||[]).join('-'):'';
 -  if(!state.configured)return <article><h3>Bu kompüteri internetlə qoş</h3>
@@ -256,7 +314,7 @@
 +    <article><h3>Bu planşetin RADAZ ID-si</h3>
        <label>Bu kodu göndərən klinikaya verin<input readOnly value={code} onFocus={e=>e.target.select()}/></label>
        <button onClick={()=>{void navigator.clipboard.writeText(code).then(()=>setNote('ID kopyalandı.'),()=>setNote('ID-ni sahədən seçib kopyalayın.'));}}>ID-ni kopyala</button>
-@@ -26,15 +26,15 @@
+       <span role="status">{note}</span>
      </article>
      {(state.invitations||[]).map(i=><article key={i.id}><h3>{i.clinic} klinikasından dəvət</h3>
 -      <p>{i.sender} sizi {i.doctor} adı ilə bu kompüterdə müayinə qəbul etməyə dəvət edir.</p>
@@ -277,16 +335,20 @@
 +        <label>Həkimin RADAZ cihaz ID-si və ya qoşulma kodu<input name="target" autoComplete="off" maxLength={80} required/></label>
          <button>Dəvəti həkimin RADAZ-ına göndər</button></form>
        {(state.outgoingInvites||[]).map(i=><div key={i.id} className="dn-item"><span>{i.doctor} · qəbul gözlənilir</span>
+         <button onClick={()=>void act('cancel_invite',{id:i.id,clinic:state.clinic})}>Dəvəti geri götür</button></div>)}
 --- a/components/private-network/workspace.tsx
 +++ b/components/private-network/workspace.tsx
-@@ -12,5 +12,5 @@
+@@ -11,7 +11,7 @@
+ import {NetworkSettingsAccess,NetworkSettingsContext} from '@/components/private-network/settings-access';
  import {openStudyInViewer} from '@/lib/viewer-session';
  import '@/components/private-network/network.css';
 -const connection=['settings','Bağlantı və qəbul ayarları',Settings] as const;
 +const connection=['settings','Bağlantı ayarları',Settings] as const;
  const management=[
   ['people','Klinikalar və radioloqlar',Users],['schedule','Növbə cədvəli',CalendarDays],['rules','Avtomatik göndərmə',Workflow],
-@@ -76,9 +76,9 @@
+ ] as const;
+@@ -75,26 +75,26 @@
+  const access=useContext(NetworkSettingsContext),request=access?.request??networkCall,controls=access?.controls,stateAction=access?'settings_state':'state';
   const [state,setState]=useState<NetworkState|null>(null),[message,setMessage]=useState(''),[busy,setBusy]=useState(false);
   const [loadError,setLoadError]=useState('');
 - const sequence=useRef({id:0,active:false}),mutating=useRef(false);
@@ -299,7 +361,7 @@
 +  }catch(e){if(sequence.current.id===id){setState(null);setLoadError(e instanceof Error?e.message:String(e));}}finally{inFlight.current--;}
   },[clinic,request,setClinic,setSection,stateAction,target.clinic]);
   useEffect(()=>{
-@@ -86,14 +86,14 @@
+    const current=sequence.current;
     current.active=true;
     const initial=window.setTimeout(()=>void refresh(),0);
 -   const timer=window.setInterval(()=>{if(!mutating.current)void refresh();},7000);
@@ -317,9 +379,11 @@
 + {state?<fieldset disabled={busy} key={section==='settings'?target.profile:state.clinic||'-'} className="dn-fields">
   {settings&&target.profile==='private'&&(section==='settings'||section==='people')&&<article><h3>Klinikadan həkimlərin kompüterlərinə göndəriş</h3>
     <button onClick={()=>{setSection('settings');switchNetwork('internet');}}>RADAZ İnternet · həkim və kompüter qoş</button></article>}
+  {target.profile==='internet'&&(section==='settings'||section==='people')&&<InternetPairing state={state} act={act}/>}
 --- a/lib/locales/ui.ts
 +++ b/lib/locales/ui.ts
-@@ -1802,7 +1802,7 @@
+@@ -1801,9 +1801,9 @@
+   "ru": "Программа DICOM для работы с радиологическими изображениями."
   },
   "ui.dicom_file_folder_zip_rar_and_cd_dvd_import_l_1985e": {
 -  "az": "DICOM fayl, qovluq, ZIP/RAR və CD/DVD importu · Local arxiv · PACS və cihazlardan DICOM qəbulu",
@@ -330,24 +394,30 @@
 +  "ru": "Импорт файлов и папок DICOM, ZIP/RAR · Локальный архив"
   },
   "ui.image_viewing_and_windowing_measurement_tools_e8457": {
+   "az": "Görüntülərin baxışı və pəncərələmə · Ölçmə alətləri · MPR · 3D görüntüləmə",
 --- a/lib/viewer-session.ts
 +++ b/lib/viewer-session.ts
-@@ -10,3 +10,6 @@
+@@ -8,6 +8,9 @@
+ const recordsOpening = new Map<RecordsKind, Promise<boolean>>();
+ const recordsWindows = new Map<RecordsKind, Window>();
  export function openRecordsWindow(kind: RecordsKind): Promise<boolean> {
 +  if((kind==='archive'||kind==='pacs') && location.origin==='https://appassets.androidplatform.net' && location.pathname==='/' &&
 +      window.prompt('radaz-tablet/open-'+kind,'')==='ok')
 +    return Promise.resolve(true);
    const pending = recordsOpening.get(kind);
    if (pending) return pending;
+   const opening = (async () => {
 --- a/components/vr-workbench.tsx
 +++ b/components/vr-workbench.tsx
-@@ -190,5 +190,5 @@
+@@ -189,7 +189,7 @@
+  {btn('3D görüntüləmə ayarları',<Settings/>,()=>toggle('settings'),menu==='settings')}{btn('Ekrana sığdır · Ctrl+0',<Maximize/>,fitView)}
   {btn('Tam ekran · F',<PanelTop/>,()=>void fullscreen().catch(e=>notice(String(e))))}
   <ToolbarDividers scope="vr"/>
 - </div><VrCloseButton onClose={onClose}/>{hidden&&<button className="vr-unhide" aria-label="Alət panelini göstər" onClick={()=>setHidden(false)}><List/></button>}
 + <VrCloseButton onClose={onClose}/></div>{hidden&&<VrCloseButton onClose={onClose}/>}{hidden&&<button className="vr-unhide" aria-label="Alət panelini göstər" onClick={()=>setHidden(false)}><List/></button>}
   {menu&&<aside className="vr-menu" aria-label="3D seçimləri"><button className="vr-dismiss" aria-label="Menyunu bağla" onClick={()=>setMenu('')}><X/></button>
   {menu==='views'&&<><strong>Görünüş istiqaməti</strong>{faces.map((f,i)=><button key={f.key} onClick={()=>face(i)}>{f.key} · {f.name}</button>)}</>}
+  {menu==='presets'&&<><strong>3D rəng rejimi</strong>{Object.entries(presets).filter(([k])=>v.modality==='MR'?k==='mr'||k.includes('mip'):k!=='mr').map(([key,label])=><button key={key} aria-pressed={s.style.preset===key} onClick={()=>{const def=initialStyle(v,v.range,key as VrPreset);style({preset:key as VrPreset,wl:def.wl,ww:def.ww});setMenu('');}}>{label}</button>)}</>}
 --- a/app/3d/page.tsx
 +++ b/app/3d/page.tsx
 @@ -1,3 +1 @@
@@ -355,3 +425,130 @@
 -
 -export default function ThreeDimensionalPage() { return <Home detachedMode="3d"/>; }
 +export {default} from '@/components/tablet-volume-window';
+--- a/components/shared-volume-view.tsx
++++ b/components/shared-volume-view.tsx
+@@ -1,5 +1,5 @@
+ 'use client';
+ import {useEffect,useState} from 'react';
+-import {tabletDisplayVolume} from '@/lib/cornerstone';
++import {tabletDisplayVolume,tabletSourceVolume} from '@/lib/cornerstone';
+ import {gpuCapabilities} from '@/lib/gpu-capabilities';
+ import {sampleAnatomyPlane,type AnatomyVolumeResult} from '@/lib/anatomy-volume';
+@@ -9,5 +9,5 @@
+ type Series={id:string;imageIds:string[];modality:string;loading?:boolean;discovered?:number};
+ type Props={series?:Series;anatomy?:AnatomyVolumeResult|null;onClose:()=>void};
+-type Display=Awaited<ReturnType<typeof tabletDisplayVolume>>;
++type Display=Awaited<ReturnType<typeof tabletDisplayVolume | typeof tabletSourceVolume>>;
+ type Loaded={data:Display;geometry:AnatomyVolumeResult;preview:boolean};
+ 
+@@ -28,10 +28,12 @@
+     async function open(source:Series){
+       let limit=256,budget=24;
+-      try{const gpu=gpuCapabilities();limit=Math.min(gpu.max3DTextureSize,tablet?384:1536);
+-        budget=tablet?(gpu.tier==='low'?20:48):(gpu.tier==='low'?64:gpu.tier==='high'?320:160);}catch{/* A bounded CPU volume is available without WebGL. */}
++      try{const gpu=gpuCapabilities();limit=tablet?gpu.max3DTextureSize:Math.min(gpu.max3DTextureSize,1536);
++        budget=gpu.tier==='low'?64:gpu.tier==='high'?320:160;}catch{/* A bounded CPU volume is available without WebGL. */}
+       const showPreview=(data:Display)=>{
+         if(!signal.aborted)setLoaded({data,geometry:geometryFor(data,source,anatomy),preview:true});
+       };
+-      const data=await tabletDisplayVolume(source.imageIds,limit,budget*1024**2,signal,setPercent,true,tablet?undefined:showPreview);
++      const data=tablet
++        ? await tabletSourceVolume(source.imageIds,limit,signal,setPercent)
++        : await tabletDisplayVolume(source.imageIds,limit,budget*1024**2,signal,setPercent,true,showPreview);
+       const geometry=geometryFor(data,source,anatomy);
+       if(anatomy?.mask.length){
+--- a/lib/cornerstone.ts
++++ b/lib/cornerstone.ts
+@@ -629,4 +629,47 @@
+   }
+   return {...displayGeometry(source,dimensions),values,range:[minimum,Math.max(minimum+1,maximum)]};
++}
++
++/** Build each acquired tablet slice at its native matrix up to 512, in patient order. */
++export async function tabletSourceVolume(imageIds:string[], maxTexture:number, signal:AbortSignal, progress:(percent:number)=>void) {
++  signal.throwIfAborted();
++  const source=seriesGeometry(imageIds);
++  const [columns,rows,depth]=source.dimensions;
++  const scale=Math.min(1,512/Math.max(columns,rows));
++  const width=Math.max(1,Math.round(columns*scale)), height=Math.max(1,Math.round(rows*scale));
++  const dimensions:Point3=[width,height,depth];
++  const geometry=displayGeometry(source,dimensions);
++  const sample=scale<1 ? displayPlaneSampler(columns,rows,areaWeights(columns,width),areaWeights(rows,height),false) : null;
++  const planeSize=width*height, length=planeSize*depth;
++  let values:Int16Array|Float32Array=sample ? new Float32Array(length) : new Int16Array(length);
++  let minimum=Infinity, maximum=-Infinity, lastYield=performance.now();
++  for(let z=0;z<depth;z++){
++    signal.throwIfAborted();
++    const record=await readDisplayPlane(source.imageIds[z],signal);
++    signal.throwIfAborted();
++    if(record.color || record.columns!==columns || record.rows!==rows || record.pixels.length!==columns*rows)
++      throw Error('3D üçün eyni ölçülü monoxrom KT və ya MRT kəsikləri seçin.');
++    const plane=sample ? sample(record.pixels) : record.pixels;
++    if(values instanceof Int16Array && plane instanceof Float32Array &&
++       (record.min < -32768 || record.max > 32767 || !plane.every(Number.isInteger))){
++      const full=new Float32Array(length);
++      full.set(values.subarray(0,z*planeSize));
++      values=full;
++    }
++    values.set(plane,z*planeSize);
++    if(sample){
++      for(let i=0;i<planeSize;i++){minimum=Math.min(minimum,plane[i]);maximum=Math.max(maximum,plane[i]);}
++    }else{
++      minimum=Math.min(minimum,record.min);maximum=Math.max(maximum,record.max);
++    }
++    if(performance.now()-lastYield>16){
++      progress(Math.round(100*(z+1)/depth));
++      await yieldToBrowser();lastYield=performance.now();
++    }
++  }
++  signal.throwIfAborted();
++  progress(100);
++  const range:[number,number]=[minimum,Math.max(minimum+1,maximum)];
++  return {...geometry,values,range,cpuOnly:dimensions.some(n=>n>maxTexture)};
+ }
+ 
+--- a/components/smart-volume-surface.tsx
++++ b/components/smart-volume-surface.tsx
+@@ -4,5 +4,5 @@
+ import type {AnatomyVolumeResult} from '@/lib/anatomy-volume';
+ import {VrWorkbench} from './vr-workbench';
+-type Props={result:AnatomyVolumeResult;colors:Record<number,string>;source?:Types.IImageVolume;sourceValues?:Float32Array;sourceSlices?:number;cpuOnly?:boolean;progressiveDesktop?:boolean;previewPercent?:number;range:[number,number];onClose:()=>void;title?:string};
++type Props={result:AnatomyVolumeResult;colors:Record<number,string>;source?:Types.IImageVolume;sourceValues?:Int16Array|Float32Array;sourceSlices?:number;cpuOnly?:boolean;progressiveDesktop?:boolean;previewPercent?:number;range:[number,number];onClose:()=>void;title?:string};
+ export function SmartVolumeSurface({result,colors,sourceValues,sourceSlices,cpuOnly,range,onClose,progressiveDesktop,previewPercent,title='3D seqmentasiya'}:Props){
+  const palette=JSON.stringify(colors);
+--- a/lib/vr/scene.ts
++++ b/lib/vr/scene.ts
+@@ -11,5 +11,5 @@
+ export type Mark={a:V;b:V;kind:'length'|'arrow';labelPoint?:V;text?:string;color?:string;lineWidth?:number;alpha?:number;head?:'filled'|'open'|'both'};
+ export type Snapshot={camera:Frame;style:Style;cuts:Cut[];marks:Mark[];duration:number};
+-export type Volume=AnatomyVolumeGeometry&{values:Float32Array;sourceSlices?:number;cpuOnly?:boolean;range:[number,number];mask:Uint8Array;colors:Record<number,string>;identity:string};
++export type Volume=AnatomyVolumeGeometry&{values:Int16Array|Float32Array;sourceSlices?:number;cpuOnly?:boolean;range:[number,number];mask:Uint8Array;colors:Record<number,string>;identity:string};
+ export const faces=[
+   {key:'A',name:'Ön',normal:[0,-1,0],up:[0,0,1]}, {key:'P',name:'Arxa',normal:[0,1,0],up:[0,0,1]},
+--- a/lib/vr/airway-envelope.ts
++++ b/lib/vr/airway-envelope.ts
+@@ -2,5 +2,5 @@
+  * space is independent of the full voxel count. Only the display copy is masked.
+  * Internal low-density spaces (lungs and bronchi) stay inside the body outline. */
+-export function airwayBodyRows(values: Float32Array, dimensions: readonly number[]) {
++export function airwayBodyRows(values: Int16Array|Float32Array, dimensions: readonly number[]) {
+   const [width, height, slices] = dimensions;
+   const step = Math.max(1, Math.ceil(Math.max(width, height) / 96));
+@@ -71,5 +71,5 @@
+ }
+ 
+-export function maskAirwayExterior(pixels: Float32Array, width: number, bounds: Int32Array, fill: number) {
++export function maskAirwayExterior(pixels: Int16Array|Float32Array, width: number, bounds: Int32Array, fill: number) {
+   for (let row = 0; row < bounds.length / 2; row++) {
+     const start = row * width;
+--- a/lib/vr/renderer.ts
++++ b/lib/vr/renderer.ts
+@@ -72,5 +72,7 @@
+      let values=v.values;
+      if(masked){
+-       values=v.values.slice();
++       const ceiling=v.range[1]+Math.max(1,v.range[1]-v.range[0]);
++       const widen=v.values instanceof Int16Array && ((excluded.length && (floor < -32768 || floor > 32767)) || (airway && ceiling > 32767));
++       values=widen ? Float32Array.from(v.values) : v.values.slice();
+        if(airway){
+          airwayBounds??=airwayBodyRows(v.values,v.dimensions);

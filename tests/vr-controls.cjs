@@ -53,7 +53,7 @@ async function verifyVrControls({home,view,vr,stage,tablet,context}){
     const lost=process.env.VR_TABLET_RETURN_TEST && await require('./vr-tablet-return.cjs').discardCoveredCanvas(home,cycle===2||!!denied);
     if(denied)await home.evaluate(()=>{window.testDeniedContexts=0;window.testDenyNewGL=true;});
     const start=Date.now();
-    await view.close();await home.bringToFront();
+    await vr.locator('.vr-close').tap();await vr.waitFor({state:'detached'});
     await home.waitForFunction(()=>!document.querySelector('main.workstation')?.inert);
     if(process.env.VR_TABLET_RETURN_TEST)await require('./vr-tablet-return.cjs').checkTabletReturn(home,lost||denied,denied);
     if(denied){
@@ -61,8 +61,7 @@ async function verifyVrControls({home,view,vr,stage,tablet,context}){
       console.log('PASS incoming 2D stack denial of all WebGL contexts: software rendering, windowing and slice navigation');
     }
     const closed=Date.now()-start,next=Date.now();
-    const opening=home.waitForEvent('popup');
-    await open.tap();view=await opening;vr=view.locator('.radaz-vr');
+    await open.tap();vr=home.locator('.radaz-vr');
     await vr.locator('.vr-raster[data-ready="true"]').waitFor();
     timings.push({closed,reopened:Date.now()-next});
   }

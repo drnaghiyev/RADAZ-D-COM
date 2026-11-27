@@ -33,6 +33,8 @@ public final class ViewerActivity extends Activity {
     private FrameLayout stage;
     private final Map<WebView,String> handoffs=new IdentityHashMap<>();
     private String nextHandoff;
+    private WebView volumeOwner;
+    private String volumeToken;
     private final Set<WebView> closing=Collections.newSetFromMap(new IdentityHashMap<>());
     private WebView home, active, archiveWindow, pacsWindow, chooserWindow, saveWindow;
     private ValueCallback<Uri[]> chooser;
@@ -110,6 +112,7 @@ public final class ViewerActivity extends Activity {
                 return null;
             }
             @Override public void onPageStarted(WebView view,String url,android.graphics.Bitmap favicon) {
+                if(view==volumeOwner)clearVolumeOwner();
                 initialized.remove(view);clinics.navigate(view,url);
                 if(!"about:blank".equals(url) && !url.startsWith("blob:") && !TabletAssets.isLocal(Uri.parse(url)))view.stopLoading();
             }
@@ -142,6 +145,12 @@ public final class ViewerActivity extends Activity {
             String answer="ok";
             try {
                 switch(command.substring("radaz-tablet/".length())) {
+                    case "volume-opened":
+                        if(web!=active || value==null || !value.matches("[0-9a-fA-F-]{36}")){answer="denied";break;}
+                        volumeOwner=web;volumeToken=value;updateChildBack();break;
+                    case "volume-closed":
+                        if(web==volumeOwner && value.equals(volumeToken))clearVolumeOwner();
+                        break;
                     case "prepare-child":
                         if(web!=home || web!=active || value==null || !value.matches("[0-9a-fA-F-]{36}")){answer="denied";break;}
                         nextHandoff=value;
@@ -242,6 +251,7 @@ public final class ViewerActivity extends Activity {
         String token=handoffs.remove(web);
         if(token==null && TabletAssets.isLocal(uri))token=uri.getQueryParameter("handoff");
         boolean unidentified=url==null || "about:blank".equals(url);
+        if(web==volumeOwner)clearVolumeOwner();
         if(web==archiveWindow)archiveWindow=null;
         if(web==pacsWindow)pacsWindow=null;
         initialized.remove(web);windows.remove(web);closing.remove(web);
@@ -255,8 +265,9 @@ public final class ViewerActivity extends Activity {
         // Leave the Chromium close/focus callback before destroying its WebView.
         updateTimer.post(web::destroy);
     }
+    private void clearVolumeOwner(){volumeOwner=null;volumeToken=null;updateChildBack();}
     private void updateChildBack() {
-        boolean needed=!isFinishing() && active!=null && active!=home;
+        boolean needed=!isFinishing() && active!=null && (active!=home || active==volumeOwner);
         if(!needed && removeVolumeBack!=null){removeVolumeBack.run();removeVolumeBack=null;}
         if(needed && removeVolumeBack==null && Build.VERSION.SDK_INT>=33){
             removeVolumeBack=VolumeBack.register(this);
@@ -272,7 +283,13 @@ public final class ViewerActivity extends Activity {
         }
     }
     @Override public void onBackPressed(){
-        if(active!=home && isViewerWorkspace(active))requestClose(active);
+        if(active!=null && active==volumeOwner){
+            WebView owner=volumeOwner;String token=volumeToken;
+            String event="!window.dispatchEvent(new CustomEvent('radaz:volume-back',{cancelable:true,detail:"+JSONObject.quote(token)+"}))";
+            owner.evaluateJavascript(event,handled->{
+                if(owner==volumeOwner && token.equals(volumeToken) && !"true".equals(handled))clearVolumeOwner();
+            });
+        }else if(active!=home && isViewerWorkspace(active))requestClose(active);
         else if(active!=null&&active.canGoBack())active.goBack();
         else if(active!=null && active!=home)requestClose(active);
         else super.onBackPressed();

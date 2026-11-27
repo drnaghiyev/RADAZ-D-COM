@@ -65,14 +65,12 @@ async function verifyTabletMultiPaneReturn(home, sources) {
   assert.equal(before.length, 2);
   assert.notEqual(before[0].slice, before[1].slice);
   assert.ok(before.every(p => p.lit > 100));
-  const opening=home.waitForEvent('popup');
   await home.getByRole('button', {name:'3D həcm görüntüləmə', exact:true}).first().tap();
-  const child=await opening;
-  const volume = child.locator('.radaz-vr');
+  const volume = home.locator('dialog.tablet-volume-dialog .radaz-vr');
   await volume.locator('.vr-raster[data-ready=true]').waitFor();
   await require('./vr-tablet-return.cjs').discardCoveredCanvas(home,true);
   await home.evaluate(() => { window.testDenyNewGL = true; window.testDeniedContexts = 0; });
-  await child.close();await home.bringToFront();
+  await volume.locator('.vr-close').tap();
   await home.waitForFunction(()=>window.testDeniedContexts>0 && window.testStackHash()?.lit>100);
   for (const pane of before) {
     await home.waitForFunction(expected=>{

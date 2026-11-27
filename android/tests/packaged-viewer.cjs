@@ -184,6 +184,7 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
     }
     async function verifyPlaybackSpeed(count){
       const range=page.getByRole('slider',{name:'Play sürəti'});
+      await range.scrollIntoViewIfNeeded();
       const box=await range.boundingBox();
       assert.ok(box);
       for(const [fraction,value] of [[.1,'1'],[.9,'10']]){
@@ -312,15 +313,13 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
     await mpr.waitForFunction(()=>!!document.querySelector('[data-panel="MA"] line[data-id*="-endpoint-"],[data-panel="MA"] .dicom-canvas svg text,[data-panel="MA"] [data-kind="length"]'));
     suite.measurement=true;
     await mpr.close();await page.bringToFront();
-    const volumeOpening=page.waitForEvent('popup');
     await page.getByRole('button',{name:'3D həcm görüntüləmə',exact:true}).first().click();
-    const volume=await volumeOpening;
+    const volume=page.locator('dialog.tablet-volume-dialog:modal');
     await volume.locator('.vr-raster[data-ready=true]').waitFor({timeout:60000});
     assert.equal(await volume.locator('.vr-tools .vr-close:visible').count(),1);
     suite.volumeCanvas=true;
-    const volumeClosed=volume.waitForEvent('close');
-    await volume.locator('.vr-tools .vr-close').tap().catch(error=>{if(!volume.isClosed())throw error;});
-    await volumeClosed;await page.bringToFront();
+    await volume.locator('.vr-tools .vr-close').tap();
+    await volume.waitFor({state:'detached'});
     await panel.locator('.bottom-right').filter({hasText:'/ 12'}).waitFor();
     await page.locator('[data-panel=A][data-has-image=true] canvas').first().waitFor();
     await page.waitForFunction(()=>!document.querySelector('.tablet-volume-overlay,.sv-surface'));
@@ -388,18 +387,17 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
       await page.locator('input[type=file][accept*="zip"]').first().setInputFiles(process.env.RADAZ_LARGE_TABLET_ZIP);
       await page.waitForFunction(()=>document.querySelector('.statusbar')?.textContent.includes('442 DICOM'),{},{timeout:120000});
       const start=Date.now();
-      const volumeOpening=page.waitForEvent('popup');
-    await page.getByRole('button',{name:'3D həcm görüntüləmə',exact:true}).first().click();
-      const texture=page.locator('.sv-surface-canvas[data-context-dimensions]');await texture.waitFor({timeout:120000});
-      const dims=(await texture.getAttribute('data-context-dimensions')).split('x').map(Number);
-      assert.ok(dims.every(n=>n>=3)&&dims.reduce((a,b)=>a*b,4)<=24*1024*1024);
-      assert.match(await page.locator('.sv-surface footer').innerText(),/442 mənbə kəsiyi/);
+      await page.getByRole('button',{name:'3D həcm görüntüləmə',exact:true}).first().click();
+      const texture=page.locator('.radaz-vr .vr-raster[data-ready=true]');await texture.waitFor({timeout:120000});
+      const dims=(await page.locator('.radaz-vr footer span').first().innerText()).match(/\d+ × \d+ × \d+/)[0].split(' × ').map(Number);
+      assert.deepEqual(dims,[512,512,442]);
+      assert.equal(await page.locator('.radaz-vr').getAttribute('data-source-slices'),'442');
       suite.largeVolume={source:'512x512x442',texture:dims,ms:Date.now()-start};
       const image=texture.locator('canvas').first(),prior=await image.screenshot(),rect=await image.boundingBox();
       const startPoint={x:rect.x+rect.width*.5,y:rect.y+rect.height*.4};
       await gestures.contact(page,tabletInput,'touch',startPoint,{x:startPoint.x+75,y:startPoint.y+30});
       assert.ok(!prior.equals(await image.screenshot()),'volume rotates and repaints');
-      await page.getByRole('button',{name:'3D-ni bağla',exact:true}).click();
+      await page.getByRole('button',{name:'3D pəncərəni bağla',exact:true}).click();
     }
     if(network)await verifyAutomaticDelivery();
     assert.deepEqual([...requests],[]);
