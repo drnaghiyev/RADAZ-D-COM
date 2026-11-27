@@ -285,15 +285,11 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
     await mpr.close();await page.bringToFront();
     await page.getByRole('button',{name:'3D həcm görüntüləmə',exact:true}).first().click();
     const volume=page;
-    await volume.waitForFunction(()=>!!document.querySelector('.sv-surface-canvas[data-ready="true"] canvas, .cornerstone-volume-stage[data-ready="true"] canvas'),{},{timeout:60000});
-    const volumePresets=volume.getByLabel('3D preset',{exact:true});
-    if(await volumePresets.count()){
-      await volumePresets.selectOption('bone');
-      await volume.locator('.sv-surface-canvas[data-context-dimensions]').waitFor();
-      suite.volumeDimensions=await volume.locator('.sv-surface-canvas').getAttribute('data-context-dimensions');
-    }
+    await volume.locator('.vr-raster[data-ready=true]').waitFor({timeout:60000});
+    assert.equal(await volume.locator('.tablet-volume-overlay .vr-close:visible').count(),0);
     suite.volumeCanvas=true;
-    await volume.getByRole('button',{name:'3D-ni bağla',exact:true}).last().click();await page.bringToFront();
+    await volume.evaluate(()=>dispatchEvent(new Event('radaz:close-volume')));await page.bringToFront();
+    await panel.locator('.bottom-right').filter({hasText:'/ 12'}).waitFor();
     assert.equal(await panel.getAttribute('data-has-image'),'true');
     await page.waitForFunction(()=>!document.querySelector('.tablet-volume-overlay,.sv-surface'));
     const smartOpen=context.waitForEvent('page');
