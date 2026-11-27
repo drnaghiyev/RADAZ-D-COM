@@ -20,7 +20,7 @@ export function chooseTabletMatrix(dimensions:readonly number[],memory:Memory,ma
   const budgetMiB=Math.min(usable*.36,memory.totalMiB*.12,memory.heapMiB*3,1536);
   for(const matrix of [512,256,128] as const){
     if((matrix===512 && Math.max(columns,rows)<=256) || (matrix===256 && Math.max(columns,rows)<=128))continue;
-    if(matrix>ceiling || (matrix>128&&(memory.low||depth>maxTexture)) ||
+    if((matrix>128 && depth>=320 && memory.totalMiB<=4608) || matrix>ceiling || (matrix>128&&(memory.low||depth>maxTexture)) ||
       (matrix===512&&(software||memory.totalMiB<5600)))continue;
     const scale=Math.min(1,matrix/Math.max(columns,rows));
     const w=Math.max(1,Math.round(columns*scale)),h=Math.max(1,Math.round(rows*scale));

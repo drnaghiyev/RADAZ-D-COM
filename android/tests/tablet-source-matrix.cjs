@@ -6,17 +6,36 @@ withTablet(async ({p,errors})=>{
   await p.locator('input[type=file][accept*="zip"]').first().setInputFiles(process.env.RADAZ_PHANTOM_ZIP);
   await p.waitForFunction(n=>document.querySelector('[data-panel=A] .bottom-right')?.innerText.includes('/ '+n),depth,{timeout:180000});
   const profile=process.env.RADAZ_TEST_QUALITY||'medium';
-  const expected={low:128,medium:256,high:512,restart:128,allocation:128,upload:128,stall:128}[profile];
+  const expected={low:128,medium:256,high:512,restart:128,allocation:128,upload:128,stall:128,compact:128,pressure:128,late:256,compressed:256,closing:256,unreadable:256}[profile];
   assert.ok(expected);
   await p.evaluate(({profile,depth})=>{
     const memory={
       low:{totalMiB:2800,availableMiB:950,heapMiB:128,reserveMiB:240,low:true},
-      medium:{totalMiB:4100,availableMiB:1900,heapMiB:256,reserveMiB:250,low:false},
+      compact:{totalMiB:4100,availableMiB:1900,heapMiB:256,reserveMiB:250,low:false},
+      medium:{totalMiB:5100,availableMiB:1900,heapMiB:256,reserveMiB:250,low:false},
       high:{totalMiB:12288,availableMiB:6500,heapMiB:512,reserveMiB:300,low:false}
     };
     if(profile==='restart')localStorage.setItem('radaz.tablet.vr.opening',JSON.stringify({matrix:256,time:Date.now()}));
     const prompt=window.prompt.bind(window);
-    window.prompt=(key,...args)=>key==='radaz-tablet/volume-memory'?JSON.stringify(memory[profile]||memory.medium):prompt(key,...args);
+    window.qaRequests=0;window.qaEncoded=0;
+    const post=MessagePort.prototype.postMessage;
+    MessagePort.prototype.postMessage=function(msg,...args){
+      if(msg?.frame?.pixels && msg.width){
+        window.qaRequests++;
+        if(msg.frame.encoding?.compressed)window.qaEncoded++;
+        if(profile==='unreadable' && window.qaRequests>=Math.round(depth*.967)){window.qaDropped=true;return;}
+        if(['late','closing'].includes(profile) && window.qaRequests===Math.round(depth*.967)){window.qaDropped=true;return;}
+      }
+      return post.call(this,msg,...args);
+    };
+    window.prompt=(key,...args)=>{
+      if(key!=='radaz-tablet/volume-memory')return prompt(key,...args);
+      if(profile==='pressure' && window.qaRequests>=Math.floor(depth*.8)){
+        window.qaLowered=true;
+        return JSON.stringify({...memory.medium,availableMiB:430,low:true});
+      }
+      return JSON.stringify(memory[profile]||memory.medium);
+    };
     if(profile==='high'){
       const original=WebGL2RenderingContext.prototype.getParameter;
       WebGL2RenderingContext.prototype.getParameter=function(k){return k===37446?'Adreno (TM) 750':original.call(this,k);};
@@ -47,7 +66,34 @@ withTablet(async ({p,errors})=>{
   },{profile,depth});
   const before=Date.now();
   await p.getByRole('button',{name:'3D həcm görüntüləmə',exact:true}).first().click();
-  const volume=p.locator('dialog .radaz-vr');
+  if(depth>48){
+    const preview=p.locator('dialog .radaz-vr[data-volume-preview=true]');
+    await preview.locator('.vr-raster[data-ready=true]').waitFor({timeout:90000});
+    assert.ok(await p.locator('.tablet-volume-count').innerText());
+    if(profile==='unreadable'){
+      const alert=p.locator('dialog .shared-volume-loading [role=status]');
+      await alert.filter({hasText:/3D kəsiyi [0-9]+\/[0-9]+ oxunmadı/}).waitFor({timeout:100000});
+      assert.equal(await p.locator('dialog .radaz-vr:not([data-volume-preview])').count(),0);
+      assert.equal(await p.evaluate(()=>window.qaRequests),Math.round(depth*.967)+1);
+      await p.getByRole('button',{name:'3D pəncərəni bağla',exact:true}).click();
+      assert.deepEqual(errors,[]);console.log('PASS unreadable late slice identified, no incomplete volume presented as final');return;
+    }
+    if(profile==='late'||profile==='closing'){
+      await p.waitForFunction(()=>window.qaDropped,{},{timeout:90000});
+      const before=await p.evaluate(()=>window.qaRequests);
+      assert.equal(before,Math.round(depth*.967));
+      const close=preview.getByRole('button',{name:'3D pəncərəni bağla',exact:true});
+      if(profile==='closing'){
+        await close.tap();await p.locator('dialog.tablet-volume-dialog').waitFor({state:'detached'});
+        await p.getByRole('button',{name:'Local arxiv',exact:true}).first().tap();
+        await p.locator('.tablet-archive-window').getByRole('button',{name:'Pəncərəni bağla'}).tap();
+        assert.deepEqual(errors,[]);console.log('PASS closed during late read and archive reopened');return;
+      }
+      assert.ok(await close.isEnabled());
+      await p.waitForFunction(()=>window.qaRequests>1+Math.round(Number(document.querySelector('.radaz-vr')?.dataset.sourceSlices)*.967),{},{timeout:35000});
+    }
+  }
+  const volume=p.locator('dialog .radaz-vr:not([data-volume-preview])');
   await volume.locator('.vr-raster[data-ready=true]').waitFor({timeout:180000});
   const sample=await volume.evaluate((root)=>{
     for(let f=root[Object.keys(root).find(k=>k.startsWith('__reactFiber'))];f;f=f.return){
@@ -71,8 +117,12 @@ withTablet(async ({p,errors})=>{
     assert.deepEqual(sample.out[z],[650,average(1100+z),average(-200-z),650,-1024,-1024],'slice '+z);
   }
   if(['allocation','upload','stall'].includes(profile))assert.ok(await p.evaluate(()=>window.qaFailed),'failure was injected');
+  const counts=await p.evaluate(()=>({requests:window.qaRequests,encoded:window.qaEncoded,lowered:window.qaLowered}));
+  if(profile==='late')assert.equal(counts.requests,depth+1,'only the stalled plane was retried');
+  if(profile==='pressure'){assert.ok(counts.lowered);assert.equal(counts.requests,depth,'no reread on memory pressure');}
+  if(profile==='compressed')assert.ok(counts.encoded>0,'encapsulated frames decoded in the worker');
   assert.deepEqual(sample.spacing,[.7*ratio,.8*ratio,1.25]);
-  console.log(JSON.stringify({dims:sample.dims,bytes:sample.bytes,backend:sample.backend,readyMs:Date.now()-before,planesVerified:depth,first:sample.out[0],middle:sample.out[depth>>1],last:sample.out.at(-1)}));
+  console.log(JSON.stringify({profile,counts,dims:sample.dims,bytes:sample.bytes,backend:sample.backend,readyMs:Date.now()-before,planesVerified:depth,first:sample.out[0],middle:sample.out[depth>>1],last:sample.out.at(-1)}));
   await volume.locator('.vr-close').click();
   await volume.waitFor({state:'detached'});
   await p.getByRole('button',{name:'Local arxiv',exact:true}).first().click();

@@ -445,7 +445,7 @@
   {btn('Tam ekran · F',<PanelTop/>,()=>void fullscreen().catch(e=>notice(String(e))))}
   <ToolbarDividers scope="vr"/>
 - </div><VrCloseButton onClose={onClose}/>{hidden&&<button className="vr-unhide" aria-label="Alət panelini göstər" onClick={()=>setHidden(false)}><List/></button>}
-+ <VrCloseButton onClose={onClose}/></div>{hidden&&<VrCloseButton onClose={onClose}/>}{hidden&&<button className="vr-unhide" aria-label="Alət panelini göstər" onClick={()=>setHidden(false)}><List/></button>}
++ {!preview&&<VrCloseButton onClose={onClose}/>}</div>{(hidden||preview)&&<VrCloseButton onClose={onClose}/>}{hidden&&<button className="vr-unhide" aria-label="Alət panelini göstər" onClick={()=>setHidden(false)}><List/></button>}
   {menu&&<aside className="vr-menu" aria-label="3D seçimləri"><button className="vr-dismiss" aria-label="Menyunu bağla" onClick={()=>setMenu('')}><X/></button>
   {menu==='views'&&<><strong>Görünüş istiqaməti</strong>{faces.map((f,i)=><button key={f.key} onClick={()=>face(i)}>{f.key} · {f.name}</button>)}</>}
   {menu==='presets'&&<><strong>3D rəng rejimi</strong>{Object.entries(presets).filter(([k])=>v.modality==='MR'?k==='mr'||k.includes('mip'):k!=='mr').map(([key,label])=><button key={key} aria-pressed={s.style.preset===key} onClick={()=>{const def=initialStyle(v,v.range,key as VrPreset);style({preset:key as VrPreset,wl:def.wl,ww:def.ww});setMenu('');}}>{label}</button>)}</>}
@@ -478,20 +478,22 @@
  
  function geometryFor(data:Display, source:Series, anatomy:Props['anatomy']):AnatomyVolumeResult {
    const {dimensions,spacing,origin,direction}=data;
-@@ -18,35 +19,68 @@
+@@ -18,35 +19,80 @@
  }
  
  export function SharedVolumeView({series,anatomy,onClose}:Props){
 +  return <VolumeSession key={series?.id} series={series} anatomy={anatomy} onClose={onClose}/>;
 +}
 +function VolumeSession({series,anatomy,onClose}:Props){
++  const [readCount,setReadCount]=useState('');
 +  const [ceiling,setCeiling]=useState<TabletMatrix>(512);
 +  const [matrix,setMatrix]=useState<TabletMatrix|null>(null);
    const [loaded,setLoaded]=useState<Loaded|null>(null),[percent,setPercent]=useState(0),[error,setError]=useState('');
    const tablet=typeof location!=='undefined' && location.origin==='https://appassets.androidplatform.net';
    useEffect(()=>{
      const controller=new AbortController(),{signal}=controller;
-     setLoaded(null);setPercent(0);setError('');
+-    setLoaded(null);setPercent(0);setError('');
++    setLoaded(null);setPercent(0);setReadCount('');setError('');
      if(!series){setError('3D üçün KT və ya MRT seriyası seçin.');return;}
 -    if(!tablet && series.loading)return;
 +    if(series.loading)return;
@@ -522,14 +524,25 @@
          if(!signal.aborted)setLoaded({data,geometry:geometryFor(data,source,anatomy),preview:true});
        };
 -      const data=await tabletDisplayVolume(source.imageIds,limit,budget*1024**2,signal,setPercent,true,tablet?undefined:showPreview);
++      const dimensions=tablet?seriesGeometry(source.imageIds).dimensions:undefined;
 +      if(tablet){
-+        activeMatrix=chooseTabletMatrix(seriesGeometry(source.imageIds).dimensions,tabletVolumeMemory(),limit,software,Math.min(ceiling,previousMatrixLimit()) as TabletMatrix);
++        activeMatrix=chooseTabletMatrix(dimensions!,tabletVolumeMemory(),limit,software,Math.min(ceiling,previousMatrixLimit()) as TabletMatrix);
 +        clearOpening=trackMatrixOpening(activeMatrix);
-+        setMatrix(activeMatrix);watch();
++        setMatrix(activeMatrix);
 +      }
-+      const progress=(n:number)=>{if(!signal.aborted){watch();setPercent(Math.round(n*.94));}};
++      const progress=(done:number,total:number)=>{
++        if(!signal.aborted){setReadCount(done+' / '+total+' kəsik');setPercent(Math.floor(done*100/total));}
++      };
++      const review=(current:TabletMatrix,touched:number)=>{
++        const memory=tabletVolumeMemory();
++        // The current opening already owns these touched pages. Count them once in the budget.
++        memory.availableMiB=Math.min(memory.totalMiB,memory.availableMiB+touched/1024**2);
++        const next=chooseTabletMatrix(dimensions!,memory,limit,software,current);
++        if(next<current){activeMatrix=next;clearOpening();clearOpening=trackMatrixOpening(next);setMatrix(next);}
++        return next;
++      };
 +      const data=tablet
-+        ? await tabletSourceVolume(source.imageIds,limit,activeMatrix!,signal,progress)
++        ? await tabletSourceVolume(source.imageIds,limit,activeMatrix!,signal,progress,review,showPreview)
 +        : await tabletDisplayVolume(source.imageIds,limit,budget*1024**2,signal,setPercent,true,showPreview);
        const geometry=geometryFor(data,source,anatomy);
        if(anatomy?.mask.length){
@@ -537,10 +550,10 @@
          const [w,h,d]=dimensions;geometry.mask=new Uint8Array(w*h*d);
          const at=(x:number,y:number,z:number)=>origin.map((n,i)=>n+x*spacing[0]*direction[i]+y*spacing[1]*direction[3+i]+z*spacing[2]*direction[6+i]) as typeof origin;
 -        for(let z=0;z<d;z++){signal.throwIfAborted();geometry.mask.set(sampleAnatomyPlane(anatomy,at(0,0,z),at(1,0,z),at(0,1,z),w,h),z*w*h);if(z%8===0)await new Promise(r=>setTimeout(r,0));}
-+        for(let z=0;z<d;z++){signal.throwIfAborted();geometry.mask.set(sampleAnatomyPlane(anatomy,at(0,0,z),at(1,0,z),at(0,1,z),w,h),z*w*h);if(z%8===0){if(tablet){watch();setPercent(94+Math.floor(5*z/d));}await new Promise(r=>setTimeout(r,0));}}
++        for(let z=0;z<d;z++){signal.throwIfAborted();geometry.mask.set(sampleAnatomyPlane(anatomy,at(0,0,z),at(1,0,z),at(0,1,z),w,h),z*w*h);if(z%8===0){if(tablet){watch();setReadCount('3D maskası hazırlanır');}await new Promise(r=>setTimeout(r,0));}}
        }
 -      if(!signal.aborted)setLoaded({data,geometry,preview:false});
-+      if(!signal.aborted){if(tablet)watch();setLoaded({data,geometry,preview:false,opening:tablet?opening:undefined});}
++      if(!signal.aborted){if(tablet){watch();setReadCount('');}setLoaded({data,geometry,preview:false,opening:tablet?opening:undefined});}
      }
 -    void open(series).catch(e=>{if(!signal.aborted){setLoaded(null);setError(String(e.message||e));}});
 -    return ()=>controller.abort();
@@ -548,6 +561,7 @@
 -  if(!tablet && series?.loading)return <section className="shared-volume-loading"><VrCloseButton loading onClose={onClose}/><p role="status">Seriya oxunur · {series.imageIds.length}{series.discovered?` / ${series.discovered}`:''} kəsik</p></section>;
 -  if(!loaded)return <section className="shared-volume-loading"><VrCloseButton loading onClose={onClose}/><p role="status">{error||`3D hazırlanır… ${percent}%`}</p></section>;
 -  return <SmartVolumeSurface key={loaded.geometry.sourceKey} sourceValues={loaded.data.values} result={loaded.geometry} colors={{}} range={loaded.data.range} sourceSlices={loaded.data.sourceSlices} cpuOnly={loaded.data.cpuOnly}
+-    progressiveDesktop={!tablet} previewPercent={loaded.preview?percent:undefined} title="3D həcm görüntüləmə" onClose={onClose}/>;
 +    void open(series).catch(e=>{if(!signal.aborted){
 +      finished();
 +      if((e instanceof RangeError || /out of memory|allocation failed/i.test(String(e))) && lower())return;
@@ -556,62 +570,138 @@
 +    return ()=>{controller.abort();finished();};
 +  },[series?.id,series?.imageIds,series?.loading,anatomy,tablet,ceiling]);
 +  if(series?.loading)return <section className="shared-volume-loading"><VrCloseButton loading onClose={onClose}/><p role="status">Seriya oxunur · {series.imageIds.length}{series.discovered?` / ${series.discovered}`:''} kəsik</p></section>;
-+  if(!loaded)return <section className="shared-volume-loading"><VrCloseButton loading onClose={onClose}/><p role="status">{error||`3D hazırlanır… ${matrix?matrix+' px · ':''}${percent}%`}</p></section>;
-+  return <SmartVolumeSurface key={loaded.geometry.sourceKey} sourceValues={loaded.data.values} result={loaded.geometry} colors={{}} range={loaded.data.range} opening={loaded.opening} sourceSlices={loaded.data.sourceSlices} cpuOnly={loaded.data.cpuOnly}
-     progressiveDesktop={!tablet} previewPercent={loaded.preview?percent:undefined} title="3D həcm görüntüləmə" onClose={onClose}/>;
++  if(!loaded)return <section className="shared-volume-loading"><VrCloseButton loading onClose={onClose}/><p role="status">{error||`3D hazırlanır… ${matrix?matrix+' px · ':''}${tablet?readCount:percent+'%'}`}</p></section>;
++  return <><SmartVolumeSurface key={loaded.geometry.sourceKey} sourceValues={loaded.data.values} result={loaded.geometry} colors={{}} range={loaded.data.range} opening={loaded.opening} sourceSlices={loaded.data.sourceSlices} cpuOnly={loaded.data.cpuOnly}
++    progressiveDesktop={!tablet} previewPercent={loaded.preview?percent:undefined} title="3D həcm görüntüləmə" onClose={onClose}/>{tablet&&loaded.preview&&<div className="tablet-volume-count" role="status">{matrix} px · {readCount}</div>}</>;
  }
 --- a/lib/cornerstone.ts
 +++ b/lib/cornerstone.ts
-@@ -628,6 +628,49 @@
-     }
+@@ -1,3 +1,4 @@
++import {tabletPlaneReader,type TabletFrame,type ReadReply} from '@/components/tablet-volume-reader';
+ import {preserveContextSizeOnRemoval} from './render-context-lifecycle';
+ import * as core from '@cornerstonejs/core';
+ import * as tools from '@cornerstonejs/tools';
+@@ -629,6 +630,120 @@
    }
    return {...displayGeometry(source,dimensions),values,range:[minimum,Math.max(minimum+1,maximum)]};
-+}
+ }
 +
-+/** Resample only in-plane. Every acquired slice retains its patient-space position. */
-+export async function tabletSourceVolume(imageIds:string[], maxTexture:number, matrix:128|256|512, signal:AbortSignal, progress:(percent:number)=>void) {
-+  signal.throwIfAborted();
-+  const source=seriesGeometry(imageIds);
-+  const [columns,rows,depth]=source.dimensions;
-+  const scale=Math.min(1,matrix/Math.max(columns,rows));
-+  const width=Math.max(1,Math.round(columns*scale)), height=Math.max(1,Math.round(rows*scale));
-+  const dimensions:Point3=[width,height,depth];
-+  const geometry=displayGeometry(source,dimensions);
-+  const sample=scale<1 ? displayPlaneSampler(columns,rows,areaWeights(columns,width),areaWeights(rows,height),true) : null;
-+  const planeSize=width*height, length=planeSize*depth;
-+  let values:Int16Array|Float32Array=sample ? new Float32Array(length) : new Int16Array(length);
-+  let minimum=Infinity, maximum=-Infinity, lastYield=performance.now();
-+  for(let z=0;z<depth;z++){
-+    signal.throwIfAborted();
-+    const record=await readDisplayPlane(source.imageIds[z],signal);
-+    signal.throwIfAborted();
-+    if(record.color || record.columns!==columns || record.rows!==rows || record.pixels.length!==columns*rows)
-+      throw Error('3D üçün eyni ölçülü monoxrom KT və ya MRT kəsikləri seçin.');
-+    const plane=sample ? sample(record.pixels) : record.pixels;
-+    if(values instanceof Int16Array && plane instanceof Float32Array &&
-+       (record.min < -32768 || record.max > 32767 || !plane.every(Number.isInteger))){
-+      const full=new Float32Array(length);
-+      full.set(values.subarray(0,z*planeSize));
-+      values=full;
-+    }
-+    values.set(plane,z*planeSize);
-+    if(sample){
-+      for(let i=0;i<planeSize;i++){minimum=Math.min(minimum,plane[i]);maximum=Math.max(maximum,plane[i]);}
-+    }else{
-+      minimum=Math.min(minimum,record.min);maximum=Math.max(maximum,record.max);
-+    }
-+    if(performance.now()-lastYield>16){
-+      progress(Math.round(100*(z+1)/depth));
-+      await yieldToBrowser();lastYield=performance.now();
-+    }
++async function tabletFrame(id:string,signal:AbortSignal):Promise<TabletFrame>{
++  const r=records.get(id);
++  if(!r || r.color)throw Error('3D üçün monoxrom KT və ya MRT kəsiyi seçin.');
++  const copy=(record:RecordItem):TabletFrame=>({columns:record.columns,rows:record.rows,pixels:record.pixels.slice()});
++  if(r.pixels.length)return copy(r);
++  const pending=pendingDicoms.get(id),disk=diskDicoms.get(id);
++  if(!pending && !disk)return copy(await readDisplayPlane(id,signal));
++  let ds:DataSet,bytes:Uint8Array;
++  if(pending){ds=pending.ds;bytes=pending.bytes;}
++  else{
++    const res=await fetch(disk!.url,{signal:AbortSignal.any([signal,disk!.signal])});
++    if(!res.ok)throw Error('DICOM faylı oxunmadı.');
++    bytes=new Uint8Array(await res.arrayBuffer());ds=parseDicomFile(bytes);
 +  }
 +  signal.throwIfAborted();
-+  progress(100);
-+  const range:[number,number]=[minimum,Math.max(minimum+1,maximum)];
-+  return {...geometry,values,range,cpuOnly:dimensions.some(n=>n>maxTexture)};
- }
++  const syntax=ds.string('x00020010')||'1.2.840.10008.1.2.1',element=ds.elements.x7fe00010;
++  const bits=ds.uint16('x00280100')||0,stored=ds.uint16('x00280101')||0,high=ds.uint16('x00280102')??stored-1;
++  const photo=ds.string('x00280004')||'MONOCHROME2';
++  if(!element||ds.uint16('x00280002')!==1||!['MONOCHROME1','MONOCHROME2'].includes(photo)||
++    ![8,16].includes(bits)||stored<1||stored>bits||high<stored-1||high>=bits)throw Error('3D kəsiyinin piksel formatı dəstəklənmir.');
++  const compressed=!!element.encapsulatedPixelData || !['1.2.840.10008.1.2','1.2.840.10008.1.2.1','1.2.840.10008.1.2.2'].includes(syntax);
++  const frame=r.frameIndex||0;
++  let pixels:Uint8Array;
++  if(compressed){
++    const {default:getPixelData}=await import('@cornerstonejs/dicom-image-loader/wadouri/getPixelData');
++    const encoded=getPixelData(ds,frame);if(!encoded?.length)throw Error('Sıxılmış DICOM kadrı tapılmadı.');
++    pixels=new Uint8Array(encoded);
++  }else{
++    const size=r.rows*r.columns*(bits/8),offset=element.dataOffset+frame*size;
++    if(element.length<(frame+1)*size||offset+size>bytes.length)throw Error('DICOM piksel məlumatı natamamdır.');
++    pixels=bytes.slice(offset,offset+size);
++  }
++  return {columns:r.columns,rows:r.rows,pixels,encoding:{syntax,bits,stored,high,photo,compressed,
++    signed:ds.uint16('x00280103')===1,slope:asNumber(ds,'x00281053',1),intercept:asNumber(ds,'x00281052',0),compact:calibratedScalarBits(ds)===16}};
++}
++
++/** One acquisition is read once, apart from a bounded retry of an unresponsive plane. */
++export async function tabletSourceVolume(imageIds:string[],maxTexture:number,matrix:128|256|512,signal:AbortSignal,
++    progress:(done:number,total:number)=>void,review:(size:128|256|512,touched:number)=>128|256|512,preview:(data:DisplayTexture)=>void){
++  signal.throwIfAborted();
++  const source=seriesGeometry(imageIds),[columns,rows,depth]=source.dimensions;
++  const scale=Math.min(1,matrix/Math.max(columns,rows));
++  let width=Math.max(1,Math.round(columns*scale)),height=Math.max(1,Math.round(rows*scale)),planeSize=width*height;
++  const scaled=width!==columns||height!==rows;
++  let values:Int16Array|Float32Array=scaled?new Float32Array(planeSize*depth):new Int16Array(planeSize*depth);
++  const previewDepth=depth>48?32:0;
++  const planes=Array.from({length:previewDepth},(_,i)=>Math.round(i*(depth-1)/(previewDepth-1)));
++  const first=new Set(planes),order=planes.concat(Array.from({length:depth},(_,z)=>z).filter(z=>!first.has(z)));
++  const ratio=Math.min(1,96/Math.max(width,height));
++  const pw=Math.max(1,Math.round(width*ratio)),ph=Math.max(1,Math.round(height*ratio));
++  const previewSample=previewDepth?displayPlaneSampler(width,height,areaWeights(width,pw),areaWeights(height,ph),true):null;
++  let small:Float32Array|null=previewDepth?new Float32Array(pw*ph*previewDepth):null;
++  let minimum=Infinity,maximum=-Infinity,lastReport=0,lastCheck=performance.now();
++  async function checkMemory(done:number){
++    const next=review(matrix,done*planeSize*values.BYTES_PER_ELEMENT);
++    if(next>=matrix)return;
++    const ratio=Math.min(1,next/Math.max(columns,rows));
++    const w=Math.max(1,Math.round(columns*ratio)),h=Math.max(1,Math.round(rows*ratio));
++    const shrink=displayPlaneSampler(width,height,areaWeights(width,w),areaWeights(height,h),true);
++    const compact=new Float32Array(w*h*depth);
++    minimum=Infinity;maximum=-Infinity;
++    let lastYield=performance.now();
++    for(let j=0;j<done;j++){
++      signal.throwIfAborted();
++      const z=order[j],plane=shrink(values.subarray(z*planeSize,(z+1)*planeSize));
++      compact.set(plane,z*w*h);
++      for(let k=0;k<plane.length;k++){const v=plane[k];if(v<minimum)minimum=v;if(v>maximum)maximum=v;}
++      if(performance.now()-lastYield>10){await yieldToBrowser();lastYield=performance.now();}
++    }
++    values=compact;width=w;height=h;planeSize=w*h;matrix=next;
++  }
++  const reader=tabletPlaneReader(async(id,s)=>{
++    const frame=await tabletFrame(id,s);
++    if(frame.columns!==columns || frame.rows!==rows)throw Error('3D kəsiklərinin ölçüləri uyğun gəlmir.');
++    return frame;
++  });
++  progress(0,depth);
++  try{
++    for(let i=0;i<depth;i++){
++      signal.throwIfAborted();
++      const z=order[i];
++      let part:ReadReply;
++      try{part=await reader.read(source.imageIds[z],width,height,signal);}
++      catch(e){
++        signal.throwIfAborted();
++        if(e instanceof RangeError)throw e;
++        throw Error(`3D kəsiyi ${z+1}/${depth} oxunmadı. ${e instanceof Error?e.message:String(e)}`);
++      }
++      signal.throwIfAborted();
++      if(values instanceof Int16Array && part.pixels instanceof Float32Array &&
++         (part.min<-32768||part.max>32767||!part.pixels.every(Number.isInteger))){
++        const full=new Float32Array(values.length);full.set(values);values=full;
++      }
++      values.set(part.pixels,z*planeSize);minimum=Math.min(minimum,part.min);maximum=Math.max(maximum,part.max);
++      if(small && previewSample && i<previewDepth){
++        small.set(previewSample(part.pixels),i*pw*ph);
++        if(i+1===previewDepth){
++          const g=displayGeometry(source,[pw,ph,depth]);
++          preview({...g,dimensions:[pw,ph,previewDepth],spacing:[g.spacing[0],g.spacing[1],g.spacing[2]*(depth-1)/(previewDepth-1)],
++            values:small,range:[minimum,Math.max(minimum+1,maximum)],cpuOnly:true});
++          small=null;
++        }
++      }
++      if(i+1>=previewDepth && (i+1===depth || (i%16===15 && performance.now()-lastCheck>=1500))){
++        await checkMemory(i+1);lastCheck=performance.now();
++      }
++      if(performance.now()-lastReport>=100 || i+1===depth){progress(i+1,depth);lastReport=performance.now();}
++    }
++    const geometry=displayGeometry(source,[width,height,depth]);
++    return {...geometry,values,range:[minimum,Math.max(minimum+1,maximum)] as [number,number],cpuOnly:geometry.dimensions.some(n=>n>maxTexture)};
++  }finally{reader.dispose();}
++}
++
  
  /** Bounded display texture. Its voxel centres and physical extent match the acquisition. */
+ export async function tabletDisplayVolume(imageIds:string[], maxDimension:number,budgetBytes:number,signal:AbortSignal,progress:(percent:number)=>void,cacheForReopen=false,onPreview?:(data:DisplayTexture)=>void):Promise<DisplayTexture> {
 --- a/components/smart-volume-surface.tsx
 +++ b/components/smart-volume-surface.tsx
 @@ -2,14 +2,15 @@
