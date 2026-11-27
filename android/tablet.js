@@ -2,11 +2,42 @@
 (() => {
   'use strict';
   const call = (operation, value = '') => window.prompt('radaz-tablet/' + operation, value);
-  if (location.pathname === '/') {
-    window.addEventListener('radaz:volume-visible', event => call('volume', event.detail === true ? 'open' : 'closed'));
-  }
   const workspace = location.pathname.replace(/^\/|\/$/g, '');
   if (['archive','pacs','mpr','3d'].includes(workspace)) document.documentElement.dataset.tabletWorkspace = workspace;
+  // The volume and stitch toolbars already own their close controls.
+  if (workspace && workspace !== '3d') {
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.dataset.tabletClose = '';
+    close.textContent = '×';
+    close.title = 'Pəncərəni bağla';
+    close.setAttribute('aria-label', close.title);
+    close.addEventListener('click', () => {
+      if (call('close-window') !== 'ok') window.close();
+    });
+    const primary = {
+      archive: '.records-header:has(.flat-toolbar-top)', pacs: '.records-header:has(.flat-toolbar-top)', mpr: '.topbar:has(.flat-toolbar-top)',
+      report: '.report-top-actions', print: '.output-page-nav', media: '.output-page-nav',
+      'printer-settings': '.output-page-nav', 'private-network': '.dn-top',
+      'private-network/settings': '.dn-top', 'chatgpt-help': '.chatgpt-help-page header',
+    };
+    const place = () => {
+      if (workspace === 'stitch' && document.querySelector('[aria-label="Stitch pəncərəsini bağla"]')) {
+        close.remove();
+        return;
+      }
+      if (close.isConnected && !close.classList.contains('tablet-close-floating')) return;
+      const bar = document.querySelector(primary[workspace] || 'header');
+      const target = bar || document.body;
+      if (!target) return;
+      close.classList.toggle('tablet-close-floating', !bar);
+      if (target !== close.parentNode) target.append(close);
+    };
+    const changes = new MutationObserver(place);
+    changes.observe(document.documentElement, {childList:true, subtree:true});
+    place();
+    window.addEventListener('pagehide', () => changes.disconnect(), {once:true});
+  }
   const dockPreference = 'radaz-tablet-dock-columns';
   const applyDock = () => {
     document.documentElement.dataset.tabletColumns = localStorage.getItem(dockPreference) === '1' ? '1' : '2';

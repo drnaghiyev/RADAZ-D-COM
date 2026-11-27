@@ -31,12 +31,12 @@ public final class ViewerActivity extends Activity {
     private final Set<WebView> initialized=Collections.newSetFromMap(new IdentityHashMap<>());
     private final List<Uri> waiting=new ArrayList<>();
     private FrameLayout stage;
-    private LinearLayout childBar;
-    private TextView childTitle;
+    private final Map<WebView,String> handoffs=new IdentityHashMap<>();
+    private String nextHandoff;
+    private final Set<WebView> closing=Collections.newSetFromMap(new IdentityHashMap<>());
     private WebView home, active, archiveWindow, pacsWindow, chooserWindow, saveWindow;
     private ValueCallback<Uri[]> chooser;
     private boolean pickingTree;
-    private boolean volumeVisible;
     private Runnable removeVolumeBack;
     private String saveId;
     private OutputStream saving;
@@ -74,18 +74,6 @@ public final class ViewerActivity extends Activity {
                 return insets;
             });
         }
-        childBar=new LinearLayout(this);
-        childBar.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        int side=Math.round(44*getResources().getDisplayMetrics().density);
-        childTitle=new TextView(this);childTitle.setSingleLine();childTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        childTitle.setPadding(side/3,0,0,0);
-        childBar.addView(childTitle,new LinearLayout.LayoutParams(0,-2,1));
-        Button closeButton=new Button(this,null,android.R.attr.borderlessButtonStyle);
-        closeButton.setText("×");closeButton.setTextSize(25);closeButton.setPadding(0,0,0,0);
-        closeButton.setContentDescription("Pəncərəni bağla");
-        closeButton.setOnClickListener(v->{if(active!=null && active!=home)close(active);});
-        childBar.addView(closeButton,new LinearLayout.LayoutParams(side,side));
-        childBar.setVisibility(View.GONE);root.addView(childBar,new LinearLayout.LayoutParams(-1,side));
         stage=new FrameLayout(this);root.addView(stage,new LinearLayout.LayoutParams(-1,0,1));
         setContentView(root);
         home=createWindow();
@@ -122,7 +110,6 @@ public final class ViewerActivity extends Activity {
                 return null;
             }
             @Override public void onPageStarted(WebView view,String url,android.graphics.Bitmap favicon) {
-                if(view==home && volumeVisible){volumeVisible=false;updateVolumeBack();}
                 initialized.remove(view);clinics.navigate(view,url);
                 if(!"about:blank".equals(url) && !url.startsWith("blob:") && !TabletAssets.isLocal(Uri.parse(url)))view.stopLoading();
             }
@@ -137,12 +124,15 @@ public final class ViewerActivity extends Activity {
     private final class Chrome extends WebChromeClient {
         @Override public boolean onCreateWindow(WebView opener,boolean isDialog,boolean gesture,Message result) {
             if(windows.size()>=10 || !windows.contains(opener))return false;
-            WebView child=createWindow();openers.put(child,opener);show(child);
+            WebView child=createWindow();openers.put(child,opener);
+            if(opener==home && nextHandoff!=null){
+                handoffs.put(child,nextHandoff);nextHandoff=null;
+            }
+            show(child);
             ((WebView.WebViewTransport)result.obj).setWebView(child);result.sendToTarget();return true;
         }
         @Override public void onCloseWindow(WebView view){if(view!=home)close(view);}
-        @Override public void onRequestFocus(WebView view){if(windows.contains(view))show(view);}
-        @Override public void onReceivedTitle(WebView view,String title){if(view==active)updateChildBar();}
+        @Override public void onRequestFocus(WebView view){if(active!=view && !closing.contains(view) && windows.contains(view))show(view);}
         @Override public boolean onShowFileChooser(WebView web,ValueCallback<Uri[]> callback,FileChooserParams params){
             pick(web,params.getMode()==2?"folder":params.getMode()==FileChooserParams.MODE_OPEN_MULTIPLE?"multiple":"single",callback);return true;
         }
@@ -152,11 +142,14 @@ public final class ViewerActivity extends Activity {
             String answer="ok";
             try {
                 switch(command.substring("radaz-tablet/".length())) {
-                    case "volume":
-                        if(web!=home || !("open".equals(value) || "closed".equals(value))){answer="denied";break;}
-                        volumeVisible="open".equals(value);
-                        updateVolumeBack();
-                        if(!volumeVisible && active==web)refreshHomeAfterVolume(web);
+                    case "prepare-child":
+                        if(web!=home || web!=active || value==null || !value.matches("[0-9a-fA-F-]{36}")){answer="denied";break;}
+                        nextHandoff=value;
+                        updateTimer.postDelayed(()->{if(value.equals(nextHandoff))nextHandoff=null;},1500);
+                        break;
+                    case "close-window":
+                        if(web==home || web!=active)answer="denied";
+                        else updateTimer.post(()->requestClose(web));
                         break;
                     case "updates": if(web==active)web.post(()->updater.check(true));else answer="denied";break;
                     case "network": answer=clinics.request(web,url,value);break;
@@ -165,7 +158,7 @@ public final class ViewerActivity extends Activity {
                         boolean pacs=command.endsWith("/open-pacs");
                         if(web!=home || web!=active || !"/".equals(Uri.parse(url).getPath()))answer="denied";
                         else if((pacs?pacsWindow:archiveWindow)==null && windows.size()>=10)answer="busy";
-                        else web.post(()->openRecords(pacs));
+                        else updateTimer.post(()->{if(active==home && !isFinishing())openRecords(pacs);});
                         break;
                     case "open-studies":
                         if (web!=active || !openStudies(value)) answer="denied";
@@ -220,7 +213,7 @@ public final class ViewerActivity extends Activity {
     private void show(WebView view){
         if(view==null || !windows.contains(view))return;
         if(active!=null && active!=view)active.setVisibility(View.INVISIBLE);
-        active=view;view.setVisibility(View.VISIBLE);view.bringToFront();view.requestFocus();updateChildBar();updateVolumeBack();
+        active=view;view.setVisibility(View.VISIBLE);view.bringToFront();view.requestFocus();updateChildBack();
     }
     private static boolean isViewerWorkspace(WebView web){
         String url=web==null?null:web.getUrl();
@@ -230,13 +223,12 @@ public final class ViewerActivity extends Activity {
         String path=uri.getPath();
         return path!=null && path.matches("/(archive|pacs|mpr|3d)/?");
     }
-    private void updateChildBar(){
-        boolean child=active!=null&&active!=home;
-        childBar.setVisibility(child?View.VISIBLE:View.GONE);
-        if(child){
-            String title=active.getTitle();
-            childTitle.setText(title==null||title.contains("RADAZ_VIEWER_")||title.contains("RADAZ_RECORDS_")?"":title);
-        }
+    private void requestClose(WebView web) {
+        if(web==home || !windows.contains(web) || !closing.add(web))return;
+        if(web==archiveWindow || web==pacsWindow){close(web);return;}
+        // Browser-created windows must invalidate the opener's WindowProxy as well.
+        web.evaluateJavascript("window.close()",null);
+        updateTimer.postDelayed(()->{if(closing.contains(web))close(web);},450);
     }
     private void close(WebView web) {
         if(web==home || !windows.contains(web))return;
@@ -245,32 +237,26 @@ public final class ViewerActivity extends Activity {
         for(Map.Entry<WebView,WebView> entry:openers.entrySet()){
             if(entry.getValue()==web)entry.setValue(owner);
         }
-        boolean volume=isViewerWorkspace(web) && Uri.parse(web.getUrl()).getPath().matches("/3d/?");
+        String url=web.getUrl();
+        Uri uri=Uri.parse(url==null?"":url);
+        String token=handoffs.remove(web);
+        if(token==null && TabletAssets.isLocal(uri))token=uri.getQueryParameter("handoff");
+        boolean unidentified=url==null || "about:blank".equals(url);
         if(web==archiveWindow)archiveWindow=null;
         if(web==pacsWindow)pacsWindow=null;
-        initialized.remove(web);windows.remove(web);clinics.navigate(web,null);stage.removeView(web);web.destroy();
+        initialized.remove(web);windows.remove(web);closing.remove(web);
+        clinics.navigate(web,null);
         if(active==web){active=null;show(owner);}
-        if(volume && owner==home)home.evaluateJavascript("window.dispatchEvent(new Event('radaz:close-volume'))",null);
+        stage.removeView(web);
+        if(token!=null || unidentified){
+            String payload=token==null?"null":JSONObject.quote(token);
+            owner.evaluateJavascript("window.dispatchEvent(new CustomEvent('radaz:child-closed',{detail:"+payload+"}))",null);
+        }
+        // Leave the Chromium close/focus callback before destroying its WebView.
+        updateTimer.post(web::destroy);
     }
-    private void refreshHomeAfterVolume(WebView web) {
-        web.post(()->{
-            if(web!=home || active!=web || volumeVisible || isFinishing())return;
-            web.requestLayout();
-            web.postInvalidateOnAnimation();
-            web.postVisualStateCallback(0,new WebView.VisualStateCallback(){
-                @Override public void onComplete(long requestId){
-                    if(web==home && active==web && !volumeVisible)web.postInvalidateOnAnimation();
-                }
-            });
-        });
-    }
-    private boolean dismissVolume() {
-        if(!volumeVisible || active!=home || home==null)return false;
-        home.evaluateJavascript("window.dispatchEvent(new Event('radaz:close-volume'))",null);
-        return true;
-    }
-    private void updateVolumeBack() {
-        boolean needed=!isFinishing() && active!=null && (active!=home || volumeVisible);
+    private void updateChildBack() {
+        boolean needed=!isFinishing() && active!=null && active!=home;
         if(!needed && removeVolumeBack!=null){removeVolumeBack.run();removeVolumeBack=null;}
         if(needed && removeVolumeBack==null && Build.VERSION.SDK_INT>=33){
             removeVolumeBack=VolumeBack.register(this);
@@ -286,10 +272,9 @@ public final class ViewerActivity extends Activity {
         }
     }
     @Override public void onBackPressed(){
-        if(dismissVolume())return;
-        if(active!=home && isViewerWorkspace(active))close(active);
+        if(active!=home && isViewerWorkspace(active))requestClose(active);
         else if(active!=null&&active.canGoBack())active.goBack();
-        else if(active!=null && active!=home)close(active);
+        else if(active!=null && active!=home)requestClose(active);
         else super.onBackPressed();
     }
 
@@ -364,7 +349,7 @@ public final class ViewerActivity extends Activity {
         return ok;
     }
     @Override protected void onDestroy(){
-        volumeVisible=false;active=null;updateVolumeBack();
+        active=null;closing.clear();updateChildBack();
         endSave();reader.shutdownNow();if(clinics!=null)clinics.destroy();
         if(receiver!=null)receiver.close();
         if(chooser!=null)chooser.onReceiveValue(null);

@@ -287,9 +287,11 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
     await page.getByRole('button',{name:'3D həcm görüntüləmə',exact:true}).first().click();
     const volume=await volumeOpening;
     await volume.locator('.vr-raster[data-ready=true]').waitFor({timeout:60000});
-    assert.equal(await volume.locator('.vr-close:visible').count(),0);
+    assert.equal(await volume.locator('.vr-tools .vr-close:visible').count(),1);
     suite.volumeCanvas=true;
-    await volume.close();await page.bringToFront();
+    const volumeClosed=volume.waitForEvent('close');
+    await volume.locator('.vr-tools .vr-close').tap().catch(error=>{if(!volume.isClosed())throw error;});
+    await volumeClosed;await page.bringToFront();
     await panel.locator('.bottom-right').filter({hasText:'/ 12'}).waitFor();
     await page.locator('[data-panel=A][data-has-image=true] canvas').first().waitFor();
     await page.waitForFunction(()=>!document.querySelector('.tablet-volume-overlay,.sv-surface'));

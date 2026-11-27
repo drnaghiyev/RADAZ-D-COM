@@ -17,7 +17,19 @@ html[data-tablet-workspace] body {margin:0;min-width:0}
 html[data-tablet-workspace] :is(.archive-shell,.pacs-shell,.workstation.detached,.radaz-vr,.shared-volume-loading) {
   box-sizing:border-box;width:100%;max-width:100vw;height:100dvh;min-height:0;
 }
-html[data-tablet-workspace="3d"] :is(.vr-close,.shared-volume-loading>button) {display:none!important}
+button[data-tablet-close] {
+  order:2147483647;flex:0 0 42px;width:42px;height:42px;padding:0;border-radius:5px;
+  border:1px solid #344e5c;background:#1b2f3b;color:#e1edf0;font:24px/1 system-ui;touch-action:manipulation
+}
+body .flat-toolbar-workspace .records-header:has(>[data-tablet-close]) .records-header-filters {
+  min-width:0!important;max-width:68%!important;overflow-x:auto!important
+}
+body .flat-toolbar-workspace :is(.topbar,.records-header):has(>[data-tablet-close]) .toolbar-overflow-trigger {
+  position:static!important;inset:auto!important;order:2147483646;flex:0 0 auto
+}
+button.tablet-close-floating {position:fixed;top:4px;right:4px;z-index:100}
+html[data-tablet-workspace="3d"] .radaz-vr .vr-tools>.vr-close {position:static;order:2147483647}
+html[data-tablet-workspace="3d"] .radaz-vr .vr-tools {padding-inline-end:5px}
 body .flat-toolbar-workspace .flat-toolbar-tool .tablet-folder-command .tablet-import-options{width:13px!important;min-width:13px!important;flex-basis:13px!important}
 
 body .flat-toolbar-workspace .flat-toolbar-right .flat-toolbar-tool :is(.workspace-split,.tablet-folder-command){width:var(--tablet-cell);height:var(--tablet-cell)}
@@ -28,3 +40,7 @@ body .flat-toolbar-workspace .flat-toolbar-right .flat-toolbar-tool :is(.workspa
 .workstation .series-rail .patient-study-summary{margin:0;padding:0}
 .workstation .body-grid:has(.series-list > .rail-empty){grid-template-columns:minmax(0,1fr)}
 .workstation .body-grid:has(.series-list > .rail-empty) :is(.series-rail,.series-rail-toggle){display:none}
+
+html[data-tablet-workspace="mpr"] .flat-toolbar-workspace.has-right-dock {padding-right:0}
+html[data-tablet-workspace="mpr"] .flat-toolbar-workspace.has-right-dock > main > .body-grid {margin-right:var(--dock-width);min-width:0}
+body .flat-toolbar-workspace :is(.topbar,.records-header)>button[data-tablet-close] {min-width:42px!important;min-height:42px!important}
