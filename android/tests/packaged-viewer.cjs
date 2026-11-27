@@ -376,7 +376,7 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
       await page.getByRole('button',{name:'3D həcm görüntüləmə',exact:true}).first().click();
       const texture=page.locator('.radaz-vr .vr-raster[data-ready=true]');await texture.waitFor({timeout:120000});
       const dims=(await page.locator('.radaz-vr footer span').first().innerText()).match(/\d+ × \d+ × \d+/)[0].split(' × ').map(Number);
-      assert.deepEqual(dims,[512,512,442]);
+      assert.ok([128,256,512].includes(dims[0]));assert.deepEqual(dims,[dims[0],dims[0],442]);
       assert.equal(await page.locator('.radaz-vr').getAttribute('data-source-slices'),'442');
       suite.largeVolume={source:'512x512x442',texture:dims,ms:Date.now()-start};
       const image=texture.locator('canvas').first(),prior=await image.screenshot(),rect=await image.boundingBox();

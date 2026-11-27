@@ -44,6 +44,27 @@ withTablet(async ({ctx, p, pane, errors}) => {
         return (!button.classList.contains('vr-close') || b.right>=innerWidth-8) && b.width>=30 && b.left>=bar.left-1 && b.right<=innerWidth+1 && b.top>=bar.top-1 && b.bottom<=bar.bottom+1 && button.contains(document.elementFromPoint(b.left+b.width/2,b.top+b.height/2));
       });
       assert.ok(inline,route+' close is inside the tool row');
+      if(route==='archive'||route==='pacs'){
+        const cross=child.locator('.records-header > [data-tablet-close] svg path');
+        assert.equal(await cross.count(),1);
+        assert.ok(await cross.evaluate(path=>{
+          const rect=path.getBoundingClientRect(),css=getComputedStyle(path);
+          return rect.width>=10 && rect.height>=10 && css.visibility==='visible' && css.stroke!=='none' && parseFloat(css.strokeWidth)>=2;
+        }),route+' shows the close icon');
+        const shot=await child.locator('.records-header > [data-tablet-close]').screenshot({scale:'css'});
+        const bright=await child.evaluate(async src=>{
+          const image=new Image();image.src=src;await image.decode();
+          const c=document.createElement('canvas');c.width=image.width;c.height=image.height;
+          const ctx=c.getContext('2d');ctx.drawImage(image,0,0);
+          const x=Math.floor(c.width/2),y=Math.floor(c.height/2);
+          return [[-4,-4],[4,4],[-4,4],[4,-4]].map(([dx,dy])=>{
+            const data=ctx.getImageData(x+dx-1,y+dy-1,3,3).data;
+            return data.some((r,i)=>i%4===0 && r>160 && data[i+1]>160 && data[i+2]>160);
+          }).every(Boolean);
+        },'data:image/png;base64,'+shot.toString('base64'));
+        assert.ok(bright,route+' all four arms of the X are painted');
+
+      }
       const box = await child.locator(selector).first().boundingBox();
       assert.ok(box.width>60 && box.height>60 && box.x>=-1 && box.y>=-1
         && box.x+box.width<=width+2 && box.y+box.height<=height+2, route+' '+JSON.stringify(box));

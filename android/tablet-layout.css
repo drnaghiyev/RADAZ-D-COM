@@ -25,6 +25,8 @@ button[data-tablet-close] {
   order:2147483647;flex:0 0 42px;width:42px;height:42px;padding:0;border-radius:5px;
   border:1px solid #344e5c;background:#1b2f3b;color:#e1edf0;font:24px/1 system-ui;touch-action:manipulation
 }
+body button[data-tablet-close] {display:inline-grid!important;place-items:center;padding:0!important}
+body button[data-tablet-close] > svg {display:block;width:24px!important;height:24px!important;fill:none;stroke:#e1edf0;stroke-width:2.3;stroke-linecap:round;pointer-events:none}
 body .flat-toolbar-workspace .records-header:has(>[data-tablet-close]) .records-header-filters {
   min-width:0!important;max-width:68%!important;overflow-x:auto!important
 }

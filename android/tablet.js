@@ -9,7 +9,13 @@
     const close = document.createElement('button');
     close.type = 'button';
     close.dataset.tabletClose = '';
-    close.textContent = '×';
+    const icon=document.createElementNS('http://www.w3.org/2000/svg','svg');
+    icon.setAttribute('viewBox','0 0 24 24');
+    icon.setAttribute('aria-hidden','true');
+    const cross=document.createElementNS(icon.namespaceURI,'path');
+    cross.setAttribute('d','M4 4l16 16M20 4L4 20');
+    icon.append(cross);
+    close.append(icon);
     close.title = 'Pəncərəni bağla';
     close.setAttribute('aria-label', close.title);
     close.addEventListener('click', () => {

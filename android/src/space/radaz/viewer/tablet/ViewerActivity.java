@@ -1,6 +1,7 @@
 package space.radaz.viewer.tablet;
 
 import android.app.Activity;
+import android.app.ActivityManager;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
@@ -51,6 +52,16 @@ public final class ViewerActivity extends Activity {
     };
     @Override protected void onResume(){super.onResume();if(updater!=null)updater.resume();updateTimer.postDelayed(checkUpdates,15*60*1000L);}
     @Override protected void onPause(){updateTimer.removeCallbacks(checkUpdates);super.onPause();}
+
+    private String volumeMemory() throws org.json.JSONException {
+        ActivityManager manager=(ActivityManager)getSystemService(Context.ACTIVITY_SERVICE);
+        ActivityManager.MemoryInfo info=new ActivityManager.MemoryInfo();
+        manager.getMemoryInfo(info);
+        long mib=1024L*1024L;
+        return new JSONObject().put("availableMiB",info.availMem/mib).put("totalMiB",info.totalMem/mib)
+                .put("reserveMiB",info.threshold/mib).put("heapMiB",manager.getMemoryClass())
+                .put("low",manager.isLowRamDevice() || info.lowMemory).toString();
+    }
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -145,6 +156,7 @@ public final class ViewerActivity extends Activity {
             String answer="ok";
             try {
                 switch(command.substring("radaz-tablet/".length())) {
+                    case "volume-memory": answer=volumeMemory();break;
                     case "version": answer=getPackageManager().getPackageInfo(getPackageName(),0).versionName;break;
                     case "workspace-opened": case "volume-opened":
                         if(web!=active || value==null || !value.matches("[0-9a-fA-F-]{36}")){answer="denied";break;}

@@ -416,7 +416,31 @@
    const url = unique.length===1?`/#archive-study=${encodeURIComponent(unique[0])}`:`/#archive-studies=${encodeURIComponent(unique.join(','))}`;
 --- a/components/vr-workbench.tsx
 +++ b/components/vr-workbench.tsx
-@@ -189,7 +189,7 @@
+@@ -1,4 +1,5 @@
+ 'use client';
++import type {TabletVolumeOpening} from './tablet-volume-quality';
+ import {ToolbarDividers} from './toolbar-dividers';
+ import {useEffect,useLayoutEffect,useRef,useState,type PointerEvent as ReactPointer,type ReactNode} from 'react';
+ import {Rotate3D,RotateCw,Move,ZoomIn,Contrast,Scissors,Ruler,MoveUpRight,Camera,Save,Printer,Undo2,Redo2,Maximize,Settings,Box,Layers,Eye,RotateCcw,X,SlidersHorizontal,List,Trash2,FolderOpen,ChevronLeft,ChevronRight,PanelTop} from 'lucide-react';
+@@ -14,7 +15,7 @@
+ type Drag={id:number;tool:Tool;at:P;last:P;start:Snapshot;index?:number;part?:'a'|'b'|'body'|'label'};
+ const distance=(a:P,b:P)=>Math.max(1,Math.hypot(a[0]-b[0],a[1]-b[1]));
+ const midpoint=(a:P,b:P):P=>[(a[0]+b[0])/2,(a[1]+b[1])/2];
+-export function VrWorkbench({volume:v,onClose,title,progressiveDesktop=false,previewPercent}:{volume:Volume;onClose:()=>void;title:string;progressiveDesktop?:boolean;previewPercent?:number}){
++export function VrWorkbench({opening,volume:v,onClose,title,progressiveDesktop=false,previewPercent}:{opening?:TabletVolumeOpening;volume:Volume;onClose:()=>void;title:string;progressiveDesktop?:boolean;previewPercent?:number}){
+  const preview=previewPercent!==undefined;
+  const sourceLifecycle=progressiveDesktop?v.identity:v;
+  const renderedVolume=useRef<Volume|null>(null);
+@@ -72,7 +73,7 @@
+  },[sourceLifecycle]);
+  useLayoutEffect(()=>{
+    setBackend('');lastCuts.current=null;
+-   const handle=createVrRenderer(host.current!,v,engine,setBackend,notice);
++   const handle=createVrRenderer(host.current!,v,engine,setBackend,notice,opening);
+    api.current=handle;renderedVolume.current=v;
+    return ()=>{api.current=null;renderedVolume.current=null;handle.dispose();};
+  },[sourceLifecycle,engine]);
+@@ -189,7 +190,7 @@
   {btn('3D görüntüləmə ayarları',<Settings/>,()=>toggle('settings'),menu==='settings')}{btn('Ekrana sığdır · Ctrl+0',<Maximize/>,fitView)}
   {btn('Tam ekran · F',<PanelTop/>,()=>void fullscreen().catch(e=>notice(String(e))))}
   <ToolbarDividers scope="vr"/>
@@ -434,53 +458,126 @@
 +export {default} from '@/components/tablet-volume-window';
 --- a/components/shared-volume-view.tsx
 +++ b/components/shared-volume-view.tsx
-@@ -1,5 +1,5 @@
+@@ -1,6 +1,7 @@
  'use client';
  import {useEffect,useState} from 'react';
 -import {tabletDisplayVolume} from '@/lib/cornerstone';
-+import {tabletDisplayVolume,tabletSourceVolume} from '@/lib/cornerstone';
++import {chooseTabletMatrix,previousMatrixLimit,trackMatrixOpening,tabletVolumeMemory,type TabletMatrix,type TabletVolumeOpening} from './tablet-volume-quality';
++import {seriesGeometry,tabletDisplayVolume,tabletSourceVolume} from '@/lib/cornerstone';
  import {gpuCapabilities} from '@/lib/gpu-capabilities';
  import {sampleAnatomyPlane,type AnatomyVolumeResult} from '@/lib/anatomy-volume';
-@@ -9,5 +9,5 @@
+ import {VrCloseButton} from './vr-close-button';
+@@ -8,8 +9,8 @@
+ 
  type Series={id:string;imageIds:string[];modality:string;loading?:boolean;discovered?:number};
  type Props={series?:Series;anatomy?:AnatomyVolumeResult|null;onClose:()=>void};
 -type Display=Awaited<ReturnType<typeof tabletDisplayVolume>>;
+-type Loaded={data:Display;geometry:AnatomyVolumeResult;preview:boolean};
 +type Display=Awaited<ReturnType<typeof tabletDisplayVolume | typeof tabletSourceVolume>>;
- type Loaded={data:Display;geometry:AnatomyVolumeResult;preview:boolean};
++type Loaded={data:Display;geometry:AnatomyVolumeResult;preview:boolean;opening?:TabletVolumeOpening};
  
-@@ -28,10 +28,12 @@
+ function geometryFor(data:Display, source:Series, anatomy:Props['anatomy']):AnatomyVolumeResult {
+   const {dimensions,spacing,origin,direction}=data;
+@@ -18,35 +19,68 @@
+ }
+ 
+ export function SharedVolumeView({series,anatomy,onClose}:Props){
++  return <VolumeSession key={series?.id} series={series} anatomy={anatomy} onClose={onClose}/>;
++}
++function VolumeSession({series,anatomy,onClose}:Props){
++  const [ceiling,setCeiling]=useState<TabletMatrix>(512);
++  const [matrix,setMatrix]=useState<TabletMatrix|null>(null);
+   const [loaded,setLoaded]=useState<Loaded|null>(null),[percent,setPercent]=useState(0),[error,setError]=useState('');
+   const tablet=typeof location!=='undefined' && location.origin==='https://appassets.androidplatform.net';
+   useEffect(()=>{
+     const controller=new AbortController(),{signal}=controller;
+     setLoaded(null);setPercent(0);setError('');
+     if(!series){setError('3D üçün KT və ya MRT seriyası seçin.');return;}
+-    if(!tablet && series.loading)return;
++    if(series.loading)return;
++    let clearOpening=()=>{};
++    const finished=()=>{clearTimeout(timer);clearOpening();};
++    let timer:ReturnType<typeof setTimeout>|undefined, activeMatrix:TabletMatrix|undefined;
++    function lower(){
++      if(signal.aborted || !tablet || !activeMatrix || activeMatrix===128)return false;
++      controller.abort();clearTimeout(timer);setLoaded(null);setPercent(0);
++      setCeiling(activeMatrix===512?256:128);return true;
++    }
++    function watch(){
++      clearTimeout(timer);
++      timer=setTimeout(()=>{
++        if(signal.aborted || lower())return;
++        controller.abort();setLoaded(null);setError('3D hazırlığı cavab vermədi. Pəncərəni bağlayıb yenidən açın.');
++      },30000);
++    }
++    const opening:TabletVolumeOpening={ready:finished,reduce:lower};
      async function open(source:Series){
-       let limit=256,budget=24;
+-      let limit=256,budget=24;
 -      try{const gpu=gpuCapabilities();limit=Math.min(gpu.max3DTextureSize,tablet?384:1536);
 -        budget=tablet?(gpu.tier==='low'?20:48):(gpu.tier==='low'?64:gpu.tier==='high'?320:160);}catch{/* A bounded CPU volume is available without WebGL. */}
++      let limit=tablet?0:256,budget=24,software=true;
 +      try{const gpu=gpuCapabilities();limit=tablet?gpu.max3DTextureSize:Math.min(gpu.max3DTextureSize,1536);
-+        budget=gpu.tier==='low'?64:gpu.tier==='high'?320:160;}catch{/* A bounded CPU volume is available without WebGL. */}
++        software=gpu.tier==='low';budget=gpu.tier==='low'?64:gpu.tier==='high'?320:160;}catch{/* A bounded CPU volume is available without WebGL. */}
        const showPreview=(data:Display)=>{
          if(!signal.aborted)setLoaded({data,geometry:geometryFor(data,source,anatomy),preview:true});
        };
 -      const data=await tabletDisplayVolume(source.imageIds,limit,budget*1024**2,signal,setPercent,true,tablet?undefined:showPreview);
++      if(tablet){
++        activeMatrix=chooseTabletMatrix(seriesGeometry(source.imageIds).dimensions,tabletVolumeMemory(),limit,software,Math.min(ceiling,previousMatrixLimit()) as TabletMatrix);
++        clearOpening=trackMatrixOpening(activeMatrix);
++        setMatrix(activeMatrix);watch();
++      }
++      const progress=(n:number)=>{if(!signal.aborted){watch();setPercent(Math.round(n*.94));}};
 +      const data=tablet
-+        ? await tabletSourceVolume(source.imageIds,limit,signal,setPercent)
++        ? await tabletSourceVolume(source.imageIds,limit,activeMatrix!,signal,progress)
 +        : await tabletDisplayVolume(source.imageIds,limit,budget*1024**2,signal,setPercent,true,showPreview);
        const geometry=geometryFor(data,source,anatomy);
        if(anatomy?.mask.length){
+         const {dimensions,origin,direction,spacing}=geometry;
+         const [w,h,d]=dimensions;geometry.mask=new Uint8Array(w*h*d);
+         const at=(x:number,y:number,z:number)=>origin.map((n,i)=>n+x*spacing[0]*direction[i]+y*spacing[1]*direction[3+i]+z*spacing[2]*direction[6+i]) as typeof origin;
+-        for(let z=0;z<d;z++){signal.throwIfAborted();geometry.mask.set(sampleAnatomyPlane(anatomy,at(0,0,z),at(1,0,z),at(0,1,z),w,h),z*w*h);if(z%8===0)await new Promise(r=>setTimeout(r,0));}
++        for(let z=0;z<d;z++){signal.throwIfAborted();geometry.mask.set(sampleAnatomyPlane(anatomy,at(0,0,z),at(1,0,z),at(0,1,z),w,h),z*w*h);if(z%8===0){if(tablet){watch();setPercent(94+Math.floor(5*z/d));}await new Promise(r=>setTimeout(r,0));}}
+       }
+-      if(!signal.aborted)setLoaded({data,geometry,preview:false});
++      if(!signal.aborted){if(tablet)watch();setLoaded({data,geometry,preview:false,opening:tablet?opening:undefined});}
+     }
+-    void open(series).catch(e=>{if(!signal.aborted){setLoaded(null);setError(String(e.message||e));}});
+-    return ()=>controller.abort();
+-  },[series?.id,series?.imageIds,series?.loading,anatomy,tablet]);
+-  if(!tablet && series?.loading)return <section className="shared-volume-loading"><VrCloseButton loading onClose={onClose}/><p role="status">Seriya oxunur · {series.imageIds.length}{series.discovered?` / ${series.discovered}`:''} kəsik</p></section>;
+-  if(!loaded)return <section className="shared-volume-loading"><VrCloseButton loading onClose={onClose}/><p role="status">{error||`3D hazırlanır… ${percent}%`}</p></section>;
+-  return <SmartVolumeSurface key={loaded.geometry.sourceKey} sourceValues={loaded.data.values} result={loaded.geometry} colors={{}} range={loaded.data.range} sourceSlices={loaded.data.sourceSlices} cpuOnly={loaded.data.cpuOnly}
++    void open(series).catch(e=>{if(!signal.aborted){
++      finished();
++      if((e instanceof RangeError || /out of memory|allocation failed/i.test(String(e))) && lower())return;
++      setLoaded(null);setError(String(e.message||e));
++    }});
++    return ()=>{controller.abort();finished();};
++  },[series?.id,series?.imageIds,series?.loading,anatomy,tablet,ceiling]);
++  if(series?.loading)return <section className="shared-volume-loading"><VrCloseButton loading onClose={onClose}/><p role="status">Seriya oxunur · {series.imageIds.length}{series.discovered?` / ${series.discovered}`:''} kəsik</p></section>;
++  if(!loaded)return <section className="shared-volume-loading"><VrCloseButton loading onClose={onClose}/><p role="status">{error||`3D hazırlanır… ${matrix?matrix+' px · ':''}${percent}%`}</p></section>;
++  return <SmartVolumeSurface key={loaded.geometry.sourceKey} sourceValues={loaded.data.values} result={loaded.geometry} colors={{}} range={loaded.data.range} opening={loaded.opening} sourceSlices={loaded.data.sourceSlices} cpuOnly={loaded.data.cpuOnly}
+     progressiveDesktop={!tablet} previewPercent={loaded.preview?percent:undefined} title="3D həcm görüntüləmə" onClose={onClose}/>;
+ }
 --- a/lib/cornerstone.ts
 +++ b/lib/cornerstone.ts
-@@ -629,4 +629,47 @@
+@@ -628,6 +628,49 @@
+     }
    }
    return {...displayGeometry(source,dimensions),values,range:[minimum,Math.max(minimum+1,maximum)]};
 +}
 +
-+/** Build each acquired tablet slice at its native matrix up to 512, in patient order. */
-+export async function tabletSourceVolume(imageIds:string[], maxTexture:number, signal:AbortSignal, progress:(percent:number)=>void) {
++/** Resample only in-plane. Every acquired slice retains its patient-space position. */
++export async function tabletSourceVolume(imageIds:string[], maxTexture:number, matrix:128|256|512, signal:AbortSignal, progress:(percent:number)=>void) {
 +  signal.throwIfAborted();
 +  const source=seriesGeometry(imageIds);
 +  const [columns,rows,depth]=source.dimensions;
-+  const scale=Math.min(1,512/Math.max(columns,rows));
++  const scale=Math.min(1,matrix/Math.max(columns,rows));
 +  const width=Math.max(1,Math.round(columns*scale)), height=Math.max(1,Math.round(rows*scale));
 +  const dimensions:Point3=[width,height,depth];
 +  const geometry=displayGeometry(source,dimensions);
-+  const sample=scale<1 ? displayPlaneSampler(columns,rows,areaWeights(columns,width),areaWeights(rows,height),false) : null;
++  const sample=scale<1 ? displayPlaneSampler(columns,rows,areaWeights(columns,width),areaWeights(rows,height),true) : null;
 +  const planeSize=width*height, length=planeSize*depth;
 +  let values:Int16Array|Float32Array=sample ? new Float32Array(length) : new Int16Array(length);
 +  let minimum=Infinity, maximum=-Infinity, lastYield=performance.now();
@@ -514,15 +611,28 @@
 +  return {...geometry,values,range,cpuOnly:dimensions.some(n=>n>maxTexture)};
  }
  
+ /** Bounded display texture. Its voxel centres and physical extent match the acquisition. */
 --- a/components/smart-volume-surface.tsx
 +++ b/components/smart-volume-surface.tsx
-@@ -4,5 +4,5 @@
+@@ -2,14 +2,15 @@
+ import {useMemo} from 'react';
+ import type {Types} from '@cornerstonejs/core';
  import type {AnatomyVolumeResult} from '@/lib/anatomy-volume';
++import type {TabletVolumeOpening} from './tablet-volume-quality';
  import {VrWorkbench} from './vr-workbench';
 -type Props={result:AnatomyVolumeResult;colors:Record<number,string>;source?:Types.IImageVolume;sourceValues?:Float32Array;sourceSlices?:number;cpuOnly?:boolean;progressiveDesktop?:boolean;previewPercent?:number;range:[number,number];onClose:()=>void;title?:string};
-+type Props={result:AnatomyVolumeResult;colors:Record<number,string>;source?:Types.IImageVolume;sourceValues?:Int16Array|Float32Array;sourceSlices?:number;cpuOnly?:boolean;progressiveDesktop?:boolean;previewPercent?:number;range:[number,number];onClose:()=>void;title?:string};
- export function SmartVolumeSurface({result,colors,sourceValues,sourceSlices,cpuOnly,range,onClose,progressiveDesktop,previewPercent,title='3D seqmentasiya'}:Props){
+-export function SmartVolumeSurface({result,colors,sourceValues,sourceSlices,cpuOnly,range,onClose,progressiveDesktop,previewPercent,title='3D seqmentasiya'}:Props){
++type Props={opening?:TabletVolumeOpening;result:AnatomyVolumeResult;colors:Record<number,string>;source?:Types.IImageVolume;sourceValues?:Int16Array|Float32Array;sourceSlices?:number;cpuOnly?:boolean;progressiveDesktop?:boolean;previewPercent?:number;range:[number,number];onClose:()=>void;title?:string};
++export function SmartVolumeSurface({opening,result,colors,sourceValues,sourceSlices,cpuOnly,range,onClose,progressiveDesktop,previewPercent,title='3D seqmentasiya'}:Props){
   const palette=JSON.stringify(colors);
+  const volume=useMemo(()=>{
+    if(!sourceValues||sourceValues.length!==result.dimensions.reduce((a,b)=>a*b,1))return null;
+    return {...result,values:sourceValues,sourceSlices,cpuOnly,colors:JSON.parse(palette) as Record<number,string>,identity:result.sourceFingerprint||result.sourceKey,range};
+  },[result,sourceValues,sourceSlices,cpuOnly,palette,range[0],range[1]]);
+  if(!volume)return <section className="shared-volume-loading"><button onClick={onClose}>Bağla</button><p role="alert">3D mənbənin həndəsəsi ilə piksel sayı uyğun gəlmir.</p></section>;
+- return <VrWorkbench volume={volume} onClose={onClose} title={title} progressiveDesktop={progressiveDesktop} previewPercent={previewPercent}/>;
++ return <VrWorkbench opening={opening} volume={volume} onClose={onClose} title={title} progressiveDesktop={progressiveDesktop} previewPercent={previewPercent}/>;
+ }
 --- a/lib/vr/scene.ts
 +++ b/lib/vr/scene.ts
 @@ -11,5 +11,5 @@
@@ -550,7 +660,22 @@
      const start = row * width;
 --- a/lib/vr/renderer.ts
 +++ b/lib/vr/renderer.ts
-@@ -72,5 +72,7 @@
+@@ -1,3 +1,4 @@
++import type {TabletVolumeOpening} from '@/components/tablet-volume-quality';
+ import '@kitware/vtk.js/Rendering/Profiles/Geometry';
+ import '@kitware/vtk.js/Rendering/Profiles/Volume';
+ import type {vtkOpenGLRenderWindow} from '@kitware/vtk.js/Rendering/OpenGL/RenderWindow';
+@@ -21,7 +22,7 @@
+ type Render={cam:Frame;style:Style;moving:boolean;quality:Quality;provisional?:boolean};
+ function gpuView(host:HTMLElement,v:Volume,tablet:boolean,onFallback:()=>void){
+  const view=vtkGenericRenderWindow.newInstance({background:[0,0,0],listenWindowResize:false});
+- let ready=false;
++ let ready=false,checkUpload=tablet;
+  const interactor=view.getInteractor(),window3d=view.getRenderWindow(),renderer=view.getRenderer();
+  let lose:WEBGL_lose_context|null=null;
+  const disposeView=()=>{
+@@ -71,7 +72,9 @@
+      const floor=min?v.range[1]+Math.max(1,v.range[1]-v.range[0]):v.range[0]-Math.max(1,v.range[1]-v.range[0]);
       let values=v.values;
       if(masked){
 -       values=v.values.slice();
@@ -559,6 +684,50 @@
 +       values=widen ? Float32Array.from(v.values) : v.values.slice();
         if(airway){
           airwayBounds??=airwayBodyRows(v.values,v.dimensions);
+          maskAirwayExterior(values,v.dimensions[0],airwayBounds,v.range[1]+Math.max(1,v.range[1]-v.range[0]));
+@@ -105,6 +108,10 @@
+    keyLight.setPosition(...add(add(add(cam.center,cam.normal,distance),right,distance*vrLighting.key.right),cam.up,distance*vrLighting.key.up));
+    keyLight.setFocalPoint(...cam.center);fillLight.setPosition(...add(add(add(cam.center,cam.normal,distance),right,distance*vrLighting.fill.right),cam.up,distance*vrLighting.fill.up));fillLight.setFocalPoint(...cam.center);
+    camera.setClippingRange(.01,distance*3);view.getRenderWindow().render();
++   if(checkUpload){
++     checkUpload=false;
++     if(!gl || gl.isContextLost() || gl.getError()===gl.OUT_OF_MEMORY)throw Error('3D tekstura üçün GPU yaddaşı çatmır.');
++   }
+  }
+  ready=true;
+  return {canvas,draw,replaceVolume(next:Volume){
+@@ -119,17 +126,19 @@
+  }};
+  }finally{if(!ready)disposeView();}
+ }
+-export function createVrRenderer(host:HTMLElement,v:Volume,requested:Engine,onFrame:(mode:string)=>void,onError:(message:string)=>void){
++export function createVrRenderer(host:HTMLElement,v:Volume,requested:Engine,onFrame:(mode:string)=>void,onError:(message:string)=>void,opening?:TabletVolumeOpening){
+   const win=host.ownerDocument.defaultView!;
+   const tablet=win.location.origin==='https://appassets.androidplatform.net';
+   let gpu:ReturnType<typeof gpuView>|null=null,cpu:HTMLCanvasElement|null=null,worker:Worker|null=null;
+   let latest:Render|null=null,dead=false,waitingCpu=false,frame=0,refinement=0;
++  let presented=false,retrying=false;
+   let revision=0,complete=-1,cutId=0,appliedCut=0,lastGesture=0,firstFrame=true;
+   let cpuTicket=0,cpuCut=0,cpuPreview=false;
+   const waiters=new Set<{resolve:()=>void;reject:(error:Error)=>void}>();
+ 
+   function finish(id:number,preview:boolean){
+     if(dead || appliedCut!==cutId)return;
++    if(!presented){presented=true;opening?.ready();}
+     onFrame(gpu?'GPU':'CPU');
+     if(id!==revision || preview)return;
+     complete=id;
+@@ -166,8 +175,9 @@
+     return worker;
+   }
+   function fallback(){
+-    if(dead||cpu)return;
++    if(dead||cpu||retrying)return;
+     gpu?.dispose();gpu=null;
++    if(!presented && requested!=='cpu' && opening?.reduce()){retrying=true;return;}
+     cpu=host.ownerDocument.createElement('canvas');host.appendChild(cpu);
+     getWorker().postMessage({type:'volume',volume:v});
+     if(latest)schedule();
 --- a/app/archive/page.tsx
 +++ b/app/archive/page.tsx
 @@ -25,5 +25,5 @@
@@ -598,7 +767,7 @@
        <input hidden ref={zipRef} type="file" multiple accept=".zip,.rar,application/vnd.rar,application/x-rar-compressed,application/zip" onChange={event => { const files=Array.from(event.currentTarget.files||[]); event.currentTarget.value=''; void addFiles(files); }}/>
        <input hidden ref={filesRef} type="file" multiple onChange={event => { const files=Array.from(event.currentTarget.files||[]); event.currentTarget.value=''; void addFiles(files); }}/>
 -      <ToolbarOverflow/>
-+      <ToolbarOverflow/>{tabletClose&&<button type="button" data-tablet-close="" aria-label="Pəncərəni bağla" title="Pəncərəni bağla" onClick={tabletClose}>×</button>}
++      <ToolbarOverflow/>{tabletClose&&<button type="button" data-tablet-close="" aria-label="Pəncərəni bağla" title="Pəncərəni bağla" onClick={tabletClose}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4l16 16M20 4L4 20"/></svg></button>}
      </header>
      <div className="records-upper">
        <ResizableTable storageKey="archive-studies" className="records-table" aria-label={tr('ui.archived_studies_905a2')}><thead><tr><ResizableHeader column="select" label="Seç" minimum={24} className="study-check-column">{selection.all}</ResizableHeader><ResizableHeader column="open" label="Aç" className="study-open-column">{tr('ui.open_dcc08')}</ResizableHeader><SortHeader column="date" label="Müayinə tarixi" {...studySort}/><SortHeader column="patient" label="Pasiyent" {...studySort}/><SortHeader column="birth" label="Doğum tarixi" {...studySort}/><SortHeader column="patientId" label="Pasiyent ID" {...studySort}/><SortHeader column="modality" label="Müayinə" {...studySort}/><SortHeader column="description" label="Təsvir" {...studySort}/><SortHeader column="accession" label="Accession" {...studySort}/><SortHeader column="series" label="Seriya" {...studySort}/><SortHeader column="imageCount" label="Görüntü" {...studySort}/><SortHeader column="referring" label="Göndərən həkim" {...studySort}/><ResizableHeader column="bridgeSend" label="RADAZBRIDGE" minimum={210} className="bridge-send-column">RADAZBRIDGE</ResizableHeader></tr></thead><tbody>
