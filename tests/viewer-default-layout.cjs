@@ -38,6 +38,13 @@ const sections = [
       const waitForTools=()=>p.waitForFunction(n=>document.querySelectorAll('[data-toolbar-scope=viewer] [data-toolbar-item][data-tool-dock=top]:not([hidden])').length===n,expected.length);
       await waitForTools();assert.deepEqual(await read(),expected);
       assert.deepEqual(new Set(await p.locator('[data-toolbar-divider=true]').evaluateAll(es=>es.map(e=>e.dataset.toolbarItem))),new Set(sections.slice(1).map(s=>s[0])));
+      for (const item of ['workspace/.$mpr','contrast/.0','help/.1']){
+        const tool=p.locator('[data-toolbar-item="'+item+'"]');
+        const button=item==='workspace/.$mpr'?tool.getByRole('button',{name:'MPR açılış seçimləri'}):tool.getByRole('button').first();
+        await button.click();
+        await p.getByRole('menu').first().waitFor();
+        await p.keyboard.press('Escape');
+      }
       const first=p.locator('[data-toolbar-item="import/.0"]'),target=p.locator('[data-toolbar-item="workspace/.$mpr"]');
       const a=await first.boundingBox(),b=await target.boundingBox(),start={x:a.x+10,y:a.y+a.height/2},end={x:b.x+b.width*.7,y:b.y+b.height/2};
       if(tablet){
@@ -54,8 +61,19 @@ const sections = [
       await ctx.close();ctx=null;await launch();await waitForTools();assert.deepEqual(await read(),changed);
       await p.getByRole('button',{name:'Alət panelini fərdiləşdir',exact:true}).click();
       await p.getByRole('button',{name:'Standart düzülüşü bərpa et'}).click();await p.getByRole('button',{name:'Təsdiq',exact:true}).click();
-      assert.deepEqual(await read(),expected);assert.deepEqual(errors,[]);
-      console.log('PASS',tablet?'Android':'desktop',expected.length,'main toolbar actions, separators, drag, saved layout after complete process restart and confirmed reset');
+      assert.deepEqual(await read(),expected);
+      await p.evaluate(()=>{
+        localStorage.setItem('radaz-toolbar-flat-v1:viewer','{"positions":{},"dividers":[]}');
+        localStorage.setItem('radaz-toolbar-v1:viewer','{"import":{"side":"right","order":2}}');
+      });
+      await p.reload();await p.locator('[data-toolbar-item="import/.0"][data-tool-dock="right"]').waitFor();
+      await p.evaluate(()=>{
+        localStorage.removeItem('radaz-toolbar-v1:viewer');
+        localStorage.setItem('radaz-toolbar-flat-v1:viewer','{"positions":{},"dividers":[]}');
+      });
+      await p.reload();await waitForTools();assert.deepEqual(await read(),expected);
+      assert.deepEqual(errors,[]);
+      console.log('PASS',tablet?'Android':'desktop',expected.length,'main toolbar actions, menus, separators, drag, saved layout after complete process restart, confirmed reset and two legacy preferences');
       }finally{
         if(ctx)await ctx.close();
         if(path.dirname(profile)===path.resolve(os.tmpdir()) && path.basename(profile).startsWith('radaz-test-toolbar-')){
