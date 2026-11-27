@@ -22,13 +22,13 @@ withTablet(async ({ctx, p, pane, errors}) => {
   const [archive,pacs,mpr,volume]=studies;
   for (const [label, route, selector] of [volume,archive,volume,pacs,volume,mpr,archive]) {
     // A dismissed native prompt exercises the same-origin popup fallback for records.
-    const opening = route==='3d'?Promise.resolve(p):p.waitForEvent('popup');
+    const opening = (route==='archive'||route==='3d')?Promise.resolve(p):p.waitForEvent('popup');
     const button = p.getByRole('button', {name:label, exact:true}).first();
     await button.tap();
     const child = await opening;
     if(child!==p)child.on('pageerror', error => errors.push(error.message));
     await child.locator(selector).first().waitFor({timeout:45000});
-    assert.equal(new URL(child.url()).pathname, route==='3d'?'/':'/'+route);
+    assert.equal(new URL(child.url()).pathname, (route==='3d'||route==='archive')?'/':'/'+route);
     assert.equal(new URL(p.url()).pathname, '/');
     assert.equal(await child.locator('.embedded-close:visible, a[href="/"]:visible').count(), 0);
     for (const [width,height] of [[800,1200],[1200,800]]) {
@@ -58,7 +58,7 @@ withTablet(async ({ctx, p, pane, errors}) => {
         const field=child.locator(route==='archive'?'.records-search input':'.pacs-patient input');
         await field.fill('QA');assert.equal(await field.inputValue(),'QA');
       }
-      await tapClose(child,close);
+      if(route==='archive'){await close.tap();await p.locator('.tablet-archive-window').waitFor({state:'detached'});}else await tapClose(child,close);
     }
     await p.bringToFront();
     // The image counter appears before the restored canvas reports its orientation.
@@ -85,11 +85,11 @@ withTablet(async ({ctx, p, pane, errors}) => {
     await p.locator('dialog .vr-raster[data-ready=true]').waitFor();
     await p.locator('dialog .vr-close').tap();
     await p.locator('dialog.tablet-volume-dialog').waitFor({state:'detached'});
-    const opening=ctx.waitForEvent('page');
+    const opening=route==='archive'?Promise.resolve(p):ctx.waitForEvent('page');
     await p.getByRole('button',{name:label,exact:true}).first().tap();
     const records=await opening;await records.locator(selector).waitFor();
     const close=records.locator(':is(.topbar,.records-header) > [data-tablet-close]');
-    await tapClose(records,close);
+    if(route==='archive'){await close.tap();await p.locator('.tablet-archive-window').waitFor({state:'detached'});}else await tapClose(records,close);
     assert.equal(p.isClosed(),false);
     console.log('PASS immediate 3D X -> '+route+' -> native close');
   }

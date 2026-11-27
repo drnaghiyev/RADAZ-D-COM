@@ -29,11 +29,10 @@ withTablet(async ({p,errors})=>{
   console.log(JSON.stringify({dims:sample.dims,bytes:sample.bytes,backend:sample.backend,readyMs:Date.now()-before,planesVerified:depth,first:sample.out[0],middle:sample.out[depth>>1],last:sample.out.at(-1)}));
   await volume.locator('.vr-close').click();
   await volume.waitFor({state:'detached'});
-  const opening=p.waitForEvent('popup');
   await p.getByRole('button',{name:'Local arxiv',exact:true}).first().click();
-  const records=await opening;await records.locator('.archive-shell').waitFor();
+  const records=p.locator('.tablet-archive-window');await records.waitFor();
   await records.locator('.records-search input').fill('TEST512');
-  await records.close();
+  await records.getByRole('button',{name:'Pəncərəni bağla',exact:true}).click();
   assert.deepEqual(errors,[]);
 }).catch(error=>{console.error(error);process.exitCode=1;});
 

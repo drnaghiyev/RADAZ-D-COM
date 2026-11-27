@@ -41,7 +41,7 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
     const context = await browser.newContext({viewport:{width:1200,height:800},isMobile:true,hasTouch:true,deviceScaleFactor:1});
     context.setDefaultTimeout(20000);
     let picker = '',delayReceiver=false,interruptReceipt=false,damageRead=false;
-    let archiveWindow=null,archiveOpens=0;
+
     context.on('page',p=>{
       p.on('pageerror',e=>issues.push(e.message));
       p.on('dialog',async d=>{
@@ -56,24 +56,6 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
           else reply=await network.call('Tablet','inbox_'+v.action,{ticket:v.ticket});
           if(!p.isClosed())await p.evaluate(([id,result])=>window.radazInboxResult?.(id,result),[v.id,reply.data||reply]).catch(()=>{});
           return;
-        }
-        if(cmd==='open-archive'){
-          await d.accept('ok');
-          if(!archiveWindow || archiveWindow.isClosed()){
-            archiveWindow=await context.newPage();await archiveWindow.goto(origin+'/archive');
-          }
-          await archiveWindow.bringToFront();archiveOpens++;return;
-        }
-        if(cmd==='open-studies'){
-          const ids=JSON.parse(d.defaultValue());
-          await d.accept('ok');
-          const home=context.pages().find(web=>new URL(web.url()).pathname==='/');
-          assert.ok(home);await home.bringToFront();
-          assert.ok(await home.evaluate(ids=>{
-            const handled=!dispatchEvent(new CustomEvent('radaz-tablet-open-studies',{cancelable:true,detail:ids}));
-            if(handled)window.qaArchiveHandoffs=[...(window.qaArchiveHandoffs||[]),ids];
-            return handled;
-          },ids));return;
         }
         if(cmd==='network'){
           const v=JSON.parse(d.defaultValue());
@@ -114,6 +96,9 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
       return route.fulfill({body:await item.async('nodebuffer'),contentType:types[asset.split('.').at(-1)]||'application/octet-stream'});
     });
     const page=await context.newPage();
+    await page.addInitScript(()=>window.addEventListener('radaz-tablet-open-studies',e=>{
+      window.qaArchiveHandoffs=[...(window.qaArchiveHandoffs||[]),e.detail];
+    }));
     await page.goto(origin+'/');await waitReady(page);
     console.log('Packaged viewer is ready.');
     const suite={};
@@ -134,13 +119,13 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
         await new Promise(resolve=>setTimeout(resolve,600));
       }while(Date.now()<until);
       assert.deepEqual(receipt,{state:'complete',done:12,total:12});
-      const firstOpen=context.waitForEvent('page');
+
       await command(page,'Local arxiv');
-      const archive=await firstOpen;await archive.waitForURL(origin+'/archive');
+      const archive=page.locator('.tablet-archive-window');await archive.waitFor();
       const today=archive.locator('.today-filter input');
       if(await today.isChecked())await today.uncheck();
       await archive.getByText('RADAZ DELIVERY QA',{exact:true}).first().waitFor();
-      const totals=await archive.evaluate(async uid=>{
+      const totals=await page.evaluate(async uid=>{
         const db=await new Promise(resolve=>{const req=indexedDB.open('radaz-local-archive');req.onsuccess=()=>resolve(req.result);});
         const files=await new Promise(resolve=>{const req=db.transaction('instances').objectStore('instances').index('studyUID').getAll(uid);req.onsuccess=()=>resolve(req.result);});
         db.close();
@@ -151,13 +136,14 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
       assert.ok(!interruptReceipt&&!damageRead);
       const row=archive.locator('tr').filter({hasText:'RADAZ DELIVERY QA'}).first();
       await row.locator('.record-open-button').click();
-      await archive.getByText(/1 seçilmiş müayinə Viewer-də açıldı/).waitFor();
+      await archive.waitFor({state:'detached'});
       await page.waitForFunction(()=>document.querySelector('.series-rail, .study-rail, [data-panel="A"]')?.ownerDocument.body.innerText.includes('RADAZ DELIVERY QA')&&document.querySelector('[data-panel="A"] canvas')?.width>0);
-      await command(page,'Local arxiv');await archive.waitForFunction(()=>document.body.innerText.includes('RADAZ DELIVERY QA'));
-      await new Promise((resolve,reject)=>{const end=Date.now()+5000;const check=()=>archiveOpens>=2?resolve():Date.now()>end?reject(Error('archive did not reopen')):setTimeout(check,20);check();});
-      assert.equal(archiveWindow,archive);
+      await command(page,'Local arxiv');
+      await archive.waitFor();
+      if(await today.isChecked())await today.uncheck();
+      await archive.getByText('RADAZ DELIVERY QA',{exact:true}).first().waitFor();
       suite.automaticDelivery={reopened:true,confirmed:receipt.done,originalHashesMatched:totals.length,openedInViewer:true,offlineResume:true,damagedReadRetried:true,lostReceiptRetried:true,uniqueTransfer:true};
-      await archive.close();
+      await archive.getByRole('button',{name:'Pəncərəni bağla',exact:true}).click();
     }
     async function assertDock(count){
       await page.waitForFunction(n=>{
@@ -334,14 +320,15 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
     await page.setViewportSize({width:800,height:1200});
     assert.ok((await panel.boundingBox()).width>100);
     await page.setViewportSize({width:1200,height:800});
-    const archOpen=context.waitForEvent('page');await command(page,'Local arxiv');
-    const archive=await archOpen;
+    await command(page,'Local arxiv');
+    const archive=page.locator('.tablet-archive-window');await archive.waitFor();
     await archive.locator('input[type=file][accept*="zip"]').first().setInputFiles({name:'TABLET-CT.zip',mimeType:'application/zip',buffer:sample});
     await archive.getByText(/1 müayinə saxlanıldı/).waitFor();
-    await archive.reload();
+    await archive.getByRole('button',{name:'Pəncərəni bağla',exact:true}).click();
+    await command(page,'Local arxiv');
     await archive.getByText(/1 müayinə arxivdədir/).waitFor();
     const todayFilter=archive.locator('.today-filter input');if(await todayFilter.isChecked())await todayFilter.uncheck();
-    const row=archive.locator('tbody tr').filter({has:archive.locator('.record-open-button')}).first();
+    const row=archive.locator('tbody tr').filter({has:page.locator('.record-open-button')}).first();
     const dateCell=row.locator('td').nth(2);
     await dateCell.tap();
     await archive.getByRole('button',{name:'Viewer',exact:true}).tap();
@@ -349,16 +336,15 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
     const opened=await page.evaluate(()=>window.qaArchiveHandoffs[0]);
     assert.equal(opened.length,1);
     assert.equal(new URLSearchParams(new URL(page.url()).hash.slice(1)).get('archive-studies'),opened[0]);
-    await archive.getByText(/1 seçilmiş müayinə Viewer-də açıldı/).waitFor();
-    await archive.bringToFront();
-    // The initial selection tap and the next double gesture are separate actions.
-    await archive.waitForTimeout(460);
+    await archive.waitFor({state:'detached'});
+    await command(page,'Local arxiv');await archive.waitFor();
+    if(await todayFilter.isChecked())await todayFilter.uncheck();
     await dateCell.tap();await dateCell.tap();
     await page.waitForFunction(()=>window.qaArchiveHandoffs?.length===2 && document.querySelector('[data-panel="A"] canvas')?.width>0);
     assert.deepEqual(await page.evaluate(()=>window.qaArchiveHandoffs[1]),opened);
     await page.waitForFunction(()=>!document.querySelector('.viewport-loading'));
     console.log('Archive Viewer and double-tap handoffs passed.');suite.archiveAfterReopen=true;
-    await archive.close();await page.bringToFront();
+    await archive.waitFor({state:'detached'});await page.bringToFront();
     const beforeTouch=await frame.innerText();
     const box=await panel.boundingBox();
     const cdp=await context.newCDPSession(page);

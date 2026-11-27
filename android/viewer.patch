@@ -1,15 +1,13 @@
 --- a/app/page.tsx
 +++ b/app/page.tsx
-@@ -3,6 +3,7 @@
- import {SharedVolumeView} from '@/components/shared-volume-view';
+@@ -4,4 +4,6 @@
  import {calibrateSoftwareStack} from '@/lib/tablet-stack-coordinates';
  import {watchPaneDoubleTap} from '@/lib/tablet-double-tap';
++import {TabletArchiveWindow} from '@/components/tablet-archive-window';
 +import {TabletVolumeDialog} from '@/components/tablet-volume-dialog';
  import {captureTabletStacks,restoreStackProperties,type TabletStackRecovery} from '@/lib/tablet-stack-return';
  import {MeasurementCopies} from '@/components/measurement-copies';
- import {CineControls} from '@/components/cine-controls';
-@@ -248,6 +249,9 @@
-           const center = vp.canvasToWorld([bounds.width / 2, bounds.height / 2]);
+@@ -249,4 +251,7 @@
            const direction = (x: number, y: number) => {
              const point = vp.canvasToWorld([x,y]);
 +            // The software stack announces its image before the transform exists.
@@ -17,8 +15,20 @@
 +            if (!center || !point) return '';
              const vector = point.map((value,i) => value - center[i]);
              const length = Math.hypot(...vector);
-             return vector.map((value,i) => ({ magnitude: Math.abs(value) / (length || 1), letter: [['R','L'],['A','P'],['I','S']][i][value >= 0 ? 1 : 0] })).filter(item => item.magnitude > .2).sort((a,b) => b.magnitude-a.magnitude).map(item => item.letter).join('');
-@@ -536,9 +540,18 @@
+@@ -534,10 +539,30 @@
+   const desktopVrWindow=useRef<Window|null>(null);
+   const [desktopVolumeId,setDesktopVolumeId]=useState<string|null>(null);
++  const [tabletArchive,setTabletArchive]=useState(false);
++  const [tabletBuild,setTabletBuild]=useState('');
++  const closeTabletArchive=useCallback(()=>setTabletArchive(false),[]);
++  useEffect(()=>{
++    if(detachedMode || location.origin!=='https://appassets.androidplatform.net')return;
++    const version=window.prompt('radaz-tablet/version','')||'';
++    if(/^\d+\.\d+\.\d+-tablet\.\d+$/.test(version))setTabletBuild(version.replace('-tablet.','-'));
++    const open=(event:Event)=>{event.preventDefault();setTabletArchive(true);};
++    window.addEventListener('radaz:open-local-archive',open);
++    return ()=>window.removeEventListener('radaz:open-local-archive',open);
++  },[detachedMode]);
    const [tabletVolumeId,setTabletVolumeId]=useState<string|null>(null);
    const [tabletRecovery,setTabletRecovery]=useState<(TabletStackRecovery&{generation:number})>();
    const tabletStacks=useRef<ReturnType<typeof captureTabletStacks>>(undefined);
@@ -39,44 +49,34 @@
 +  },[tabletVolumeId]);
    useEffect(()=>()=>tabletStacks.current?.dispose(),[]);
    const [workspace, setWorkspace] = useState<'viewer' | 'mpr' | '3d'>(detachedMode || 'viewer');
-   useEffect(()=>{if(limited){setTool('scroll');setLayout({rows:1,columns:1});setActive('A');setMaximizedPane(null);setLocalizers(false);setSelectedMarkId(null);setWorkspace('viewer');}},[limited]);
-@@ -560,7 +573,7 @@
-   const importJobs=useRef(Promise.resolve());
+@@ -561,5 +586,5 @@
    const importPending=useRef(0);
    const [importQueue, setImportQueue] = useState<ImportSource[]>([]);
 -  const [status, setStatus] = useState('DICOM faylı, CD/DVD və ya arxiv müayinəsi açın');
 +  const [status, setStatus] = useState('DICOM faylı, qovluq və ya arxiv müayinəsi açın');
    const fileRef = useRef<HTMLInputElement>(null);
    const folderRef = useRef<HTMLInputElement>(null);
-   const zipRef = useRef<HTMLInputElement>(null);
-@@ -578,7 +591,7 @@
-   const mediaOrder = useRef(new Map<string, { id: string; n: number; sop: string }[]>());
+@@ -579,5 +604,5 @@
    const preferredMediaSeries = useRef<string | undefined>(undefined);
    // Disc watching belongs to this Viewer; archive/PACS tabs must start with it off.
 -  const [mediaEnabled, setMediaEnabled] = useState(false);
 +  const mediaEnabled = false;
    const [mediaFilter, setMediaFilter] = useState<string[] | undefined>();
    const [mediaProgress, setMediaProgress] = useState<MediaProgress | null>(null);
-   const [loadProgress, setLoadProgress] = useState<LoadingProgress | null>(null);
-@@ -611,6 +624,7 @@
-   },[projectionViews]);
+@@ -612,4 +637,5 @@
    const channels = useRef<Map<string, BroadcastChannel>>(new Map());
    const detachedWindows=useRef(new Map<string,Window>());
 +  const tabletChildren=useRef(new Map<string,{key:string,tab:Window}>());
    const detachedSources=useRef(new Map<string,()=>void>());
    const selectedIdRef = useRef<string | undefined>(undefined);
-   selectedIdRef.current=assigned[active];
-@@ -628,7 +642,7 @@
-         const selected=listRef.current.find(s=>s.id===seriesId);
+@@ -629,5 +655,5 @@
          const sources=mode==='stitch'&&selected?listRef.current.filter(s=>s.studyId===selected.studyId&&['CR','DX','DR','RG','RF'].includes(s.modality)):(selected?[selected]:[]);
          return {revision:sources.map(s=>`${s.id}:${s.imageIds.join(',')}:${s.loading}`).join('|')||'empty',
 -          series:sources.map(s=>({...s,images:shareLocalDicoms(s.imageIds)})),preferredSeriesId:selected?.id,preferredImageId:mode==='stitch'?currentImages[active]:undefined,anatomy:selected&&anatomyRef.current.result?.sourceKey===volumeSourceKey(selected.imageIds)?anatomyRef.current.result:null};
 +          series:sources.map(s=>({...s,images:shareLocalDicoms(s.imageIds,mode==='3d')})),preferredSeriesId:selected?.id,preferredImageId:mode==='stitch'?currentImages[active]:undefined,anatomy:selected&&anatomyRef.current.result?.sourceKey===volumeSourceKey(selected.imageIds)?anatomyRef.current.result:null};
        }));
      }
-     channels.current.get(key)?.close();
-@@ -1066,34 +1080,49 @@
-   }, [detachedMode, loadArchiveStudies]);
+@@ -1067,24 +1093,34 @@
  
    useEffect(()=>{
 -    if(location.origin!=='https://appassets.androidplatform.net')return;
@@ -125,8 +125,7 @@
 -    if(mode==='3d'){if(desktopVolumeId===source.id&&desktopVrWindow.current&&!desktopVrWindow.current.closed)desktopVrWindow.current.focus();else setDesktopVolumeId(source.id);return;}
      const key=`${mode}:${source.id}`;
      const existing=detachedWindows.current.get(key);
-     if(existing&&!existing.closed){existing.focus();existing.dispatchEvent(new Event('radaz-maximize-window'));return;}
-     const token=crypto.randomUUID();connectHandoff(mode,token,source.id);
+@@ -1093,6 +1129,11 @@
      try { const entries=JSON.parse(sessionStorage.getItem('radaz-detached-handoffs-v2')||'[]').filter((e:any)=>`${e.mode}:${e.seriesId}`!==key);
        sessionStorage.setItem('radaz-detached-handoffs-v2',JSON.stringify([...entries,{mode,seriesId:source.id,token}])); } catch {}
 +    window.prompt('radaz-tablet/prepare-child',token);
@@ -139,18 +138,20 @@
 +    }
      else setStatus('Yeni pəncərə bloklandı. RADAZ üçün pəncərə açılmasına icazə verin.');
    };
- 
-@@ -1487,7 +1516,7 @@
- 
+@@ -1116,4 +1157,5 @@
+   useEffect(() => {
+     const onKey = (e: KeyboardEvent) => {
++      if(document.querySelector('.tablet-archive-window'))return;
+       if(limited)return;
+       if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement).tagName) || document.querySelector('[role=dialog], dialog[open], .tablet-volume-overlay') || (e.target as HTMLElement).isContentEditable) return;
+@@ -1488,5 +1530,5 @@
    const sourceLoading: LoadingProgress | null = volumeSeries?.loading ? {label:'Seriya yüklənir',done:volumeSeries.imageIds.length,total:volumeSeries.discovered||0,indeterminate:!volumeSeries.discovered} : null;
    if(['3d'].includes(workspace))return <SharedVolumeView series={volumeSeries} anatomy={volumeResultFor(volumeSeries)} onClose={()=>{if(detachedMode)window.close();else setWorkspace('viewer');}}/>;
 -  return <><ToolbarWorkspace scope={workspace}><main inert={tabletVolumeId?true:undefined} className={`workstation grouped-workstation ${railHidden ? 'rail-hidden' : ''} ${detachedMode ? 'detached' : ''}`} data-mode={detachedMode || 'viewer'} style={measurementVariables as React.CSSProperties}
 +  return <><ToolbarWorkspace scope={workspace}><main className={`workstation grouped-workstation ${railHidden ? 'rail-hidden' : ''} ${detachedMode ? 'detached' : ''}`} data-mode={detachedMode || 'viewer'} style={measurementVariables as React.CSSProperties}
      onDragOverCapture={event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; } }}
      onDropCapture={event => {
-       if (event.dataTransfer.types.includes('application/x-series-id') || !event.dataTransfer.types.includes('Files') || (event.target as HTMLElement).closest('.source-list')) return;
-@@ -1499,36 +1528,30 @@
-       <ToolbarOverflow/>
+@@ -1500,5 +1542,7 @@
        {!detachedMode && <div className="brand"><RadazLogo size={34}/><span><strong>RADAZ</strong><RadazTagline/></span></div>}
        <div className="primary-command-row">
 -        {!detachedMode && <ToolbarGroup className="toolbar-group import-command" role="group" aria-label={tr('ui.dicom_import_48fa8')} groupId="import" order={10}><DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" className="header-control" title={tr('ui.dicom_import_e8ec8')} aria-label={tr('ui.dicom_import_e8ec8')} disabled={importBusy || limited}><FolderOpen size={17}/><span>{tr('ui.dicom_import_e8ec8')}</span><ChevronDown size={14}/></Button></DropdownMenuTrigger>
@@ -159,8 +160,7 @@
 +          <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" className="header-control tablet-import-options" title={tr('ui.dicom_import_e8ec8')} aria-label={tr('ui.dicom_import_e8ec8')} disabled={importBusy || limited}><ChevronDown size={14}/></Button></DropdownMenuTrigger>
            <DropdownMenuContent align="start" className="header-menu">
              <DropdownMenuItem onSelect={() => { setImportOpen(false); folderRef.current?.click(); }}><FolderOpen size={16}/> {tr('ui.open_folder_55722')}</DropdownMenuItem>
-             <DropdownMenuItem onSelect={() => { setImportOpen(false); zipRef.current?.click(); }}><FileArchive size={16}/> {tr('ui.open_zip_rar_38098')}</DropdownMenuItem>
-             <DropdownMenuItem onSelect={() => fileRef.current?.click()}><ScanSearch size={16}/> {tr('ui.dicom_files_650bc')}</DropdownMenuItem>
+@@ -1507,10 +1551,5 @@
              <DropdownMenuItem onSelect={() => setImportOpen(true)}><Grid2X2 size={16}/> {tr('ui.select_multiple_sources_e4aae')}</DropdownMenuItem>
            </DropdownMenuContent>
 -        </DropdownMenu></ToolbarGroup>}
@@ -172,7 +172,7 @@
 +        </DropdownMenu></div></ToolbarGroup>}
        {!detachedMode && <ToolbarGroup className="workspace-launch toolbar-group" role="group" aria-label={tr('ui.view_mode_a87b2')} groupId="workspace" order={20}>
          <button type="button" aria-label={tr('ui.2d_viewer_b2533')} onClick={() => {setWorkspace('viewer');setInlinePlanes(null);setRecordsPage(null);}}><ScanLine size={18}/></button>
-         <div className="workspace-split" key="mpr"><button type="button" disabled={limited} title={tr('ui.mpr_reconstruction_9bcc7')} aria-label={tr('ui.mpr_reconstruction_9bcc7')} onClick={()=>openDetached('mpr')}><b className="mode-letter-icon">MPR</b></button><DropdownMenu><DropdownMenuTrigger asChild><button className="workspace-options" aria-label="MPR açılış seçimləri" disabled={limited}><ChevronDown/></button></DropdownMenuTrigger><DropdownMenuContent>
+@@ -1518,16 +1557,13 @@
   <DropdownMenuItem toolbarId="mpr-window" onSelect={()=>openDetached('mpr')}>MPR</DropdownMenuItem>
   {(['COR','SAG','AX'] as const).map(plane=><DropdownMenuItem toolbarId={`mpr-${plane}`} key={plane} onSelect={()=>void reformatPane(plane)}>{{AX:'Axial',COR:'Coronal',SAG:'Sagittal'}[plane]}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu></div>
 -        <div className="workspace-split" key="3d"><button type="button" disabled={limited} title={tr('ui.3d_volume_rendering_8b54e')} aria-label={tr('ui.3d_volume_rendering_8b54e')} onClick={()=>openDetached('3d')}><b className="mode-letter-icon">3D</b></button><DropdownMenu><DropdownMenuTrigger asChild><button className="workspace-options" aria-label="3D açılış seçimləri" disabled={limited}><ChevronDown/></button></DropdownMenuTrigger><DropdownMenuContent>
@@ -193,22 +193,22 @@
 +      {workspace === 'mpr' && <>
          <div className="mode-identity" title={tr('ui.mpr_reconstruction_9bcc7')}><strong><Layers3 size={17}/><span>{tr('ui.mpr_reconstruction_9bcc7')}</span></strong><span title={seriesList.find(s => s.id === mprData?.sourceId)?.name || ''}>{seriesList.find(s => s.id === mprData?.sourceId)?.name || currentSeries?.name || 'Seriya seçin'}</span></div>
          <ToolbarGroup className="mode-controls mpr-header-controls" groupId="mpr-modes" order={30}>
-           <div className="mpr-modes" role="group" aria-label={tr('ui.active_mpr_pane_mode_5965d')}>{(['MPR','MIP','MinIP','Avg'] as const).map(mode => <button key={mode} title={mode} aria-label={mode} type="button" className={mprSettings[panePlane[mprActive as keyof typeof panePlane] || 'AX'].mode === mode ? 'current' : ''} onClick={() => changeMprSetting({ mode })}><b className="mpr-mode-label">{mode}</b></button>)}</div>
-@@ -1617,7 +1640,7 @@
-       <section className="main-area">{recordsPage&&<section className="embedded-records" aria-label={recordsPage==='archive'?'Local arxiv':'PACS'}><button className="embedded-close" onClick={()=>setRecordsPage(null)}>Viewer-ə qayıt ×</button>{recordsPage==='archive'?<ArchivePage embedded/>:<PacsPage embedded/>}</section>}
+@@ -1618,5 +1654,5 @@
          {smartVolumeSource&&<SmartVolume key={smartVolumeSource.id} source={smartVolumeSource} sources={seriesList.filter(s=>['CT','MR'].includes(s.modality))} onSourceChange={s=>setSmartVolumeSource({id:s.id,imageIds:[...s.imageIds],modality:s.modality})} onClose={()=>setSmartVolumeSource(null)}/> }
          {anatomyLabel&&tool==='anatomy'&&<div className="anatomy-placement" role="status"><Crosshair size={18}/><span><strong>{anatomyLabel.text.split('\n')[0]}</strong> {tr('ui._pane_b5c88')}{anatomyLabel.panel}{tr('ui._click_the_structure_once_44e32')}</span><button onClick={()=>{setAnatomyLabel(null);setTool('wl');}}>{tr('ui.cancel_esc_bd665')}</button></div>}
 -        {workspace === 'viewer' && !tabletVolumeId && <div className={'viewport-grid'+(maximizedPane?' maximized':'')} style={{ gridTemplateColumns: `repeat(${layout.columns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${layout.rows}, minmax(0, 1fr))` }}>
 +        {workspace === 'viewer' && <div className={'viewport-grid'+(maximizedPane?' maximized':'')} style={{ gridTemplateColumns: `repeat(${layout.columns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${layout.rows}, minmax(0, 1fr))` }}>
            {Array.from({ length: layout.rows * layout.columns }, (_, index) => paneId(index)).map(id => { const otherImages = id !== active && assigned[active] && currentImages[active] ? [{ panel: active, imageId: currentImages[active] }] : []; return <ViewportPane expanded={maximizedPane===id} concealed={!!maximizedPane&&maximizedPane!==id} onHover={()=>{syncSource.current=id;}} projectionViews={projectionViews} anatomyControl={anatomyVolume} anatomyVolume={volumeResultFor(seriesList.find(s=>s.id===assigned[id]))} anatomyVolumeVisible={anatomyVolume.visible} anatomyVolumeOpacity={anatomyVolume.opacity} anatomyLabel={anatomyLabel?.panel===id?anatomyLabel:null} windowLevels={windowLevels} tabletRecovery={tabletRecovery} key={`${id}-${datasetVersion}-${tabletRecovery?.generation||0}`} id={id} initialImageId={currentImages[id]} series={seriesList.find(s => s.id === assigned[id])} selected={active === id} tool={limited ? 'scroll' : tool} cursor={cursor} onCursor={onCursor} hideText={hideText} preset={preset} resetToken={resetToken} clearToken={clearToken} ready={ready} marks={marks} selectedMarkId={selectedMarkId} localizers={localizers && id !== active} otherImages={otherImages} onImageChange={onImageChange} onMoveSource={onMoveSource} onAddMark={onAddMark} onUpdateMark={onUpdateMark} onRemoveMark={onRemoveMark} onSelectMark={markId => { setActive(id); setSelectedMarkId(markId); }} onClearImage={onClearImage} onSelect={() => { setActive(id); setSelectedMarkId(null); }} onToggleMaximize={() => { setActive(id); if(layout.rows*layout.columns>1)setMaximizedPane(current => current === id ? null : id); }} onDropSeries={sid => place(sid, id, true)}/>; })}
          </div>}
-         {workspace === 'mpr' && <>
-@@ -1636,5 +1659,5 @@
-         <footer className="statusbar"><div><span className="viewer-version">v{releaseVersion}</span><span className="status-led"/> {ready ? 'Cornerstone3D hazırdır' : 'Görüntüləmə hazırlanır'} <span className="status-sep">/</span> <span>{workspace === 'mpr' ? `MPR · ${mprSettings[panePlane[mprActive as keyof typeof panePlane] || 'AX'].mode}` : workspace === '3d' ? '3D görünüş' : `Aktiv panel ${active}`}</span><span className="status-sep">/</span>{status}<span className="status-sep">/</span><span aria-label={tr('ui.licence_status_2eb16')}>{licenseStatus}</span></div><WorkProgress className="status-job-progress" progress={jobProgress}/></footer>
+@@ -1634,7 +1670,7 @@
+           </div>
+         </>}
+-        <footer className="statusbar"><div><span className="viewer-version">v{releaseVersion}</span><span className="status-led"/> {ready ? 'Cornerstone3D hazırdır' : 'Görüntüləmə hazırlanır'} <span className="status-sep">/</span> <span>{workspace === 'mpr' ? `MPR · ${mprSettings[panePlane[mprActive as keyof typeof panePlane] || 'AX'].mode}` : workspace === '3d' ? '3D görünüş' : `Aktiv panel ${active}`}</span><span className="status-sep">/</span>{status}<span className="status-sep">/</span><span aria-label={tr('ui.licence_status_2eb16')}>{licenseStatus}</span></div><WorkProgress className="status-job-progress" progress={jobProgress}/></footer>
++        <footer className="statusbar"><div><span className="viewer-version">v{tabletBuild||releaseVersion}</span><span className="status-led"/> {ready ? 'Cornerstone3D hazırdır' : 'Görüntüləmə hazırlanır'} <span className="status-sep">/</span> <span>{workspace === 'mpr' ? `MPR · ${mprSettings[panePlane[mprActive as keyof typeof panePlane] || 'AX'].mode}` : workspace === '3d' ? '3D görünüş' : `Aktiv panel ${active}`}</span><span className="status-sep">/</span>{status}<span className="status-sep">/</span><span aria-label={tr('ui.licence_status_2eb16')}>{licenseStatus}</span></div><WorkProgress className="status-job-progress" progress={jobProgress}/></footer>
        </section>
      </div>
 -  </main></ToolbarWorkspace>{desktopVolumeId&&<SmartDetachedWindow key={desktopVolumeId} windowRef={desktopVrWindow} title="RADAZ · 3D həcm görüntüləmə" onClose={()=>setDesktopVolumeId(null)}><SharedVolumeView series={seriesList.find(s=>s.id===desktopVolumeId)} anatomy={volumeResultFor(seriesList.find(s=>s.id===desktopVolumeId))} onClose={()=>setDesktopVolumeId(null)}/></SmartDetachedWindow>}{tabletVolumeId&&<div className="tablet-volume-overlay" role="dialog" aria-modal="true" aria-label="3D həcm görüntüləmə"><SharedVolumeView series={seriesList.find(s=>s.id===tabletVolumeId)} anatomy={volumeResultFor(seriesList.find(s=>s.id===tabletVolumeId))} onClose={closeTabletVolume}/></div>}</>;
-+  </main></ToolbarWorkspace>{desktopVolumeId&&<SmartDetachedWindow key={desktopVolumeId} windowRef={desktopVrWindow} title="RADAZ · 3D həcm görüntüləmə" onClose={()=>setDesktopVolumeId(null)}><SharedVolumeView series={seriesList.find(s=>s.id===desktopVolumeId)} anatomy={volumeResultFor(seriesList.find(s=>s.id===desktopVolumeId))} onClose={()=>setDesktopVolumeId(null)}/></SmartDetachedWindow>}{tabletVolumeId&&<TabletVolumeDialog onClose={closeTabletVolume}><SharedVolumeView series={seriesList.find(s=>s.id===tabletVolumeId)} anatomy={volumeResultFor(seriesList.find(s=>s.id===tabletVolumeId))} onClose={closeTabletVolume}/></TabletVolumeDialog>}</>;
++  </main></ToolbarWorkspace>{desktopVolumeId&&<SmartDetachedWindow key={desktopVolumeId} windowRef={desktopVrWindow} title="RADAZ · 3D həcm görüntüləmə" onClose={()=>setDesktopVolumeId(null)}><SharedVolumeView series={seriesList.find(s=>s.id===desktopVolumeId)} anatomy={volumeResultFor(seriesList.find(s=>s.id===desktopVolumeId))} onClose={()=>setDesktopVolumeId(null)}/></SmartDetachedWindow>}{tabletVolumeId&&<TabletVolumeDialog onClose={closeTabletVolume}><SharedVolumeView series={seriesList.find(s=>s.id===tabletVolumeId)} anatomy={volumeResultFor(seriesList.find(s=>s.id===tabletVolumeId))} onClose={closeTabletVolume}/></TabletVolumeDialog>}{tabletArchive&&<TabletArchiveWindow onClose={closeTabletArchive}/>}</>;
  }
 --- a/components/app-product.tsx
 +++ b/components/app-product.tsx
@@ -397,16 +397,23 @@
    "az": "Görüntülərin baxışı və pəncərələmə · Ölçmə alətləri · MPR · 3D görüntüləmə",
 --- a/lib/viewer-session.ts
 +++ b/lib/viewer-session.ts
-@@ -8,6 +8,9 @@
- const recordsOpening = new Map<RecordsKind, Promise<boolean>>();
+@@ -9,4 +9,9 @@
  const recordsWindows = new Map<RecordsKind, Window>();
  export function openRecordsWindow(kind: RecordsKind): Promise<boolean> {
++  if(kind==='archive' && location.origin==='https://appassets.androidplatform.net' && location.pathname==='/' &&
++      !window.dispatchEvent(new Event('radaz:open-local-archive',{cancelable:true})))return Promise.resolve(true);
 +  if((kind==='archive'||kind==='pacs') && location.origin==='https://appassets.androidplatform.net' && location.pathname==='/' &&
 +      window.prompt('radaz-tablet/open-'+kind,'')==='ok')
 +    return Promise.resolve(true);
    const pending = recordsOpening.get(kind);
    if (pending) return pending;
-   const opening = (async () => {
+@@ -159,4 +164,6 @@
+   if (!studies.length||studies.length>200||studies.some(study=>!validStudy(study))) throw new Error('DICOM Study UID düzgün deyil');
+   const unique=[...new Set(studies)];
++  if(typeof window!=='undefined' && location.origin==='https://appassets.androidplatform.net' && document.querySelector('.tablet-archive-window') &&
++      !window.dispatchEvent(new CustomEvent('radaz-tablet-open-studies',{cancelable:true,detail:unique})))return 'reused';
+   if (typeof window!=='undefined' && window.location?.origin==='https://appassets.androidplatform.net' && window.prompt('radaz-tablet/open-studies',JSON.stringify(unique))==='ok') return 'reused';
+   const url = unique.length===1?`/#archive-study=${encodeURIComponent(unique[0])}`:`/#archive-studies=${encodeURIComponent(unique.join(','))}`;
 --- a/components/vr-workbench.tsx
 +++ b/components/vr-workbench.tsx
 @@ -189,7 +189,7 @@
@@ -552,3 +559,101 @@
 +       values=widen ? Float32Array.from(v.values) : v.values.slice();
         if(airway){
           airwayBounds??=airwayBodyRows(v.values,v.dimensions);
+--- a/app/archive/page.tsx
++++ b/app/archive/page.tsx
+@@ -25,5 +25,5 @@
+ const modalityOptions = ['CR','DX','CT','MR','XA','MG','US','PT','NM','RF','RG','PX','ES','XC','GM','SC','OT','SR'];
+ 
+-export default function ArchivePage({embedded=false}:{embedded?:boolean}={}) {
++export default function ArchivePage({embedded=false,tabletClose}:{embedded?:boolean;tabletClose?:()=>void}={}) {
+   const privateDesktop=usePrivateDesktop();
+   useUiTranslation();
+@@ -41,9 +41,14 @@
+   const filesRef = useRef<HTMLInputElement>(null);
+ 
++  const inFlight=useRef<Promise<ArchiveStudy[]>|null>(null);
+   const refresh = useCallback(async () => {
+-    const entries = await listArchiveStudies();
++    if(inFlight.current)return inFlight.current;
++    const pending=listArchiveStudies();inFlight.current=pending;
++    try{
++    const entries = await pending;
+     setStudies(entries);
+     setSelected(current => entries.some(item => item.uid === current) ? current : entries[0]?.uid || '');
+     return entries;
++    }finally{inFlight.current=null;}
+   }, []);
+   useEffect(() => {
+@@ -81,4 +86,9 @@
+   const studySort=useTableSort(filtered,{date:r=>r.date+r.time,patient:r=>r.patient,birth:r=>r.birth,patientId:r=>r.patientId,modality:r=>r.modality,description:r=>r.description,accession:r=>r.accession,series:r=>r.series.length,imageCount:r=>r.imageCount,referring:r=>r.referring},{key:'date',direction:'desc'});
+   const seriesSort=useTableSort((current?.series||[]).map((r,i)=>({...r,ordinal:i+1})),{ordinal:r=>r.ordinal,addedAt:r=>r.addedAt,number:r=>r.number,modality:r=>r.modality,description:r=>r.description,protocol:r=>r.protocol,imageCount:r=>r.imageCount,openedAt:()=>current?.openedAt},{key:'number',direction:'asc'});
++  const [page,setPage]=useState(0);
++  const pageSize=64;
++  const currentPage=Math.min(page,Math.max(0,Math.ceil(studySort.rows.length/pageSize)-1));
++  useEffect(()=>setPage(0),[search,dateFrom,dateTo,modalities,studySort.sort]);
++  const rows=tabletClose?studySort.rows.slice(currentPage*pageSize,(currentPage+1)*pageSize):studySort.rows;
+   const lastTap=useRef<{uid:string;time:number;x:number;y:number}|null>(null);
+   const openStudy = async (uid: string, row=false) => {
+@@ -112,9 +122,9 @@
+       <input hidden ref={zipRef} type="file" multiple accept=".zip,.rar,application/vnd.rar,application/x-rar-compressed,application/zip" onChange={event => { const files=Array.from(event.currentTarget.files||[]); event.currentTarget.value=''; void addFiles(files); }}/>
+       <input hidden ref={filesRef} type="file" multiple onChange={event => { const files=Array.from(event.currentTarget.files||[]); event.currentTarget.value=''; void addFiles(files); }}/>
+-      <ToolbarOverflow/>
++      <ToolbarOverflow/>{tabletClose&&<button type="button" data-tablet-close="" aria-label="Pəncərəni bağla" title="Pəncərəni bağla" onClick={tabletClose}>×</button>}
+     </header>
+     <div className="records-upper">
+       <ResizableTable storageKey="archive-studies" className="records-table" aria-label={tr('ui.archived_studies_905a2')}><thead><tr><ResizableHeader column="select" label="Seç" minimum={24} className="study-check-column">{selection.all}</ResizableHeader><ResizableHeader column="open" label="Aç" className="study-open-column">{tr('ui.open_dcc08')}</ResizableHeader><SortHeader column="date" label="Müayinə tarixi" {...studySort}/><SortHeader column="patient" label="Pasiyent" {...studySort}/><SortHeader column="birth" label="Doğum tarixi" {...studySort}/><SortHeader column="patientId" label="Pasiyent ID" {...studySort}/><SortHeader column="modality" label="Müayinə" {...studySort}/><SortHeader column="description" label="Təsvir" {...studySort}/><SortHeader column="accession" label="Accession" {...studySort}/><SortHeader column="series" label="Seriya" {...studySort}/><SortHeader column="imageCount" label="Görüntü" {...studySort}/><SortHeader column="referring" label="Göndərən həkim" {...studySort}/><ResizableHeader column="bridgeSend" label="RADAZBRIDGE" minimum={210} className="bridge-send-column">RADAZBRIDGE</ResizableHeader></tr></thead><tbody>
+-        {studySort.rows.map(study => <tr key={study.uid} className={current?.uid === study.uid ? 'selected' : ''} onClick={() => setSelected(study.uid)} onPointerUp={event=>{
++        {rows.map(study => <tr key={study.uid} className={current?.uid === study.uid ? 'selected' : ''} onClick={() => setSelected(study.uid)} onPointerUp={event=>{
+           if(location.origin!=='https://appassets.androidplatform.net'||event.pointerType==='mouse'||(event.target as Element).closest('button,input'))return;
+           const last=lastTap.current,time=performance.now();lastTap.current={uid:study.uid,time,x:event.clientX,y:event.clientY};
+@@ -130,5 +140,9 @@
+       <div className="records-series-scroll"><ResizableTable storageKey="archive-series" className="records-table" aria-label={tr('ui.series_in_selected_study_610f0')}><thead><tr><ResizableHeader column="open" label="Aç">{tr('ui.open_dcc08')}</ResizableHeader><SortHeader column="ordinal" label="#" {...seriesSort}/><SortHeader column="addedAt" label="Əlavə olunub" {...seriesSort}/><SortHeader column="number" label="Seriya nömrəsi" {...seriesSort}/><SortHeader column="modality" label="Modallıq" {...seriesSort}/><SortHeader column="description" label="Təsvir" {...seriesSort}/><SortHeader column="protocol" label="Protokol" {...seriesSort}/><SortHeader column="imageCount" label="Görüntü sayı" {...seriesSort}/><SortHeader column="openedAt" label="Son açılma" {...seriesSort}/></tr></thead><tbody>{current && seriesSort.rows.map(series => <tr key={series.uid} onDoubleClick={() => void openStudy(current.uid)}><td><button className="record-open-button" aria-label={`${series.description || 'Seriya'} viewer-də aç`} onClick={() => void openStudy(current.uid)}><ExternalLink size={16}/></button></td><td>{series.ordinal}</td><td>{clock(series.addedAt)}</td><td>{series.number}</td><td>{series.modality}</td><td>{series.description}</td><td>{series.protocol || '—'}</td><td>{series.imageCount}</td><td>{clock(current.openedAt)}</td></tr>)}</tbody></ResizableTable></div>
+     </div>
+-    <footer className="records-status" role="status">{busy && <span className="records-spinner"/>}<span className="records-count">{selection.checked.length > 0 && `${selection.checked.length} seçilib · `}{filtered.length}/{studies.length} {tr('ui.studies_fc1a8')}</span><span>{message}</span></footer>
++    <footer className="records-status" role="status">{busy && <span className="records-spinner"/>}<span className="records-count">{selection.checked.length > 0 && `${selection.checked.length} seçilib · `}{filtered.length}/{studies.length} {tr('ui.studies_fc1a8')}</span><span>{message}</span>{tabletClose&&studySort.rows.length>pageSize&&<nav className="tablet-archive-pages" aria-label="Arxiv səhifələri">
++      <button aria-label="Əvvəlki səhifə" disabled={!currentPage} onClick={()=>setPage(currentPage-1)}>‹</button>
++      <span>{currentPage+1} / {Math.ceil(studySort.rows.length/pageSize)}</span>
++      <button aria-label="Növbəti səhifə" disabled={(currentPage+1)*pageSize>=studySort.rows.length} onClick={()=>setPage(currentPage+1)}>›</button>
++    </nav>}</footer>
+   </main></ToolbarWorkspace>;
+ }
+--- a/components/smart-volume.tsx
++++ b/components/smart-volume.tsx
+@@ -11,7 +11,8 @@
+ import {useSmartShortcuts} from '@/lib/smart-volume/shortcuts';
+ import {SmartDetachedWindow} from './smart-detached-window';
++import {TabletSmartInput} from './tablet-smart-input';
+ import {SmartDock,SmartDockItems} from './smart-dock';
+ import {SmartVolumeSurface} from './smart-volume-surface';
+-import {PenTool, Pentagon, Paintbrush, Eraser, Undo2, Redo2, Check, Layers, Plus, Save, FolderOpen, Box, X, Sparkles, Crosshair, StopCircle, Move, ZoomIn, Contrast, SlidersHorizontal, ChevronDown} from 'lucide-react';
++import {PenTool, Pentagon, Paintbrush, Eraser, Undo2, Redo2, Check, Layers, Plus, Save, FolderOpen, Box, X, Sparkles, Crosshair, StopCircle, Move, ZoomIn, Contrast, ArrowUpDown, SlidersHorizontal, ChevronDown} from 'lucide-react';
+ import {indexToWorld,radiologicalOrientation,orientationLetter} from '@/lib/smart-volume/navigation';
+ 
+@@ -41,5 +42,5 @@
+  const root=useRef<HTMLDivElement>(null);const [maximized,setMaximized]=useState<number|null>(null);
+  const [overflow,setOverflow]=useState(false);
+- const [navigation,setNavigation]=useState<'Draw'|'Pan'|'Zoom'|'WW/WL'|'Localizer'>('Pan');
++ const [navigation,setNavigation]=useState<'Draw'|'Pan'|'Zoom'|'WW/WL'|'Localizer'|'Scroll'>('Pan');
+  const [pointAI,setPointAI]=useState(false);
+  const navDrag=useRef<{x:number;y:number}|null>(null);
+@@ -133,8 +134,8 @@
+ 
+  useEffect(()=>{const node=root.current;if(!node)return;const menus=Array.from(node.querySelectorAll<HTMLDetailsElement>('details'));const outside=(e:Event)=>{if(!(e.target as HTMLElement).closest('details'))menus.forEach(m=>m.open=false);};node.ownerDocument.addEventListener('pointerdown',outside);const closeOthers=(e:Event)=>{const selected=e.target as HTMLDetailsElement;if(selected.open)menus.forEach(m=>{if(m!==selected)m.open=false;});};menus.forEach(m=>m.addEventListener('toggle',closeOthers));node.querySelectorAll<HTMLButtonElement>('button').forEach(b=>{if(!b.title)b.title=(b.getAttribute('aria-label')||b.textContent||'Alət')+' · Tab, Enter';});return()=>{node.ownerDocument.removeEventListener('pointerdown',outside);menus.forEach(m=>m.removeEventListener('toggle',closeOthers));};});
+- useEffect(()=>{const key=(e:KeyboardEvent)=>{if(e.altKey||!active||surface||(e.target as HTMLElement).closest('input,select,textarea,[contenteditable=true]'))return;const k=e.key.toLowerCase();if(e.ctrlKey||e.metaKey){if(k==='s'){e.preventDefault();void save();}else if(k==='z'&&!busy&&!candidate){e.preventDefault();undo(e.shiftKey);}return;}const nav:Record<string,typeof navigation>={p:'Pan',z:'Zoom',w:'WW/WL','ü':'WW/WL','ц':'WW/WL'};if(nav[k])setNavigation(nav[k]);else if(k==='i'){setPointAI(v=>!v);setNavigation('Draw');}else if(k==='l'){setLocalizers(true);setNavigation('Localizer');}else if(k==='3'&&ready)openSurface();else if(k==='enter'&&!busy&&!candidate)finish();else if(['f','g','b','e'].includes(k)&&!busy&&!candidate){setTool(({f:'Freehand',g:'Polygon',b:'Brush',e:'Eraser'} as const)[k as 'f']);setNavigation('Draw');}else return;e.preventDefault();e.stopPropagation();};const target=root.current?.ownerDocument.defaultView||window;target.addEventListener('keydown',key,true);return()=>target.removeEventListener('keydown',key,true);});
++ useEffect(()=>{const key=(e:KeyboardEvent)=>{if(e.altKey||!active||surface||(e.target as HTMLElement).closest('input,select,textarea,[contenteditable=true]'))return;const k=e.key.toLowerCase();if(e.ctrlKey||e.metaKey){if(k==='s'){e.preventDefault();void save();}else if(k==='z'&&!busy&&!candidate){e.preventDefault();undo(e.shiftKey);}return;}const nav:Record<string,typeof navigation>={s:'Scroll',p:'Pan',z:'Zoom',w:'WW/WL','ü':'WW/WL','ц':'WW/WL'};if(nav[k])setNavigation(nav[k]);else if(k==='i'){setPointAI(v=>!v);setNavigation('Draw');}else if(k==='l'){setLocalizers(true);setNavigation('Localizer');}else if(k==='3'&&ready)openSurface();else if(k==='enter'&&!busy&&!candidate)finish();else if(['f','g','b','e'].includes(k)&&!busy&&!candidate){setTool(({f:'Freehand',g:'Polygon',b:'Brush',e:'Eraser'} as const)[k as 'f']);setNavigation('Draw');}else return;e.preventDefault();e.stopPropagation();};const target=root.current?.ownerDocument.defaultView||window;target.addEventListener('keydown',key,true);return()=>target.removeEventListener('keydown',key,true);});
+  return <SmartDock scope={native?"smart-native":"smart-volume"}><div ref={root} data-native={native} className="smart-volume-workspace sv-workspace" role="dialog" aria-modal="true" aria-label="Smart Volume">
+   <header className="sv-title"><div className="smart-dock-top"/><div className="sv-brand"><Layers/><div><strong>Smart Volume</strong><small>RADAZ</small></div></div><div className="sv-series-select" hidden={native}><select aria-label="Smart Volume seriyası" value={source.id} onChange={e=>{const next=sources.find(s=>s.id===e.target.value);if(next&&(!dirty||confirm('Saxlanmamış dəyişikliklər var. Seriya dəyişsin?')))onSourceChange?.(next);}}>{(sources.length?sources:[source]).map(s=><option key={s.id} value={s.id} disabled={s.loading||s.imageIds.length<2}>{s.name||s.modality} · {s.imageIds.length} kəsik{s.loading?' · yüklənir':''}</option>)}</select></div>  <div className="sv-overflow" data-open={overflow}><button className="sv-overflow-toggle" aria-label="Əlavə alətlər" aria-expanded={overflow} onClick={()=>setOverflow(!overflow)}>•••</button><nav className="sv-toolbar" aria-label="Smart Volume alətləri">
+-   <SmartDockItems id="sv-inline-navigation" side="top" order={0}>{(['Pan','Zoom','WW/WL'] as const).map((name,i)=>{const Icon=[Move,ZoomIn,Contrast][i];return <button key={name} aria-label={name} title={`${name} · ${["P","Z","W"][i]}`} aria-pressed={navigation===name} onClick={()=>setNavigation(name)}><Icon/></button>;})}<button aria-label="Localizer" title="Localizer · L" aria-pressed={localizers} onClick={()=>{setLocalizers(true);setNavigation('Localizer');}}><Crosshair/></button><label>WW<input aria-label="WW" type="text" inputMode="decimal" min={1} value={windowWidth} onChange={e=>setWindowWidth(Math.max(1,+e.target.value||1))}/></label><label>WL<input aria-label="WL" type="text" inputMode="decimal" value={windowLevel} onChange={e=>setWindowLevel(+e.target.value||0)}/></label><label>Maska şəffaflığı<input type="range" min={0} max={1} step={.05} value={opacity} onChange={e=>setOpacity(+e.target.value)}/></label><button onClick={interpolate} disabled={!ready||busy||!!candidate||reviewEditing}><Layers/>İnterpolasiya (AI deyil)</button></SmartDockItems>
++   <SmartDockItems id="sv-inline-navigation" side="top" order={0}>{<button aria-label="Listələ" title="Listələ · S" aria-pressed={navigation==='Scroll'} onClick={()=>setNavigation('Scroll')}><ArrowUpDown/></button>}{(['Pan','Zoom','WW/WL'] as const).map((name,i)=>{const Icon=[Move,ZoomIn,Contrast][i];return <button key={name} aria-label={name} title={`${name} · ${["P","Z","W"][i]}`} aria-pressed={navigation===name} onClick={()=>setNavigation(name)}><Icon/></button>;})}<button aria-label="Localizer" title="Localizer · L" aria-pressed={localizers} onClick={()=>{setLocalizers(true);setNavigation('Localizer');}}><Crosshair/></button><label>WW<input aria-label="WW" type="text" inputMode="decimal" min={1} value={windowWidth} onChange={e=>setWindowWidth(Math.max(1,+e.target.value||1))}/></label><label>WL<input aria-label="WL" type="text" inputMode="decimal" value={windowLevel} onChange={e=>setWindowLevel(+e.target.value||0)}/></label><label>Maska şəffaflığı<input type="range" min={0} max={1} step={.05} value={opacity} onChange={e=>setOpacity(+e.target.value)}/></label><button onClick={interpolate} disabled={!ready||busy||!!candidate||reviewEditing}><Layers/>İnterpolasiya (AI deyil)</button></SmartDockItems>
+   </nav></div><div className="sv-title-actions"><ToolbarDividers scope="smart-volume" container=".smart-dock-root" selector={'.smart-flat-command button, .sv-title-actions > button'}/><button disabled={!ready} onClick={openSurface}><Box/>3D səth</button><button disabled={!ready||busy||!!candidate||reviewEditing} onClick={()=>void save()}><Save/>Maskanı saxla</button><button disabled={!ready||busy||!!candidate||reviewEditing} onClick={()=>void restore()}><FolderOpen/>Saxlanmış maskanı aç</button><button aria-label="Bağla" onClick={()=>{if(!dirty||confirm('Saxlanmamış dəyişikliklər var. Bağlansın?'))onClose();}}><X/></button></div></header>
+ <aside className="sv-right-tools smart-dock-right" aria-label="Seqmentasiya alətləri">   <SmartDockItems id="sv-contour-tools" side="right" order={1} disabled={busy||!!candidate}>{(['Freehand','Polygon','Brush','Eraser'] as const).map((t,i)=>{const Icon=[PenTool,Pentagon,Paintbrush,Eraser][i];return <button key={t} aria-label={t} title={t} disabled={!ready} aria-pressed={tool===t} onClick={()=>{path.current=null;setDraft(null);setTool(t);setNavigation('Draw');}}><Icon/><span>{t}</span></button>;})}<button onClick={editContour} disabled={!ready||!!draft}><PenTool/>Konturu redaktə et</button><button onClick={finish} disabled={!ready}><Check/>Konturu tamamla</button><button title="Geri al" aria-label="Undo" disabled={!history.current.length} onClick={()=>undo()}><Undo2/></button><button title="Yenidən et" aria-label="Redo" disabled={!future.current.length} onClick={()=>undo(true)}><Redo2/></button><label>Fırça, mm<input type="number" min={.5} max={30} step={.5} value={radius} onChange={e=>setRadius(Math.max(.5,Math.min(30,Number(e.target.value)||.5)))}/></label></SmartDockItems>
+@@ -144,5 +145,8 @@
+ 
+   <div className="sv-summary"><p role="status">{status}</p><div className="sv-metrics">{(candidate||reviewEditing)&&<span>AI ön baxış · təsdiqlənməyib</span>}{metrics&&<><strong>{metrics.ml.toFixed(2)} <small>ml / cm³</small></strong><span>{metrics.mm3.toFixed(1)} mm³</span><span title="Mənbə oxları üzrə sərhəd ölçüləri">{metrics.orientedExtentsMm.map(n=>n.toFixed(1)).join(' × ')} mm</span></>}</div></div>
+-  <div className="sv-planes" data-maximized={maximized!==null||native} data-view-tick={viewTick}>{([0,1,2] as const).map(axis=><div key={axis} className="sv-plane" style={{display:(native?axis!==2:maximized!==null&&maximized!==axis)?"none":undefined}} onDoubleClick={()=>{if(!native&&!path.current)setMaximized(maximized===axis?null:axis);}} data-axis={axis}><div className="sv-plane-title"><span>{native?(source.name||"Orijinal MRT seriyası"):["Sagittal","Coronal","Axial"][axis]}</span><small>{Math.round(cross.current[axis])+1} / {session.current?.geometry.dimensions[axis]||"—"}</small></div><div ref={el=>{hosts.current[axis]=el;}} style={{position:'absolute',inset:0}}/>{ready&&<div style={{position:'absolute',inset:0,cursor:'crosshair',touchAction:'none'}} onWheel={e=>{if(path.current)return;scrollPlane(axis,e.deltaY>0?1:-1);}} onContextMenu={e=>e.preventDefault()} onPointerDown={e=>{if(!session.current)return;if(e.button===1||navigation!=='Draw'){e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);navDrag.current={x:e.clientX,y:e.clientY};return;}if(e.button!==0||busy||candidate)return;e.currentTarget.setPointerCapture(e.pointerId);const p=point(axis,e),other=([0,1,2] as const).filter(a=>a!==axis);if(pointAI){setPointAI(false);void runAI({axis,slice:Math.round(p[axis]),point:[p[other[0]],p[other[1]]]});return;}if(tool==='Brush'||tool==='Eraser'){paint(axis,p);return;}const xy:[number,number]=[p[other[0]],p[other[1]]];const rect=e.currentTarget.getBoundingClientRect(),screen:[number,number]=[e.clientX-rect.left,e.clientY-rect.top];setDraft(current=>tool==='Polygon'&&current?.axis===axis?{axis,points:[...current.points,screen]}:{axis,points:[screen]});if(tool==='Polygon'&&path.current?.axis===axis&&path.current.slice===Math.round(p[axis]))path.current.points.push(xy);else path.current={axis,slice:Math.round(p[axis]),points:[xy]};}} onPointerMove={e=>{const drag=navDrag.current,s=session.current;if(drag&&s){const host=hosts.current[axis]!,rect=host.getBoundingClientRect();const dx=(e.clientX-drag.x)*host.clientWidth/rect.width,dy=(e.clientY-drag.y)*host.clientHeight/rect.height;const vp=s.engine.getViewport(s.views[axis]),c=vp.getCamera();if(navigation==='WW/WL'&&!(e.buttons&4)){setWindowWidth(v=>Math.max(1,v+dx*3));setWindowLevel(v=>v+dy*3);}else if(navigation==='Zoom'&&!(e.buttons&4)){vp.setCamera({parallelScale:Math.max(.01,c.parallelScale!*Math.exp(dy*.01))});}else{const a=vp.canvasToWorld([0,0]),b=vp.canvasToWorld([dx,dy]),delta=a.map((n,i)=>n-b[i]);vp.setCamera({position:c.position!.map((n,i)=>n+delta[i]) as Vec3,focalPoint:c.focalPoint!.map((n,i)=>n+delta[i]) as Vec3});}navDrag.current={x:e.clientX,y:e.clientY};vp.render();return;}if(!e.buttons||!session.current||busy||candidate)return;const p=point(axis,e);if(tool==='Brush'||tool==='Eraser')paint(axis,p);else if(tool==='Freehand'&&path.current){const other=([0,1,2] as const).filter(a=>a!==axis);path.current.points.push([p[other[0]],p[other[1]]]);const rect=e.currentTarget.getBoundingClientRect();setDraft(current=>({axis,points:[...(current?.points||[]),[e.clientX-rect.left,e.clientY-rect.top]]}));}}} onPointerUp={()=>{if(navDrag.current){navDrag.current=null;return;}if(busy||candidate)return;if(tool==='Freehand')finish();else if(tool!=='Polygon')commit();}} onPointerCancel={()=>{navDrag.current=null;path.current=null;setDraft(null);commit();}}/>}{ready&&<><span className="sv-edge sv-left">{edgeLabels(axis)[0]}</span><span className="sv-edge sv-right">{edgeLabels(axis)[1]}</span><span className="sv-edge sv-top">{edgeLabels(axis)[2]}</span><span className="sv-edge sv-bottom">{edgeLabels(axis)[3]}</span></>}{ready&&localizers&&native&&bridge&&<svg className="sv-localizers" onPointerMove={e=>{const id=dragLine.current?.peer,s=session.current;if(!id||!s)return;bridge.peers.get(id)?.move(indexToWorld(s.geometry,point(axis,e)));}} onPointerUp={e=>{dragLine.current=null;if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);}} onPointerCancel={()=>{dragLine.current=null;}}>{[...bridge.peers].filter(([id])=>id!==source.id).map(([id,peer],i)=>{const s=session.current;if(!s||!s.frameOfReferenceUID||s.frameOfReferenceUID!==peer.session.frameOfReferenceUID)return null;const line=localizerSegment(sourcePlane(s.geometry,cross.current[2],s.studyInstanceUID,s.frameOfReferenceUID),sourcePlane(peer.session.geometry,peer.slice(),peer.session.studyInstanceUID,peer.session.frameOfReferenceUID));if(!line)return null;const points=line.map(p=>s.engine.getViewport(s.views[2]).worldToCanvas(p));return <g key={id}><line x1={points[0][0]} y1={points[0][1]} x2={points[1][0]} y2={points[1][1]} stroke={['#58d6b2','#65aaf5'][i%2]} pointerEvents="none"/><line data-native-localizer={id} x1={points[0][0]} y1={points[0][1]} x2={points[1][0]} y2={points[1][1]} stroke="transparent" strokeWidth={14} style={{pointerEvents:navigation==='Localizer'||navigation==='Pan'?'stroke':'none',cursor:'move'}} onPointerDown={e=>{if(path.current)return;e.preventDefault();e.stopPropagation();dragLine.current={axis,target:2,peer:id};e.currentTarget.ownerSVGElement!.setPointerCapture(e.pointerId);}}/></g>;})}</svg>}{ready&&localizers&&!native&&<svg className="sv-localizers" onPointerMove={e=>{const drag=dragLine.current;if(!drag)return;moveCross(axis,point(axis,e),drag.target);}} onPointerUp={e=>{dragLine.current=null;e.currentTarget.releasePointerCapture(e.pointerId);}} onPointerCancel={()=>{dragLine.current=null;}}>{[0,1,2].filter(a=>a!==axis).map(target=>{const line=lineGeometry(axis,target);if(!line)return null;return <g key={target}><line x1={line[0][0]} y1={line[0][1]} x2={line[1][0]} y2={line[1][1]} stroke={['#f5ad58','#58d6b2','#65aaf5'][target]} strokeWidth={1} pointerEvents="none"/><line aria-label={`${target} localizer`} data-localizer-target={target} x1={line[0][0]} y1={line[0][1]} x2={line[1][0]} y2={line[1][1]} stroke="transparent" strokeWidth={12} style={{pointerEvents:navigation==='Localizer'||navigation==='Pan'?'stroke':'none',cursor:'move'}} onPointerDown={e=>{if(path.current)return;e.preventDefault();e.stopPropagation();dragLine.current={axis,target};e.currentTarget.ownerSVGElement!.setPointerCapture(e.pointerId);}}/></g>;})}</svg>}{projectedDraft?.axis===axis&&<svg style={{position:'absolute',inset:0,width:'100%',height:'100%',pointerEvents:'none'}}><polyline points={projectedDraft.points.map(p=>p.join(',')).join(' ')} fill="none" stroke="#42d6b0" strokeWidth={2}/>{tool==='Polygon'&&projectedDraft.points.map((p,i)=><circle key={i} cx={p[0]} cy={p[1]} r={5} fill="#fff" stroke="#42d6b0" style={{pointerEvents:'all',cursor:'move'}} onPointerDown={e=>{e.preventDefault();e.stopPropagation();e.currentTarget.setPointerCapture(e.pointerId);}} onPointerMove={e=>{if(!e.buttons||!path.current)return;const q=point(axis,e),other=([0,1,2] as const).filter(a=>a!==axis);path.current.points[i]=[q[other[0]],q[other[1]]];const rect=hosts.current[axis]!.getBoundingClientRect();setDraft(current=>current?{...current,points:current.points.map((v,j)=>j===i?[e.clientX-rect.left,e.clientY-rect.top]:v)}:null);}}/>)}</svg>}</div>)}</div>
++  <div className="sv-planes" data-maximized={maximized!==null||native} data-view-tick={viewTick}>{([0,1,2] as const).map(axis=><div key={axis} className="sv-plane" style={{display:(native?axis!==2:maximized!==null&&maximized!==axis)?"none":undefined}} onDoubleClick={()=>{if(!native&&!path.current)setMaximized(maximized===axis?null:axis);}} data-axis={axis}><div className="sv-plane-title"><span>{native?(source.name||"Orijinal MRT seriyası"):["Sagittal","Coronal","Axial"][axis]}</span><small>{Math.round(cross.current[axis])+1} / {session.current?.geometry.dimensions[axis]||"—"}</small></div><div ref={el=>{hosts.current[axis]=el;}} style={{position:'absolute',inset:0}}/>{ready&&<TabletSmartInput viewport={()=>{const s=session.current;return s?.engine.getViewport(s.views[axis]);}} drawing={navigation==='Draw'} style={{position:'absolute',inset:0,cursor:'crosshair',touchAction:'none'}} onWheel={e=>{if(path.current)return;scrollPlane(axis,e.deltaY>0?1:-1);}} onContextMenu={e=>e.preventDefault()} onPointerDown={e=>{if(!session.current)return;if(e.button===1||navigation!=='Draw'){e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);navDrag.current={x:e.clientX,y:e.clientY};return;}if(e.button!==0||busy||candidate)return;e.currentTarget.setPointerCapture(e.pointerId);const p=point(axis,e),other=([0,1,2] as const).filter(a=>a!==axis);if(pointAI){setPointAI(false);void runAI({axis,slice:Math.round(p[axis]),point:[p[other[0]],p[other[1]]]});return;}if(tool==='Brush'||tool==='Eraser'){paint(axis,p);return;}const xy:[number,number]=[p[other[0]],p[other[1]]];const rect=e.currentTarget.getBoundingClientRect(),screen:[number,number]=[e.clientX-rect.left,e.clientY-rect.top];setDraft(current=>tool==='Polygon'&&current?.axis===axis?{axis,points:[...current.points,screen]}:{axis,points:[screen]});if(tool==='Polygon'&&path.current?.axis===axis&&path.current.slice===Math.round(p[axis]))path.current.points.push(xy);else path.current={axis,slice:Math.round(p[axis]),points:[xy]};}} onPointerMove={e=>{const drag=navDrag.current,s=session.current;if(drag&&s){const host=hosts.current[axis]!,rect=host.getBoundingClientRect();const dx=(e.clientX-drag.x)*host.clientWidth/rect.width,dy=(e.clientY-drag.y)*host.clientHeight/rect.height;const vp=s.engine.getViewport(s.views[axis]),c=vp.getCamera();if(navigation==='Scroll'&&!(e.buttons&4)){
++        if(!path.current){const steps=Math.trunc((e.clientY-drag.y)/14);if(steps){scrollPlane(axis,steps);navDrag.current={x:e.clientX,y:drag.y+steps*14};}}
++        return;
++      }else if(navigation==='WW/WL'&&!(e.buttons&4)){setWindowWidth(v=>Math.max(1,v+dx*3));setWindowLevel(v=>v+dy*3);}else if(navigation==='Zoom'&&!(e.buttons&4)){vp.setCamera({parallelScale:Math.max(.01,c.parallelScale!*Math.exp(dy*.01))});}else{const a=vp.canvasToWorld([0,0]),b=vp.canvasToWorld([dx,dy]),delta=a.map((n,i)=>n-b[i]);vp.setCamera({position:c.position!.map((n,i)=>n+delta[i]) as Vec3,focalPoint:c.focalPoint!.map((n,i)=>n+delta[i]) as Vec3});}navDrag.current={x:e.clientX,y:e.clientY};vp.render();return;}if(!e.buttons||!session.current||busy||candidate)return;const p=point(axis,e);if(tool==='Brush'||tool==='Eraser')paint(axis,p);else if(tool==='Freehand'&&path.current){const other=([0,1,2] as const).filter(a=>a!==axis);path.current.points.push([p[other[0]],p[other[1]]]);const rect=e.currentTarget.getBoundingClientRect();setDraft(current=>({axis,points:[...(current?.points||[]),[e.clientX-rect.left,e.clientY-rect.top]]}));}}} onPointerUp={()=>{if(navDrag.current){navDrag.current=null;return;}if(busy||candidate)return;if(tool==='Freehand')finish();else if(tool!=='Polygon')commit();}} onPointerCancel={()=>{navDrag.current=null;path.current=null;setDraft(null);commit();}}/>}{ready&&<><span className="sv-edge sv-left">{edgeLabels(axis)[0]}</span><span className="sv-edge sv-right">{edgeLabels(axis)[1]}</span><span className="sv-edge sv-top">{edgeLabels(axis)[2]}</span><span className="sv-edge sv-bottom">{edgeLabels(axis)[3]}</span></>}{ready&&localizers&&native&&bridge&&<svg className="sv-localizers" onPointerMove={e=>{const id=dragLine.current?.peer,s=session.current;if(!id||!s)return;bridge.peers.get(id)?.move(indexToWorld(s.geometry,point(axis,e)));}} onPointerUp={e=>{dragLine.current=null;if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);}} onPointerCancel={()=>{dragLine.current=null;}}>{[...bridge.peers].filter(([id])=>id!==source.id).map(([id,peer],i)=>{const s=session.current;if(!s||!s.frameOfReferenceUID||s.frameOfReferenceUID!==peer.session.frameOfReferenceUID)return null;const line=localizerSegment(sourcePlane(s.geometry,cross.current[2],s.studyInstanceUID,s.frameOfReferenceUID),sourcePlane(peer.session.geometry,peer.slice(),peer.session.studyInstanceUID,peer.session.frameOfReferenceUID));if(!line)return null;const points=line.map(p=>s.engine.getViewport(s.views[2]).worldToCanvas(p));return <g key={id}><line x1={points[0][0]} y1={points[0][1]} x2={points[1][0]} y2={points[1][1]} stroke={['#58d6b2','#65aaf5'][i%2]} pointerEvents="none"/><line data-native-localizer={id} x1={points[0][0]} y1={points[0][1]} x2={points[1][0]} y2={points[1][1]} stroke="transparent" strokeWidth={14} style={{pointerEvents:navigation==='Localizer'||navigation==='Pan'?'stroke':'none',cursor:'move'}} onPointerDown={e=>{if(path.current)return;e.preventDefault();e.stopPropagation();dragLine.current={axis,target:2,peer:id};e.currentTarget.ownerSVGElement!.setPointerCapture(e.pointerId);}}/></g>;})}</svg>}{ready&&localizers&&!native&&<svg className="sv-localizers" onPointerMove={e=>{const drag=dragLine.current;if(!drag)return;moveCross(axis,point(axis,e),drag.target);}} onPointerUp={e=>{dragLine.current=null;e.currentTarget.releasePointerCapture(e.pointerId);}} onPointerCancel={()=>{dragLine.current=null;}}>{[0,1,2].filter(a=>a!==axis).map(target=>{const line=lineGeometry(axis,target);if(!line)return null;return <g key={target}><line x1={line[0][0]} y1={line[0][1]} x2={line[1][0]} y2={line[1][1]} stroke={['#f5ad58','#58d6b2','#65aaf5'][target]} strokeWidth={1} pointerEvents="none"/><line aria-label={`${target} localizer`} data-localizer-target={target} x1={line[0][0]} y1={line[0][1]} x2={line[1][0]} y2={line[1][1]} stroke="transparent" strokeWidth={12} style={{pointerEvents:navigation==='Localizer'||navigation==='Pan'?'stroke':'none',cursor:'move'}} onPointerDown={e=>{if(path.current)return;e.preventDefault();e.stopPropagation();dragLine.current={axis,target};e.currentTarget.ownerSVGElement!.setPointerCapture(e.pointerId);}}/></g>;})}</svg>}{projectedDraft?.axis===axis&&<svg style={{position:'absolute',inset:0,width:'100%',height:'100%',pointerEvents:'none'}}><polyline points={projectedDraft.points.map(p=>p.join(',')).join(' ')} fill="none" stroke="#42d6b0" strokeWidth={2}/>{tool==='Polygon'&&projectedDraft.points.map((p,i)=><circle key={i} cx={p[0]} cy={p[1]} r={5} fill="#fff" stroke="#42d6b0" style={{pointerEvents:'all',cursor:'move'}} onPointerDown={e=>{e.preventDefault();e.stopPropagation();e.currentTarget.setPointerCapture(e.pointerId);}} onPointerMove={e=>{if(!e.buttons||!path.current)return;const q=point(axis,e),other=([0,1,2] as const).filter(a=>a!==axis);path.current.points[i]=[q[other[0]],q[other[1]]];const rect=hosts.current[axis]!.getBoundingClientRect();setDraft(current=>current?{...current,points:current.points.map((v,j)=>j===i?[e.clientX-rect.left,e.clientY-rect.top]:v)}:null);}}/>)}</svg>}</div>)}</div>
+   {surface&&<SmartDetachedWindow title="RADAZ Smart Volume 3D" onClose={()=>setSurface(null)}><SmartVolumeSurface sourceValues={session.current!.engine.scalars} source={core.cache.getVolume(session.current!.sourceVolumeId)!} range={[windowLevel-windowWidth/2,windowLevel+windowWidth/2]} result={surface} colors={Object.fromEntries(segments.map(s=>[s.id,s.color]))} onClose={()=>setSurface(null)}/></SmartDetachedWindow>}
+   <small className="sv-footer">Kontur tamamlananda maska görünür. Təkər kəsikləri dəyişir. MedSAM2 lokal tədqiqat modelidir. Livewire, DICOM SEG və klinik yoxlama hələ aktiv deyil. {revision>0&&dirty?'Saxlanmamış dəyişikliklər':''}</small>

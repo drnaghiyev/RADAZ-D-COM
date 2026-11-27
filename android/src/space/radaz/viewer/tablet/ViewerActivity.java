@@ -145,10 +145,11 @@ public final class ViewerActivity extends Activity {
             String answer="ok";
             try {
                 switch(command.substring("radaz-tablet/".length())) {
-                    case "volume-opened":
+                    case "version": answer=getPackageManager().getPackageInfo(getPackageName(),0).versionName;break;
+                    case "workspace-opened": case "volume-opened":
                         if(web!=active || value==null || !value.matches("[0-9a-fA-F-]{36}")){answer="denied";break;}
                         volumeOwner=web;volumeToken=value;updateChildBack();break;
-                    case "volume-closed":
+                    case "workspace-closed": case "volume-closed":
                         if(web==volumeOwner && value.equals(volumeToken))clearVolumeOwner();
                         break;
                     case "prepare-child":
