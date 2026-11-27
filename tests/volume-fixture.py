@@ -9,6 +9,7 @@ p = argparse.ArgumentParser()
 p.add_argument('--output', type=Path, required=True)
 p.add_argument('--size', type=int, default=512)
 p.add_argument('--slices', type=int, default=128)
+p.add_argument('--metrology', action='store_true', help='Seven physical fiducials in a 128x128 anisotropic image for touch measurement QA.')
 p.add_argument('--airway', action='store_true', help='Chest phantom with bronchi, lung and external objects.')
 p.add_argument('--oblique', action='store_true')
 p.add_argument('--plane-markers', action='store_true', help='Encode slice index in a small corner patch for 3D coverage tests.')
@@ -39,6 +40,13 @@ for z in range(a.slices):
         hu=np.where(bronchus,-968,hu)
         hu=np.where((y>.80)&(y<.86)&(abs(x)<.94),-906,hu)
         hu=np.where((x<-.68)&(x>-.84)&(y<-.55)&(y>-.63),-941,hu)
+    if a.metrology:
+        if a.size != 128 or a.oblique:
+            raise ValueError('Metrology fixture requires a non-oblique 128x128 image')
+        ds.PixelSpacing = [.8, .5]
+        hu = np.full((a.size, a.size), -1024)
+        for xx, yy in [(22,29),(62,29),(108,21),(108,46),(37,75),(77,75),(77,100)]:
+            hu[yy-1:yy+2,xx-1:xx+2] = 1400
     pixels = np.rint((hu+1024)/1.5).astype('<i2')
     if a.plane_markers:
         pixels[:24, :24] = 128 + z

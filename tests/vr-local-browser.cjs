@@ -67,6 +67,11 @@ const origin=tablet?'https://appassets.androidplatform.net':base;
   }
   if(tablet && !archived){await home.locator('.statusbar').filter({hasText:'Cornerstone3D hazırdır'}).waitFor();const local=home.locator('input[type=file][multiple]:not([webkitdirectory])').first();await local.setInputFiles(fs.readdirSync(source).filter(n=>n.endsWith('.dcm')).sort().map(n=>path.resolve(source,n)));}
   const panel=home.locator('[data-panel="A"]');await panel.locator('.bottom-right').filter({hasText:new RegExp('/\\s*'+files.length)}).waitFor();
+  if(process.env.VR_TABLET_METROLOGY){
+    assert.ok(tablet);
+    await require('./tablet-metrology.cjs').verifyMetrology(home,panel,context);
+    assert.deepEqual(errs,[]);return;
+  }
   if(tablet){
    const cdp=await context.newCDPSession(home),box=await panel.locator('.dicom-canvas').boundingBox(),x=box.x+box.width*.5,y=box.y+box.height*.5;
    const send=(type,points)=>cdp.send('Input.dispatchTouchEvent',{type,touchPoints:points.map(([id,x,y])=>({id,x,y}))});
