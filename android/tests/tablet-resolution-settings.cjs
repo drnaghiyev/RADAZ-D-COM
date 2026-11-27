@@ -48,6 +48,18 @@ withTablet(async({p,errors})=>{
   await p.waitForFunction(()=>{const c=document.querySelector('dialog .vr-raster canvas');return c && Math.max(c.width,c.height)>=512;},{},{timeout:60000});
   await modal.getByRole('button',{name:'3D pəncərəni bağla'}).tap();
   await open();await full(512);
+  await modal.getByRole('button',{name:'Proyeksiyada uzunluq',exact:true}).tap();
+  const stage=await modal.locator('.vr-stage').boundingBox();
+  await p.mouse.move(stage.x+stage.width*.4,stage.y+stage.height*.4);
+  await p.mouse.down();
+  await p.mouse.move(stage.x+stage.width*.6,stage.y+stage.height*.55,{steps:4});
+  await p.mouse.up();
+  await settings();await select.selectOption('256');
+  await modal.getByRole('status').filter({hasText:'növbəti 3D açılışında'}).waitFor();
+  await full(512);
+  await modal.getByRole('button',{name:'3D pəncərəni bağla'}).tap();
+  await open();await full(256);
+  await settings();await select.selectOption('512');await full(512);
   await modal.getByRole('button',{name:'3D pəncərəni bağla'}).tap();
   await p.evaluate(()=>window.qaAvailable=345);
   await open();
