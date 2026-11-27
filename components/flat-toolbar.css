@@ -72,4 +72,48 @@ body .flat-toolbar-workspace .flat-toolbar-tool :is(.workspace-options,.tablet-i
 html:not([data-tablet-columns]) .workstation .series-rail .rail-heading{display:none}
 @media(max-width:800px){.workstation .statusbar:has(.status-job-progress){flex-wrap:wrap;height:auto}.status-job-progress small{display:none}}
 
+/* Keep the desktop transfer details and the meter inside the visible footer. */
+html:not([data-tablet-columns]) .workstation .statusbar:has(.status-job-progress){
+  flex-wrap:nowrap;
+  column-gap:12px;
+  box-sizing:border-box;
+}
+html:not([data-tablet-columns]) .statusbar > .status-job-progress{
+  flex:1 1 480px;
+  flex-flow:row nowrap;
+  align-items:center;
+  gap:8px;
+  max-width:680px;
+  border:0;
+  background:transparent;
+}
+html:not([data-tablet-columns]) .statusbar .status-job-progress > progress{
+  flex:1 1 220px;
+  min-width:48px;
+  width:auto;
+}
+html:not([data-tablet-columns]) .status-job-progress > strong,
+html:not([data-tablet-columns]) .status-job-progress > small{
+  display:block;
+  min-width:0;
+  max-width:40%;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+html:not([data-tablet-columns]) .status-job-progress > span{flex:none}
+@media(max-width:1100px){
+  html:not([data-tablet-columns]) .workstation .statusbar:has(.status-job-progress){
+    flex-wrap:wrap;
+    height:auto;
+    padding-block:3px;
+    row-gap:2px;
+  }
+  html:not([data-tablet-columns]) .statusbar:has(.status-job-progress) > div:first-child,
+  html:not([data-tablet-columns]) .statusbar > .status-job-progress{
+    flex:1 0 100%;
+    max-width:100%;
+  }
+}
+
 .viewport-grid.maximized{position:relative}.viewport-grid.maximized>.viewport[data-expanded=true]{position:absolute;inset:0;z-index:20}.viewport-grid.maximized>.viewport[aria-hidden=true]{visibility:hidden;pointer-events:none}
