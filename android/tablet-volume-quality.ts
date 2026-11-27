@@ -1,4 +1,4 @@
-export type TabletMatrix = 64 | 128 | 192 | 256 | 512;
+export type TabletMatrix = number;
 export type ResolutionPreference = 'auto' | 64 | 128 | 256 | 512;
 const preferenceKey='radaz.tablet.vr.resolution';
 export function readResolutionPreference():ResolutionPreference {
@@ -19,7 +19,7 @@ export function weakTablet(memory:Memory){
   return memory.low || memory.totalMiB<=4608 || memory.heapMiB<=192;
 }
 export function smallerTabletMatrix(matrix:TabletMatrix):TabletMatrix {
-  return matrix===512?256:matrix===256?192:matrix===192?128:64;
+  return Math.max(64,matrix-32);
 }
 export function tabletVolumeMemory():Memory {
   try {
@@ -37,21 +37,19 @@ export function chooseTabletMatrix(dimensions:readonly number[],memory:Memory,ma
   // Allow for the scalar array, upload/driver copies, and one decoded source plane at a time.
   // CPU drawing holds the assembled volume and its worker copy, without a GPU texture.
   const budgetMiB=Math.min(usable*(cpu ? .49 : .36),memory.totalMiB*(cpu ? .21 : .12),memory.heapMiB*3,1536);
-  for(const matrix of [512,256,192,128,64] as const){
-    if(choice==='auto'){
-      if(matrix===64 && Math.max(columns,rows)>64)continue;
-      if(matrix===192 && !cpu)continue;
-      const smaller=matrix===256&&!cpu ? 128 : smallerTabletMatrix(matrix);
-      if(matrix>64 && Math.max(columns,rows)<=smaller)continue;
-      if(matrix>ceiling || (matrix>128&&!cpu&&(memory.low||depth>maxTexture)) ||
-        (matrix===512&&(software||memory.totalMiB<5600)))continue;
-    }else if(matrix!==choice)continue;
+  let selected:TabletMatrix|undefined;
+  const sourceLimit=Math.max(64,Math.ceil(Math.max(columns,rows)/32)*32);
+  const limit=choice==='auto'?Math.min(512,ceiling,sourceLimit):choice;
+  // Evaluate 64, 96, 128... without allocating trial volumes or rereading DICOM.
+  for(let matrix=choice==='auto'?64:choice;matrix<=limit;matrix+=32){
     const scale=Math.min(1,matrix/Math.max(columns,rows));
     const w=Math.max(1,Math.round(columns*scale)),h=Math.max(1,Math.round(rows*scale));
-    if(matrix>128 && (w>maxTexture||h>maxTexture))continue;
+    if(!cpu && (w>maxTexture||h>maxTexture))break;
     const peakMiB=(w*h*depth*(cpu?9:10)+columns*rows*12)/MiB+8;
-    if(peakMiB<=budgetMiB)return matrix;
+    if(peakMiB>budgetMiB)break;
+    selected=matrix;
   }
+  if(selected!==undefined)return selected;
   const label=choice==='auto'?'3D':choice+' px';
   throw new RangeError(label+' üçün boş yaddaş çatmır. Daha aşağı ölçü seçin və ya digər tətbiqləri bağlayın.');
 }
@@ -63,7 +61,7 @@ export function previousMatrixLimit(now=Date.now()):TabletMatrix {
   try {
     const entry=JSON.parse(localStorage.getItem(openingKey)||'null');
     if(entry && now>=entry.time && now-entry.time<60*60*1000){
-      if([64,128,192,256,512].includes(entry.matrix))return smallerTabletMatrix(entry.matrix);
+      if(Number.isInteger(entry.matrix) && entry.matrix>=64 && entry.matrix<=512 && entry.matrix%32===0)return smallerTabletMatrix(entry.matrix);
     }
   }catch{/* Storage can be unavailable in a restricted WebView. */}
   return 512;

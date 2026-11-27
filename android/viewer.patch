@@ -562,7 +562,7 @@
 +    const finished=()=>{clearTimeout(timer);clearOpening();};
 +    let timer:ReturnType<typeof setTimeout>|undefined, activeMatrix:TabletMatrix|undefined;
 +    function lower(){
-+      if(signal.aborted || !tablet || requested!=='auto' || !activeMatrix || activeMatrix<=128)return false;
++      if(signal.aborted || !tablet || requested!=='auto' || !activeMatrix || activeMatrix<=64)return false;
 +      controller.abort();clearTimeout(timer);setLoaded(null);setPercent(0);
 +      setCeiling(smallerTabletMatrix(activeMatrix));return true;
 +    }
@@ -594,7 +594,7 @@
 +        if(requested!=='auto' && (Math.min(requested,Math.max(...dimensions!.slice(0,2)))>limit || dimensions![2]>limit)){
 +          opening.preferCpu=true;limit=Number.MAX_SAFE_INTEGER;
 +        }
-+        const safeCeiling=Math.min(ceiling,Math.max(128,previousMatrixLimit())) as TabletMatrix;
++        const safeCeiling=Math.min(ceiling,previousMatrixLimit()) as TabletMatrix;
 +        activeMatrix=chooseTabletMatrix(dimensions!,memory!,limit,software,safeCeiling,opening.preferCpu,requested);
 +        clearOpening=trackMatrixOpening(activeMatrix);
 +        setMatrix(activeMatrix);
