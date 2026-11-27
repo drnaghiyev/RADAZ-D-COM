@@ -4,8 +4,25 @@ const path = require('node:path');
 const { withTablet, frame } = require('./private-tablet-fixture.cjs');
 const { syntheticSeriesFile } = require('./vr-tablet-multipane.cjs');
 
+const desktop = process.argv.includes('--desktop');
+async function withDesktop(check) {
+  const {chromium}=require(process.env.PLAYWRIGHT_MODULE);
+  const browser=await chromium.launch({channel:'msedge',headless:true,args:['--enable-unsafe-swiftshader']});
+  try {
+    const p=await browser.newPage({viewport:{width:1300,height:850}});
+    await p.route('**/local-archive-api/**',r=>r.fulfill({json:r.request().url().endsWith('/license')?{valid:true,required:true,kind:'owner'}:[]}));
+    const errors=[];p.on('pageerror',e=>errors.push(e.message));
+    await p.goto(process.env.RADAZ_TEST_URL);
+    await p.locator('.statusbar').filter({hasText:'Cornerstone3D hazırdır'}).waitFor();
+    await check({p,errors});
+  }finally{await browser.close();}
+}
 async function doubleTap(page, pane) {
   const rect = await pane.locator('.dicom-canvas').boundingBox();
+  if(desktop){
+    await page.mouse.dblclick(rect.x + rect.width * .63, rect.y + rect.height * .47);
+    return;
+  }
   for (let i = 0; i < 2; i++) {
     await page.touchscreen.tap(rect.x + rect.width * .63, rect.y + rect.height * .47);
     await page.waitForTimeout(55);
@@ -24,7 +41,8 @@ async function snapshot(page) {
   }));
 }
 
-withTablet(async ({p, errors}) => {
+(desktop ? withDesktop : withTablet)(async ({p, errors}) => {
+  const select=desktop?'click':'tap';
   const folder = process.env.VR_CT_DIR;
   const names = fs.readdirSync(folder).filter(name => name.endsWith('.dcm')).sort();
   assert.ok(names.length >= 64);
@@ -41,8 +59,8 @@ withTablet(async ({p, errors}) => {
   await panes.nth(3).waitFor();
   for (let i = 0; i < 4; i++) {
     const pane = panes.nth(i);
-    await pane.tap({position:{x:60, y:70}});
-    await p.locator('.series-card').filter({hasText:'Synthetic CT set 0' + (i + 1)}).tap();
+    await pane[select]({position:{x:60, y:70}});
+    await p.locator('.series-card').filter({hasText:'Synthetic CT set 0' + (i + 1)})[select]();
     const overlay=pane.locator('.bottom-right');
     await overlay.filter({hasText:'/ 16'}).waitFor();
     await pane.hover();
@@ -72,5 +90,5 @@ withTablet(async ({p, errors}) => {
     assert.ok(restored.every(v=>v.lit>100),'four visible DICOM rasters after restoring '+initial[i].panel);
   }
   assert.deepEqual(errors,[]);
-  console.log('PASS touch double tap on each of four independently populated CT panes, four stack indices, WL/WW and all rasters restored',initial.map(v=>[v.panel,v.slice]));
+  console.log('PASS',desktop?'desktop mouse':'tablet touch','double tap on each of four independently populated CT panes, four stack indices, WL/WW and all rasters restored',initial.map(v=>[v.panel,v.slice]));
 }).catch(error=>{console.error(error);process.exitCode=1});
