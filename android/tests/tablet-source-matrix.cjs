@@ -6,7 +6,11 @@ withTablet(async ({p,errors})=>{
   await p.locator('input[type=file][accept*="zip"]').first().setInputFiles(process.env.RADAZ_PHANTOM_ZIP);
   await p.waitForFunction(n=>document.querySelector('[data-panel=A] .bottom-right')?.innerText.includes('/ '+n),depth,{timeout:180000});
   const profile=process.env.RADAZ_TEST_QUALITY||'medium';
-  const expected={low:128,medium:256,high:512,restart:128,allocation:128,upload:128,stall:128,compact:128,pressure:128,late:256,compressed:256,closing:256,unreadable:256}[profile];
+  const expected={
+    low:depth>=320?64:128,medium:256,high:depth<=128?256:512,restart:128,allocation:128,
+    upload:depth<=128?256:128,stall:128,compact:depth>=320?64:256,pressure:64,
+    last128:64,first128:64,restart128:64,budget64:64,late:256,compressed:256,closing:256,unreadable:256
+  }[profile];
   assert.ok(expected);
   await p.evaluate(({profile,depth})=>{
     const memory={
@@ -15,13 +19,19 @@ withTablet(async ({p,errors})=>{
       medium:{totalMiB:5100,availableMiB:1900,heapMiB:256,reserveMiB:250,low:false},
       high:{totalMiB:12288,availableMiB:6500,heapMiB:512,reserveMiB:300,low:false}
     };
+    const narrow={totalMiB:5000,availableMiB:750,heapMiB:256,reserveMiB:220,low:false};
+    Object.assign(memory,{last128:narrow,first128:narrow,restart128:narrow,
+      budget64:{...narrow,availableMiB:350}});
+    if(profile==='restart128')localStorage.setItem('radaz.tablet.vr.opening',JSON.stringify({matrix:128,time:Date.now()}));
     if(profile==='restart')localStorage.setItem('radaz.tablet.vr.opening',JSON.stringify({matrix:256,time:Date.now()}));
     const prompt=window.prompt.bind(window);
-    window.qaRequests=0;window.qaEncoded=0;
+    window.qaRequests=0;window.qaEncoded=0;window.qaMatrices=[];
     const post=MessagePort.prototype.postMessage;
     MessagePort.prototype.postMessage=function(msg,...args){
       if(msg?.frame?.pixels && msg.width){
         window.qaRequests++;
+        if(window.qaMatrices.at(-1)!==msg.width)window.qaMatrices.push(msg.width);
+        if(profile==='last128' && window.qaRequests===depth){window.qaDropped=true;return;}
         if(msg.frame.encoding?.compressed)window.qaEncoded++;
         if(profile==='unreadable' && window.qaRequests>=Math.round(depth*.967)){window.qaDropped=true;return;}
         if(['late','closing'].includes(profile) && window.qaRequests===Math.round(depth*.967)){window.qaDropped=true;return;}
@@ -47,10 +57,11 @@ withTablet(async ({p,errors})=>{
         return Reflect.construct(target,args,...rest);
       }});
     }
-    if(profile==='stall'){
+    if(profile==='stall' || profile==='first128'){
       const raf=window.requestAnimationFrame.bind(window);
       window.requestAnimationFrame=cb=>{
-        if(document.querySelector('.vr-raster') && JSON.parse(localStorage.getItem('radaz.tablet.vr.opening'))?.matrix===256){
+        const target=profile==='first128'?128:256;
+        if(document.querySelector('.radaz-vr:not([data-volume-preview]) .vr-raster') && JSON.parse(localStorage.getItem('radaz.tablet.vr.opening'))?.matrix===target){
           window.qaFailed=true;return raf(()=>{});
         }
         return raf(cb);
@@ -66,10 +77,17 @@ withTablet(async ({p,errors})=>{
   },{profile,depth});
   const before=Date.now();
   await p.getByRole('button',{name:'3D həcm görüntüləmə',exact:true}).first().click();
-  if(depth>48){
+  if(depth>128){
     const preview=p.locator('dialog .radaz-vr[data-volume-preview=true]');
     await preview.locator('.vr-raster[data-ready=true]').waitFor({timeout:90000});
     assert.ok(await p.locator('.tablet-volume-count').innerText());
+    if(profile==='last128'){
+      await p.waitForFunction(()=>window.qaDropped,{},{timeout:90000});
+      const hint=p.locator('dialog .tablet-volume-count');
+      await hint.filter({hasText:'128 px'}).waitFor();
+      assert.equal(await p.evaluate(()=>window.qaRequests),depth);
+    }
+    if(profile==='first128')await p.locator('dialog .tablet-volume-count').filter({hasText:'İlk 3D görüntü çəkilir'}).waitFor({timeout:90000});
     if(profile==='unreadable'){
       const alert=p.locator('dialog .shared-volume-loading [role=status]');
       await alert.filter({hasText:/3D kəsiyi [0-9]+\/[0-9]+ oxunmadı/}).waitFor({timeout:100000});
@@ -116,11 +134,26 @@ withTablet(async ({p,errors})=>{
     const area=ratio**2, average=value=>650+(value-650)/area;
     assert.deepEqual(sample.out[z],[650,average(1100+z),average(-200-z),650,-1024,-1024],'slice '+z);
   }
-  if(['allocation','upload','stall'].includes(profile))assert.ok(await p.evaluate(()=>window.qaFailed),'failure was injected');
-  const counts=await p.evaluate(()=>({requests:window.qaRequests,encoded:window.qaEncoded,lowered:window.qaLowered}));
+  if(profile==='upload' && depth<=128)assert.equal(await p.evaluate(()=>!!window.qaFailed),false,'short stack avoids the GPU upload');
+  if(['allocation','stall','first128'].includes(profile) || profile==='upload'&&depth>128)assert.ok(await p.evaluate(()=>window.qaFailed),'failure was injected');
+  const counts=await p.evaluate(()=>({requests:window.qaRequests,encoded:window.qaEncoded,lowered:window.qaLowered,matrices:window.qaMatrices}));
   if(profile==='late')assert.equal(counts.requests,depth+1,'only the stalled plane was retried');
   if(profile==='pressure'){assert.ok(counts.lowered);assert.equal(counts.requests,depth,'no reread on memory pressure');}
-  if(profile==='compressed')assert.ok(counts.encoded>0,'encapsulated frames decoded in the worker');
+  if(expected===64){
+    assert.equal(sample.backend,'CPU','safe first frame presented from the full volume');
+    const visible=await volume.locator('.vr-raster canvas').first().evaluate(canvas=>{
+      const rgba=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
+      return rgba.some((value,i)=>i%4!==3 && value>12);
+    });
+    assert.ok(visible,'first complete CPU frame shows the phantom');
+  }
+  if(profile==='last128'){
+    assert.deepEqual(counts.matrices,[128,64]);
+    assert.equal(counts.requests,depth+1,'retry only the last source slice at the smaller size');
+  }
+  if(profile==='first128')assert.deepEqual(counts.matrices,[128,64]);
+  if(['compact','budget64','restart128'].includes(profile))assert.deepEqual(counts.matrices,[64]);
+  if(profile==='compressed' && depth<=128)assert.equal(counts.requests,0,'short compressed series uses the established 2D decoder');
   assert.deepEqual(sample.spacing,[.7*ratio,.8*ratio,1.25]);
   console.log(JSON.stringify({profile,counts,dims:sample.dims,bytes:sample.bytes,backend:sample.backend,readyMs:Date.now()-before,planesVerified:depth,first:sample.out[0],middle:sample.out[depth>>1],last:sample.out.at(-1)}));
   await volume.locator('.vr-close').click();

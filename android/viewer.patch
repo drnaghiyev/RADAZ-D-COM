@@ -416,23 +416,39 @@
    const url = unique.length===1?`/#archive-study=${encodeURIComponent(unique[0])}`:`/#archive-studies=${encodeURIComponent(unique.join(','))}`;
 --- a/components/vr-workbench.tsx
 +++ b/components/vr-workbench.tsx
-@@ -1,4 +1,5 @@
+@@ -1,4 +1,6 @@
  'use client';
++import {bindTabletVolumeButtons} from './tablet-vr-toolbar';
 +import type {TabletVolumeOpening} from './tablet-volume-quality';
  import {ToolbarDividers} from './toolbar-dividers';
  import {useEffect,useLayoutEffect,useRef,useState,type PointerEvent as ReactPointer,type ReactNode} from 'react';
  import {Rotate3D,RotateCw,Move,ZoomIn,Contrast,Scissors,Ruler,MoveUpRight,Camera,Save,Printer,Undo2,Redo2,Maximize,Settings,Box,Layers,Eye,RotateCcw,X,SlidersHorizontal,List,Trash2,FolderOpen,ChevronLeft,ChevronRight,PanelTop} from 'lucide-react';
-@@ -14,7 +15,7 @@
+@@ -14,8 +16,10 @@
  type Drag={id:number;tool:Tool;at:P;last:P;start:Snapshot;index?:number;part?:'a'|'b'|'body'|'label'};
  const distance=(a:P,b:P)=>Math.max(1,Math.hypot(a[0]-b[0],a[1]-b[1]));
  const midpoint=(a:P,b:P):P=>[(a[0]+b[0])/2,(a[1]+b[1])/2];
 -export function VrWorkbench({volume:v,onClose,title,progressiveDesktop=false,previewPercent}:{volume:Volume;onClose:()=>void;title:string;progressiveDesktop?:boolean;previewPercent?:number}){
 +export function VrWorkbench({opening,volume:v,onClose,title,progressiveDesktop=false,previewPercent}:{opening?:TabletVolumeOpening;volume:Volume;onClose:()=>void;title:string;progressiveDesktop?:boolean;previewPercent?:number}){
   const preview=previewPercent!==undefined;
++ const tablet=typeof location!=='undefined' && location.origin==='https://appassets.androidplatform.net';
++ const interactivePreview=tablet && preview;
   const sourceLifecycle=progressiveDesktop?v.identity:v;
   const renderedVolume=useRef<Volume|null>(null);
-@@ -72,7 +73,7 @@
-  },[sourceLifecycle]);
+  const root=useRef<HTMLElement>(null),host=useRef<HTMLDivElement>(null),stage=useRef<HTMLDivElement>(null),overlayRef=useRef<HTMLCanvasElement>(null),file=useRef<HTMLInputElement>(null);
+@@ -35,6 +39,7 @@
+  const recording=useRef<AbortController|null>(null),abortOnClose=useRef(false);
+  const drag=useRef<Drag|null>(null),touches=useRef(new Map<number,P>()),pinch=useRef<{cam:Frame;a:P;b:P}|null>(null),release=useRef(false),timer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);
+  const sz=()=>[Math.max(1,stage.current!.clientWidth),Math.max(1,stage.current!.clientHeight)] as P;
++ useEffect(()=>{if(tablet && root.current)return bindTabletVolumeButtons(root.current);},[tablet]);
+  const evt=(e:ReactPointer):P=>{const r=stage.current!.getBoundingClientRect();return [e.clientX-r.left,e.clientY-r.top];};
+  const update=(next:Snapshot)=>{live.current=next;set(next);};
+  const camera=(cam:Frame)=>update({...live.current,camera:cam});
+@@ -69,10 +74,10 @@
+    sizeChanged();const resize=new view.ResizeObserver(sizeChanged);resize.observe(el);
+    const clearPrint=()=>{doc.querySelector('.vr-print-image')?.remove();};view.addEventListener('afterprint',clearPrint);
+    return ()=>{clearPrint();view.removeEventListener('afterprint',clearPrint);abortOnClose.current=true;recording.current?.abort();clearTimeout(timer.current);resize.disconnect();};
+- },[sourceLifecycle]);
++ },[tablet?v.identity:sourceLifecycle]);
   useLayoutEffect(()=>{
     setBackend('');lastCuts.current=null;
 -   const handle=createVrRenderer(host.current!,v,engine,setBackend,notice);
@@ -440,8 +456,32 @@
     api.current=handle;renderedVolume.current=v;
     return ()=>{api.current=null;renderedVolume.current=null;handle.dispose();};
   },[sourceLifecycle,engine]);
-@@ -189,7 +190,7 @@
-  {btn('3D görüntüləmə ayarları',<Settings/>,()=>toggle('settings'),menu==='settings')}{btn('Ekrana sığdır · Ctrl+0',<Maximize/>,fitView)}
+@@ -112,7 +117,7 @@
+    if(release.current)return;
+    const saved=live.current;let t=tool;
+    if(e.button!==0)t=bindings[e.button]||tool;else if(e.ctrlKey&&e.altKey)t='roll';else if(e.ctrlKey)t='window';else if(e.altKey||(e.pointerType==='pen'&&tool==='rotate'))t='cut';else if(e.shiftKey&&tool!=='length'&&tool!=='arrow')t='pan';
+-   if(preview && !['rotate','roll','pan','zoom'].includes(t))t='rotate';
++   if(preview && !['rotate','roll','pan','zoom',...(interactivePreview?['window']:[])].includes(t))t='rotate';
+    const hit=labels&&t!=='cut'?hitMark(saved.camera,saved.marks,at,...sz(),e.pointerType==='touch'?15:7):null;
+    if(hit){select(hit.i);drag.current={id:e.pointerId,tool:saved.marks[hit.i].kind,at,last:at,start:saved,index:hit.i,part:hit.part};return;}
+    select(-1);drag.current={id:e.pointerId,tool:t,at,last:at,start:saved};if(t==='cut'){setMenu('cut');setPoly([at]);return;}
+@@ -179,17 +184,17 @@
+  const option=(name:string,fn:()=>void,disabled=false)=><button type="button" onClick={fn} disabled={disabled}>{name}</button>;
+  const docKey=(e:React.DragEvent)=>{e.preventDefault();if(!preview)void loadShots(e.dataTransfer.files[0]);};
+  return <section ref={root} className="radaz-vr" aria-label={title} data-volume-preview={preview?'true':undefined} data-source-slices={v.sourceSlices} data-volume-depth={v.dimensions[2]} data-backend={backend} onDrop={docKey} onDragOver={e=>{if(e.dataTransfer.types.includes('Files'))e.preventDefault();}}>
+- <div className="vr-tools" hidden={hidden} inert={preview?true:undefined} role="toolbar" aria-label="3D alətləri">
+- {btn('Səhnəni sıfırla · Ctrl+R',<RotateCcw/>,reset)}{btn('Şəkil və video ixracı',<Save/>,()=>toggle('output'),menu==='output')}
+- {btn('Çap · Ctrl+P',<Printer/>,()=>void output('print'))}{btn('3D görünüşlər · F3',<Camera/>,()=>toggle('shots'),menu==='shots')}
++ <div className="vr-tools" hidden={hidden} inert={preview&&!interactivePreview?true:undefined} role="toolbar" aria-label="3D alətləri">
++ {btn('Səhnəni sıfırla · Ctrl+R',<RotateCcw/>,reset)}{btn('Şəkil və video ixracı',<Save/>,()=>toggle('output'),menu==='output',interactivePreview)}
++ {btn('Çap · Ctrl+P',<Printer/>,()=>void output('print'),false,interactivePreview)}{btn('3D görünüşlər · F3',<Camera/>,()=>toggle('shots'),menu==='shots',interactivePreview)}
+  {btn('Yazılar və istiqamət kubu · F12',<Eye/>,()=>setLabels(a=>!a),labels)}
+  {btn('Baxış istiqaməti',<Box/>,()=>toggle('views'),menu==='views')}
+- {tools.map(([id,name,key,Icon])=><button type="button" key={id} aria-pressed={tool===id} aria-label={name} title={name+' · '+key} onClick={()=>choose(id)}><Icon/></button>)}
++ {tools.map(([id,name,key,Icon])=><button type="button" key={id} disabled={interactivePreview&&(id==='cut'||id==='length'||id==='arrow')} aria-pressed={tool===id} aria-label={name} title={name+' · '+key} onClick={()=>choose(id)}><Icon/></button>)}
+  {btn('3D rəng rejimləri',<Layers/>,()=>toggle('presets'),menu==='presets')}{btn('WW/WL ayarları · Ctrl+F11',<SlidersHorizontal/>,()=>toggle('window'),menu==='window')}
+- {btn('3D görüntüləmə ayarları',<Settings/>,()=>toggle('settings'),menu==='settings')}{btn('Ekrana sığdır · Ctrl+0',<Maximize/>,fitView)}
++ {btn('3D görüntüləmə ayarları',<Settings/>,()=>toggle('settings'),menu==='settings',interactivePreview)}{btn('Ekrana sığdır · Ctrl+0',<Maximize/>,fitView)}
   {btn('Tam ekran · F',<PanelTop/>,()=>void fullscreen().catch(e=>notice(String(e))))}
   <ToolbarDividers scope="vr"/>
 - </div><VrCloseButton onClose={onClose}/>{hidden&&<button className="vr-unhide" aria-label="Alət panelini göstər" onClick={()=>setHidden(false)}><List/></button>}
@@ -462,7 +502,7 @@
  'use client';
  import {useEffect,useState} from 'react';
 -import {tabletDisplayVolume} from '@/lib/cornerstone';
-+import {chooseTabletMatrix,previousMatrixLimit,trackMatrixOpening,tabletVolumeMemory,type TabletMatrix,type TabletVolumeOpening} from './tablet-volume-quality';
++import {chooseTabletMatrix,weakTablet,smallerTabletMatrix,previousMatrixLimit,trackMatrixOpening,tabletVolumeMemory,type TabletMatrix,type TabletVolumeOpening} from './tablet-volume-quality';
 +import {seriesGeometry,tabletDisplayVolume,tabletSourceVolume} from '@/lib/cornerstone';
  import {gpuCapabilities} from '@/lib/gpu-capabilities';
  import {sampleAnatomyPlane,type AnatomyVolumeResult} from '@/lib/anatomy-volume';
@@ -478,7 +518,7 @@
  
  function geometryFor(data:Display, source:Series, anatomy:Props['anatomy']):AnatomyVolumeResult {
    const {dimensions,spacing,origin,direction}=data;
-@@ -18,35 +19,80 @@
+@@ -18,35 +19,98 @@
  }
  
  export function SharedVolumeView({series,anatomy,onClose}:Props){
@@ -486,6 +526,7 @@
 +}
 +function VolumeSession({series,anatomy,onClose}:Props){
 +  const [readCount,setReadCount]=useState('');
++  const [drawing,setDrawing]=useState(false);
 +  const [ceiling,setCeiling]=useState<TabletMatrix>(512);
 +  const [matrix,setMatrix]=useState<TabletMatrix|null>(null);
    const [loaded,setLoaded]=useState<Loaded|null>(null),[percent,setPercent]=useState(0),[error,setError]=useState('');
@@ -493,7 +534,7 @@
    useEffect(()=>{
      const controller=new AbortController(),{signal}=controller;
 -    setLoaded(null);setPercent(0);setError('');
-+    setLoaded(null);setPercent(0);setReadCount('');setError('');
++    setLoaded(null);setPercent(0);setReadCount('');setError('');setDrawing(false);
      if(!series){setError('3D üçün KT və ya MRT seriyası seçin.');return;}
 -    if(!tablet && series.loading)return;
 +    if(series.loading)return;
@@ -501,9 +542,9 @@
 +    const finished=()=>{clearTimeout(timer);clearOpening();};
 +    let timer:ReturnType<typeof setTimeout>|undefined, activeMatrix:TabletMatrix|undefined;
 +    function lower(){
-+      if(signal.aborted || !tablet || !activeMatrix || activeMatrix===128)return false;
++      if(signal.aborted || !tablet || !activeMatrix || activeMatrix===64)return false;
 +      controller.abort();clearTimeout(timer);setLoaded(null);setPercent(0);
-+      setCeiling(activeMatrix===512?256:128);return true;
++      setCeiling(smallerTabletMatrix(activeMatrix));return true;
 +    }
 +    function watch(){
 +      clearTimeout(timer);
@@ -512,38 +553,55 @@
 +        controller.abort();setLoaded(null);setError('3D hazırlığı cavab vermədi. Pəncərəni bağlayıb yenidən açın.');
 +      },30000);
 +    }
-+    const opening:TabletVolumeOpening={ready:finished,reduce:lower};
++    const opening:TabletVolumeOpening={preferCpu:false,ready:()=>{if(!signal.aborted){finished();setDrawing(false);}},reduce:lower};
      async function open(source:Series){
 -      let limit=256,budget=24;
 -      try{const gpu=gpuCapabilities();limit=Math.min(gpu.max3DTextureSize,tablet?384:1536);
 -        budget=tablet?(gpu.tier==='low'?20:48):(gpu.tier==='low'?64:gpu.tier==='high'?320:160);}catch{/* A bounded CPU volume is available without WebGL. */}
 +      let limit=tablet?0:256,budget=24,software=true;
-+      try{const gpu=gpuCapabilities();limit=tablet?gpu.max3DTextureSize:Math.min(gpu.max3DTextureSize,1536);
++      const dimensions=tablet?seriesGeometry(source.imageIds).dimensions:undefined;
++      const short=!!dimensions && dimensions[2]<=128;
++      const memory=tablet?tabletVolumeMemory():null;
++      opening.preferCpu=!!memory && (short || weakTablet(memory));
++      if(opening.preferCpu){limit=Number.MAX_SAFE_INTEGER;}
++      else try{const gpu=gpuCapabilities();limit=tablet?gpu.max3DTextureSize:Math.min(gpu.max3DTextureSize,1536);
 +        software=gpu.tier==='low';budget=gpu.tier==='low'?64:gpu.tier==='high'?320:160;}catch{/* A bounded CPU volume is available without WebGL. */}
        const showPreview=(data:Display)=>{
          if(!signal.aborted)setLoaded({data,geometry:geometryFor(data,source,anatomy),preview:true});
        };
 -      const data=await tabletDisplayVolume(source.imageIds,limit,budget*1024**2,signal,setPercent,true,tablet?undefined:showPreview);
-+      const dimensions=tablet?seriesGeometry(source.imageIds).dimensions:undefined;
 +      if(tablet){
-+        activeMatrix=chooseTabletMatrix(dimensions!,tabletVolumeMemory(),limit,software,Math.min(ceiling,previousMatrixLimit()) as TabletMatrix);
++        activeMatrix=chooseTabletMatrix(dimensions!,memory!,limit,software,Math.min(ceiling,previousMatrixLimit()) as TabletMatrix);
 +        clearOpening=trackMatrixOpening(activeMatrix);
 +        setMatrix(activeMatrix);
 +      }
 +      const progress=(done:number,total:number)=>{
 +        if(!signal.aborted){setReadCount(done+' / '+total+' kəsik');setPercent(Math.floor(done*100/total));}
 +      };
-+      const review=(current:TabletMatrix,touched:number)=>{
++      const review=(current:TabletMatrix,touched:number,limitMatrix:TabletMatrix=current)=>{
 +        const memory=tabletVolumeMemory();
 +        // The current opening already owns these touched pages. Count them once in the budget.
 +        memory.availableMiB=Math.min(memory.totalMiB,memory.availableMiB+touched/1024**2);
-+        const next=chooseTabletMatrix(dimensions!,memory,limit,software,current);
++        const next=chooseTabletMatrix(dimensions!,memory,limit,software,limitMatrix);
 +        if(next<current){activeMatrix=next;clearOpening();clearOpening=trackMatrixOpening(next);setMatrix(next);}
 +        return next;
 +      };
-+      const data=tablet
-+        ? await tabletSourceVolume(source.imageIds,limit,activeMatrix!,signal,progress,review,showPreview)
-+        : await tabletDisplayVolume(source.imageIds,limit,budget*1024**2,signal,setPercent,true,showPreview);
++      let data:Display;
++      if(short && dimensions && activeMatrix){
++        // Use the same source reader as the 2D viewer for a short complete stack.
++        // The byte budget controls XY while maxDimension still permits every acquired Z.
++        const [cols,rows,depth]=dimensions,scale=Math.min(1,activeMatrix/Math.max(cols,rows));
++        const bytes=Math.ceil(cols*rows*scale*scale*depth*4);
++        watch();
++        data=await tabletDisplayVolume(source.imageIds,Math.max(activeMatrix,depth),bytes,signal,p=>{
++          if(signal.aborted)return;
++          watch();setReadCount(p+'%');setPercent(p);
++        },false);
++      }else if(tablet){
++        data=await tabletSourceVolume(source.imageIds,limit,activeMatrix!,signal,progress,review,showPreview,(z,d)=>setReadCount((z+1)+'/'+d+' kəsiyi yenidən oxunur'));
++      }else{
++        data=await tabletDisplayVolume(source.imageIds,limit,budget*1024**2,signal,setPercent,true,showPreview);
++      }
        const geometry=geometryFor(data,source,anatomy);
        if(anatomy?.mask.length){
          const {dimensions,origin,direction,spacing}=geometry;
@@ -553,7 +611,7 @@
 +        for(let z=0;z<d;z++){signal.throwIfAborted();geometry.mask.set(sampleAnatomyPlane(anatomy,at(0,0,z),at(1,0,z),at(0,1,z),w,h),z*w*h);if(z%8===0){if(tablet){watch();setReadCount('3D maskası hazırlanır');}await new Promise(r=>setTimeout(r,0));}}
        }
 -      if(!signal.aborted)setLoaded({data,geometry,preview:false});
-+      if(!signal.aborted){if(tablet){watch();setReadCount('');}setLoaded({data,geometry,preview:false,opening:tablet?opening:undefined});}
++      if(!signal.aborted){if(tablet){watch();setReadCount('İlk 3D görüntü çəkilir');setDrawing(true);}setLoaded({data,geometry,preview:false,opening:tablet?opening:undefined});}
      }
 -    void open(series).catch(e=>{if(!signal.aborted){setLoaded(null);setError(String(e.message||e));}});
 -    return ()=>controller.abort();
@@ -572,16 +630,51 @@
 +  if(series?.loading)return <section className="shared-volume-loading"><VrCloseButton loading onClose={onClose}/><p role="status">Seriya oxunur · {series.imageIds.length}{series.discovered?` / ${series.discovered}`:''} kəsik</p></section>;
 +  if(!loaded)return <section className="shared-volume-loading"><VrCloseButton loading onClose={onClose}/><p role="status">{error||`3D hazırlanır… ${matrix?matrix+' px · ':''}${tablet?readCount:percent+'%'}`}</p></section>;
 +  return <><SmartVolumeSurface key={loaded.geometry.sourceKey} sourceValues={loaded.data.values} result={loaded.geometry} colors={{}} range={loaded.data.range} opening={loaded.opening} sourceSlices={loaded.data.sourceSlices} cpuOnly={loaded.data.cpuOnly}
-+    progressiveDesktop={!tablet} previewPercent={loaded.preview?percent:undefined} title="3D həcm görüntüləmə" onClose={onClose}/>{tablet&&loaded.preview&&<div className="tablet-volume-count" role="status">{matrix} px · {readCount}</div>}</>;
++    progressiveDesktop={!tablet} previewPercent={loaded.preview?percent:undefined} title="3D həcm görüntüləmə" onClose={onClose}/>{tablet&&(loaded.preview||drawing)&&<div className="tablet-volume-count" role="status">{matrix} px · {readCount}</div>}</>;
  }
 --- a/lib/cornerstone.ts
 +++ b/lib/cornerstone.ts
-@@ -1,3 +1,4 @@
+@@ -1,3 +1,5 @@
++import type {TabletMatrix} from '@/components/tablet-volume-quality';
 +import {tabletPlaneReader,type TabletFrame,type ReadReply} from '@/components/tablet-volume-reader';
  import {preserveContextSizeOnRemoval} from './render-context-lifecycle';
  import * as core from '@cornerstonejs/core';
  import * as tools from '@cornerstonejs/tools';
-@@ -629,6 +630,120 @@
+@@ -558,6 +560,22 @@
+     return {...g,id,frameIndex:record?.frameIndex,sopUID:derived.has(id)||geometryOverrides.has(id)?undefined:ds.string('x00080018')?.trim(),sliceThickness:asNumber(ds,'x00180050',0),spacingBetweenSlices:asNumber(ds,'x00180088',0)};
+   }));
+ }
++// Older Android WebViews do not implement AbortSignal.any. Cancel both the
++// request and its body when the source study or the 3D window is closed.
++async function readVolumeFile(url:string,study:AbortSignal,view:AbortSignal){
++  const read=new AbortController(),cancel=()=>read.abort();
++  for(const signal of [study,view]){
++    signal.addEventListener('abort',cancel,{once:true});
++    if(signal.aborted)cancel();
++  }
++  try{
++    const response=await fetch(url,{signal:read.signal});
++    if(!response.ok)throw Error('Kəsik oxunmadı.');
++    return new Uint8Array(await response.arrayBuffer());
++  }finally{
++    study.removeEventListener('abort',cancel);view.removeEventListener('abort',cancel);
++  }
++}
+ async function readDisplayPlane(id:string,signal:AbortSignal):Promise<RecordItem> {
+   const record=records.get(id);
+   if(!record)throw Error('Seriya bağlanıb.');
+@@ -574,9 +592,7 @@
+   let bytes:Uint8Array, ds:DataSet;
+   if(pending){bytes=pending.bytes;ds=pending.ds;}
+   else{
+-    const response=await fetch(disk!.url,{signal:AbortSignal.any([signal,disk!.signal])});
+-    if(!response.ok)throw Error('Kəsik oxunmadı.');
+-    bytes=new Uint8Array(await response.arrayBuffer());ds=parseDicomFile(bytes);
++    bytes=await readVolumeFile(disk!.url,disk!.signal,signal);ds=parseDicomFile(bytes);
+   }
+   signal.throwIfAborted();
+   const temporary=`localdicom:${serial++}`;
+@@ -629,6 +645,125 @@
    }
    return {...displayGeometry(source,dimensions),values,range:[minimum,Math.max(minimum+1,maximum)]};
  }
@@ -596,9 +689,7 @@
 +  let ds:DataSet,bytes:Uint8Array;
 +  if(pending){ds=pending.ds;bytes=pending.bytes;}
 +  else{
-+    const res=await fetch(disk!.url,{signal:AbortSignal.any([signal,disk!.signal])});
-+    if(!res.ok)throw Error('DICOM faylı oxunmadı.');
-+    bytes=new Uint8Array(await res.arrayBuffer());ds=parseDicomFile(bytes);
++    bytes=await readVolumeFile(disk!.url,disk!.signal,signal);ds=parseDicomFile(bytes);
 +  }
 +  signal.throwIfAborted();
 +  const syntax=ds.string('x00020010')||'1.2.840.10008.1.2.1',element=ds.elements.x7fe00010;
@@ -623,8 +714,9 @@
 +}
 +
 +/** One acquisition is read once, apart from a bounded retry of an unresponsive plane. */
-+export async function tabletSourceVolume(imageIds:string[],maxTexture:number,matrix:128|256|512,signal:AbortSignal,
-+    progress:(done:number,total:number)=>void,review:(size:128|256|512,touched:number)=>128|256|512,preview:(data:DisplayTexture)=>void){
++export async function tabletSourceVolume(imageIds:string[],maxTexture:number,matrix:TabletMatrix,signal:AbortSignal,
++    progress:(done:number,total:number)=>void,review:(size:TabletMatrix,touched:number,ceiling?:TabletMatrix)=>TabletMatrix,
++    preview:(data:DisplayTexture)=>void,retrying:(slice:number,depth:number)=>void){
 +  signal.throwIfAborted();
 +  const source=seriesGeometry(imageIds),[columns,rows,depth]=source.dimensions;
 +  const scale=Math.min(1,matrix/Math.max(columns,rows));
@@ -639,8 +731,8 @@
 +  const previewSample=previewDepth?displayPlaneSampler(width,height,areaWeights(width,pw),areaWeights(height,ph),true):null;
 +  let small:Float32Array|null=previewDepth?new Float32Array(pw*ph*previewDepth):null;
 +  let minimum=Infinity,maximum=-Infinity,lastReport=0,lastCheck=performance.now();
-+  async function checkMemory(done:number){
-+    const next=review(matrix,done*planeSize*values.BYTES_PER_ELEMENT);
++  async function checkMemory(done:number,ceiling?:TabletMatrix){
++    const next=review(matrix,done*planeSize*values.BYTES_PER_ELEMENT,ceiling);
 +    if(next>=matrix)return;
 +    const ratio=Math.min(1,next/Math.max(columns,rows));
 +    const w=Math.max(1,Math.round(columns*ratio)),h=Math.max(1,Math.round(rows*ratio));
@@ -668,7 +760,13 @@
 +      signal.throwIfAborted();
 +      const z=order[i];
 +      let part:ReadReply;
-+      try{part=await reader.read(source.imageIds[z],width,height,signal);}
++      try{
++        part=await reader.read(source.imageIds[z],width,height,signal,async()=>{
++          retrying(z,depth);
++          if(depth>=320 && i>=previewDepth && matrix===128)await checkMemory(i,64);
++          return {width,height};
++        });
++      }
 +      catch(e){
 +        signal.throwIfAborted();
 +        if(e instanceof RangeError)throw e;
@@ -786,7 +884,7 @@
   }
   ready=true;
   return {canvas,draw,replaceVolume(next:Volume){
-@@ -119,17 +126,19 @@
+@@ -119,17 +126,22 @@
   }};
   }finally{if(!ready)disposeView();}
  }
@@ -796,6 +894,9 @@
    const tablet=win.location.origin==='https://appassets.androidplatform.net';
    let gpu:ReturnType<typeof gpuView>|null=null,cpu:HTMLCanvasElement|null=null,worker:Worker|null=null;
    let latest:Render|null=null,dead=false,waitingCpu=false,frame=0,refinement=0;
++  // At the lowest tablet tier, draw in the existing background CPU renderer.
++  // Some mobile drivers block the UI thread inside the first GPU upload.
++  const safeDrawing=tablet && requested==='auto' && (opening?.preferCpu || Math.max(v.dimensions[0],v.dimensions[1])<=64);
 +  let presented=false,retrying=false;
    let revision=0,complete=-1,cutId=0,appliedCut=0,lastGesture=0,firstFrame=true;
    let cpuTicket=0,cpuCut=0,cpuPreview=false;
@@ -807,17 +908,33 @@
      onFrame(gpu?'GPU':'CPU');
      if(id!==revision || preview)return;
      complete=id;
-@@ -166,8 +175,9 @@
+@@ -166,8 +178,9 @@
      return worker;
    }
    function fallback(){
 -    if(dead||cpu)return;
 +    if(dead||cpu||retrying)return;
      gpu?.dispose();gpu=null;
-+    if(!presented && requested!=='cpu' && opening?.reduce()){retrying=true;return;}
++    if(!presented && !v.cpuOnly && !safeDrawing && requested!=='cpu' && opening?.reduce()){retrying=true;return;}
      cpu=host.ownerDocument.createElement('canvas');host.appendChild(cpu);
      getWorker().postMessage({type:'volume',volume:v});
      if(latest)schedule();
+@@ -196,12 +209,13 @@
+     const {cam,style,quality}=request;
+     const width=host.clientWidth,height=host.clientHeight;
+     const cap=moving?(quality==='speed'||tablet?144:220):(quality==='detail'?(tablet?800:960):(tablet?512:640));
+-    const ratio=Math.min(1,cap/Math.max(1,width,height));
++    const renderCap=safeDrawing?Math.min(cap,moving?128:320):cap;
++    const ratio=Math.min(1,renderCap/Math.max(1,width,height));
+     cpuTicket=revision;cpuCut=cutId;cpuPreview=preview;waitingCpu=true;
+     getWorker().postMessage({type:'draw',id:cpuTicket,cam,style,moving,aspect:width/Math.max(1,height),
+       width:Math.max(2,Math.round(width*ratio)),height:Math.max(2,Math.round(height*ratio))});
+   }
+-  if(requested!=='cpu' && !v.cpuOnly){
++  if(requested!=='cpu' && !v.cpuOnly && !safeDrawing){
+     try{gpu=gpuView(host,v,tablet,()=>{queueMicrotask(fallback);});}
+     catch{fallback();}
+   }else fallback();
 --- a/app/archive/page.tsx
 +++ b/app/archive/page.tsx
 @@ -25,5 +25,5 @@

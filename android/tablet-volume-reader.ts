@@ -41,13 +41,15 @@ export function tabletPlaneReader(readFrame:(id:string,signal:AbortSignal)=>Prom
       if(worker)worker.onerror=null;
     }
   }
-  return {dispose,async read(id:string,width:number,height:number,signal:AbortSignal){
+  return {dispose,async read(id:string,width:number,height:number,signal:AbortSignal,
+      onRetry:()=>Promise<{width:number;height:number}>){
     try{return await attempt(id,width,height,signal,12000);}
     catch(e){
       signal.throwIfAborted();
       if(!(e instanceof DOMException && e.name==='TimeoutError'))throw e;
       // Only the outstanding plane is retried. Previously assembled slices remain usable.
-      return attempt(id,width,height,signal,24000);
+      const next=await onRetry();
+      return attempt(id,next.width,next.height,signal,24000);
     }
   }};
 }
