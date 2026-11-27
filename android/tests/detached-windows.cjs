@@ -38,7 +38,8 @@ withTablet(async ({p, pane, errors}) => {
     }
     await child.close();
     await p.bringToFront();
-    await pane.locator('.bottom-right').filter({hasText:'/ 24'}).waitFor();
+    // The image counter appears before the restored canvas reports its orientation.
+    await p.waitForFunction(expected => document.querySelector('[data-panel=A] .bottom-right')?.innerText === expected, before);
     assert.equal(await pane.locator('.bottom-right').innerText(), before);
     assert.equal(await pane.locator('.bottom-left').innerText(), initialWindow);
     console.log('PASS '+route+' in both orientations; original slice and window level restored');
