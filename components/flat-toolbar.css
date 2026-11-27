@@ -117,3 +117,7 @@ html:not([data-tablet-columns]) .status-job-progress > span{flex:none}
 }
 
 .viewport-grid.maximized{position:relative}.viewport-grid.maximized>.viewport[data-expanded=true]{position:absolute;inset:0;z-index:20}.viewport-grid.maximized>.viewport[aria-hidden=true]{visibility:hidden;pointer-events:none}
+
+/* Reserve the right dock beside the image grid, below the full-width desktop header. */
+html:not([data-tablet-columns]) .flat-toolbar-workspace.has-right-dock:has(> main[data-mode="viewer"]){padding-right:0}
+html:not([data-tablet-columns]) .flat-toolbar-workspace.has-right-dock > main[data-mode="viewer"] > .body-grid{margin-right:var(--dock-width);min-width:0}

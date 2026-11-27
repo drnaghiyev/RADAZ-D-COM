@@ -21,3 +21,10 @@ html[data-tablet-workspace="3d"] :is(.vr-close,.shared-volume-loading>button) {d
 body .flat-toolbar-workspace .flat-toolbar-tool .tablet-folder-command .tablet-import-options{width:13px!important;min-width:13px!important;flex-basis:13px!important}
 
 body .flat-toolbar-workspace .flat-toolbar-right .flat-toolbar-tool :is(.workspace-split,.tablet-folder-command){width:var(--tablet-cell);height:var(--tablet-cell)}
+
+/* The patient identity and series cards are the sidebar's content. */
+.workstation .series-rail :is(.rail-heading,.group-heading-label,.study-modality-summary){display:none}
+.workstation .series-rail .patient-group-heading{padding:5px 30px 5px 8px;min-height:0}
+.workstation .series-rail .patient-study-summary{margin:0;padding:0}
+.workstation .body-grid:has(.series-list > .rail-empty){grid-template-columns:minmax(0,1fr)}
+.workstation .body-grid:has(.series-list > .rail-empty) :is(.series-rail,.series-rail-toggle){display:none}

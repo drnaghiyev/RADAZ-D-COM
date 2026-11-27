@@ -76,13 +76,15 @@ public final class ViewerActivity extends Activity {
         }
         childBar=new LinearLayout(this);
         childBar.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        Button back=new Button(this,null,android.R.attr.borderlessButtonStyle);
-        back.setText("‹");back.setTextSize(25);back.setPadding(0,0,0,0);
-        back.setContentDescription("Əvvəlki pəncərə");back.setOnClickListener(v->onBackPressed());
         int side=Math.round(44*getResources().getDisplayMetrics().density);
-        childBar.addView(back,new LinearLayout.LayoutParams(side,side));
         childTitle=new TextView(this);childTitle.setSingleLine();childTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        childTitle.setPadding(side/3,0,0,0);
         childBar.addView(childTitle,new LinearLayout.LayoutParams(0,-2,1));
+        Button closeButton=new Button(this,null,android.R.attr.borderlessButtonStyle);
+        closeButton.setText("×");closeButton.setTextSize(25);closeButton.setPadding(0,0,0,0);
+        closeButton.setContentDescription("Pəncərəni bağla");
+        closeButton.setOnClickListener(v->{if(active!=null && active!=home)close(active);});
+        childBar.addView(closeButton,new LinearLayout.LayoutParams(side,side));
         childBar.setVisibility(View.GONE);root.addView(childBar,new LinearLayout.LayoutParams(-1,side));
         stage=new FrameLayout(this);root.addView(stage,new LinearLayout.LayoutParams(-1,0,1));
         setContentView(root);
@@ -230,9 +232,7 @@ public final class ViewerActivity extends Activity {
     }
     private void updateChildBar(){
         boolean child=active!=null&&active!=home;
-        String childUrl=child?active.getUrl():null;
-        boolean known=childUrl!=null && !"about:blank".equals(childUrl);
-        childBar.setVisibility(child && known && !isViewerWorkspace(active)?View.VISIBLE:View.GONE);
+        childBar.setVisibility(child?View.VISIBLE:View.GONE);
         if(child){
             String title=active.getTitle();
             childTitle.setText(title==null||title.contains("RADAZ_VIEWER_")||title.contains("RADAZ_RECORDS_")?"":title);
