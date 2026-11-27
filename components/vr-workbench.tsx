@@ -79,7 +79,7 @@ export function VrWorkbench({volume:v,onClose,title,progressiveDesktop=false,pre
  useLayoutEffect(()=>{
    if(renderedVolume.current===v || !api.current)return;
    api.current.replacePreview(v);renderedVolume.current=v;lastCuts.current=null;setBackend('');
-   update({...live.current,style:initialStyle(v,v.range)});
+   if(live.current.style.relative && live.current.style.preset==='mr')update({...live.current,style:{...live.current.style,wl:(v.range[0]+v.range[1])/2,ww:Math.max(1,v.range[1]-v.range[0])}});
  },[v]);
  const render=(frame:Snapshot,interaction:boolean)=>{const handle=api.current;if(!handle)return;
    if(lastCuts.current!==frame.cuts){if(frame.cuts.length||lastCuts.current?.length)handle.cut(frame.cuts);lastCuts.current=frame.cuts;}
@@ -165,7 +165,7 @@ export function VrWorkbench({volume:v,onClose,title,progressiveDesktop=false,pre
    else if(k.startsWith('arrow')){const x=k==='arrowleft'?-1:k==='arrowright'?1:0,y=k==='arrowup'?-1:k==='arrowdown'?1:0;if(ctrl)camera(panZoom(cam,[0,0],[x*12,y*12],1,w,h));else camera(turn(cam,-x*.09,-y*.09));}
    else if(ctrl&&['+','=','-'].includes(k))camera(panZoom(cam,[w/2,h/2],[w/2,h/2],k==='-'?1.15:1/1.15,w,h));
    else if(k===','||k==='<'||k==='.'||k==='>')camera(turn(cam,0,0,k===','||k==='<'?-.09:.09));
-   else if(/^[1-6]$/.test(k))face(+k-1);else if(k==='0'){const def=initialStyle(v,v.range);style({ww:def.ww,wl:def.wl});}
+   else if(/^[1-6]$/.test(k))face(+k-1);else if(k==='0'){const def=initialStyle(v,v.range,live.current.style.preset);style({ww:def.ww,wl:def.wl});}
    else if(k==='delete'){if(pathRef.current.length)applyCut(true);else deleteMark();}else if(k==='enter'&&pathRef.current.length)applyCut(false);
    else if(k==='escape'){if(drag.current){update(drag.current.start);drag.current=null;setMoving(false);}setMenu('');setPoly([]);select(-1);}else if(k==='f12')setLabels(a=>!a);else if(k==='f')void fullscreen().catch(e=>notice(String(e)));
    else if(k==='k')take();else if(k===']')recall(Math.min(shots.length-1,shot+1));else if(k==='[')recall(Math.max(0,shot-1));
@@ -192,8 +192,8 @@ export function VrWorkbench({volume:v,onClose,title,progressiveDesktop=false,pre
  </div><VrCloseButton onClose={onClose}/>{hidden&&<button className="vr-unhide" aria-label="Alət panelini göstər" onClick={()=>setHidden(false)}><List/></button>}
  {menu&&<aside className="vr-menu" aria-label="3D seçimləri"><button className="vr-dismiss" aria-label="Menyunu bağla" onClick={()=>setMenu('')}><X/></button>
  {menu==='views'&&<><strong>Görünüş istiqaməti</strong>{faces.map((f,i)=><button key={f.key} onClick={()=>face(i)}>{f.key} · {f.name}</button>)}</>}
- {menu==='presets'&&<><strong>3D rəng rejimi</strong>{Object.entries(presets).filter(([k])=>v.modality==='MR'?k==='mr'||k.includes('mip'):k!=='mr').map(([key,label])=><button key={key} aria-pressed={s.style.preset===key} onClick={()=>{const def=initialStyle(v,v.range);style({preset:key as VrPreset,wl:def.wl,ww:def.ww});setMenu('');}}>{label}</button>)}</>}
- {menu==='window'&&<><strong>Rəng və şəffaflıq</strong>{(['wl','ww'] as const).map(k=><label key={k}>{k.toUpperCase()}<input type="number" value={Math.round(s.style[k])} onChange={e=>{if(e.target.value)style({[k]:k==='ww'?Math.max(1,+e.target.value):+e.target.value});}}/></label>)}{option('Başlanğıc pəncərə',()=>{const def=initialStyle(v,v.range);style({ww:def.ww,wl:def.wl});})}</>}
+ {menu==='presets'&&<><strong>3D rəng rejimi</strong>{Object.entries(presets).filter(([k])=>v.modality==='MR'?k==='mr'||k.includes('mip'):k!=='mr').map(([key,label])=><button key={key} aria-pressed={s.style.preset===key} onClick={()=>{const def=initialStyle(v,v.range,key as VrPreset);style({preset:key as VrPreset,wl:def.wl,ww:def.ww});setMenu('');}}>{label}</button>)}</>}
+ {menu==='window'&&<>{v.modality==='CT'&&s.style.preset==='airway'&&<label><input type="checkbox" checked={s.style.hideExterior!==false} onChange={e=>style({hideExterior:e.target.checked})}/>Bədən xaricini gizlət</label>}<strong>Rəng və şəffaflıq</strong>{(['wl','ww'] as const).map(k=><label key={k}>{k.toUpperCase()}<input type="number" value={Math.round(s.style[k])} onChange={e=>{if(e.target.value)style({[k]:k==='ww'?Math.max(1,+e.target.value):+e.target.value});}}/></label>)}{option('Başlanğıc pəncərə',()=>{const def=initialStyle(v,v.range,live.current.style.preset);style({ww:def.ww,wl:def.wl});})}</>}
  {menu==='cut'&&<><strong>Skalpel</strong>{option('Konturun içini kəs · Del',()=>applyCut(true),path.length<3)}{option('Konturun xaricini kəs · Enter',()=>applyCut(false),path.length<3)}
  {btn('Son kəsimi geri al · Ctrl+Z',<Undo2/>,undo,undefined,s.cuts.length<=cutFloor.current)}{btn('Kəsimi təkrarla · Ctrl+Y',<Redo2/>,redoCut,undefined,!redo.length)}
  {option('Konturu təmizlə',()=>setPoly([]),!path.length)}{option('Həcmi bərpa et',restoreVolume,!s.cuts.length)}{option('Skalpel tarixçəsini təmizlə',clearHist,!s.cuts.length&&!redo.length)}</>}

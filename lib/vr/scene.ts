@@ -6,7 +6,7 @@ export type V=[number,number,number];
 export type P=[number,number];
 export type Frame={center:V;normal:V;up:V;scale:number};
 export type VrPreset=VolumePreset|'bone-warm'|'bone-gray'|'skin-gray'|'bone-skin'|'bone-skin-soft'|'mip-inverse';
-export type Style={preset:VrPreset;relative?:boolean;mixFrom?:VrPreset;mixAmount?:number;ww:number;wl:number;shading:boolean;opacity:number;brightness:number;context:boolean;segments:boolean};
+export type Style={preset:VrPreset;hideExterior?:boolean;relative?:boolean;mixFrom?:VrPreset;mixAmount?:number;ww:number;wl:number;shading:boolean;opacity:number;brightness:number;context:boolean;segments:boolean};
 export type Cut={polygon:P[];origin:P;axes:[P,P,P];inside:boolean};
 export type Mark={a:V;b:V;kind:'length'|'arrow';labelPoint?:V;text?:string;color?:string;lineWidth?:number;alpha?:number;head?:'filled'|'open'|'both'};
 export type Snapshot={camera:Frame;style:Style;cuts:Cut[];marks:Mark[];duration:number};
@@ -63,9 +63,16 @@ export function cutPlane(g:AnatomyVolumeGeometry,cam:Frame,polygon:P[],w:number,
  const p0=normalized(g.origin);const axes=([world(g,1,0,0),world(g,0,1,0),world(g,0,0,1)]).map(v=>{const p=normalized(v);return [p[0]-p0[0],p[1]-p0[1]];}) as [P,P,P];
  return {origin:p0,axes,polygon:polygon.map(([x,y])=>[x/w,y/h]),inside};
 }
-export function initialStyle(geometry:AnatomyVolumeGeometry,range:[number,number]):Style{
- const mr=geometry.modality==='MR';
- return {relative:mr,preset:mr?'mr':'bone-warm',wl:mr?(range[0]+range[1])/2:287,ww:mr?Math.max(1,range[1]-range[0]):332,shading:true,opacity:1,brightness:vrLighting.ambient,segments:true,context:true};
+function presetWindow(preset:VrPreset,relative:boolean,range:[number,number]){
+ if(relative)return {wl:(range[0]+range[1])/2,ww:Math.max(1,range[1]-range[0])};
+ return preset==='airway'?{wl:129,ww:279}:{wl:287,ww:332};
+}
+export function initialStyle(geometry:AnatomyVolumeGeometry,range:[number,number],preset:VrPreset=geometry.modality==='MR'?'mr':'bone-warm'):Style{
+ const relative=geometry.modality==='MR';
+ return {relative,preset,...presetWindow(preset,relative,range),shading:true,opacity:1,brightness:vrLighting.ambient,segments:true,context:true};
+}
+export function hideAirwayExterior(s:Style,modality:string){
+ return modality==='CT'&&s.preset==='airway'&&s.hideExterior!==false;
 }
 function baseMaterial(s:Style,range:[number,number]){
  const base:VolumePreset=({'bone-warm':'bone','bone-gray':'bone','skin-gray':'skin','bone-skin':'bone','bone-skin-soft':'skin','mip-inverse':'mip'} as Partial<Record<VrPreset,VolumePreset>>)[s.preset]||s.preset as VolumePreset;
@@ -75,14 +82,17 @@ function baseMaterial(s:Style,range:[number,number]){
    const skin=s.preset==='bone-skin-soft'?.12:s.preset==='bone-skin'?.035:0;
    alpha=[[-1050,0],[-350,0],[-120,skin],[40,skin*.7],[105,0],[150,.003],[210,.06],[280,.34],[365,.77],[640,.98],[1600,1]];
  }
+ if(s.preset==='airway'){
+   colors=[[-1024,.33,.54,.68],[-970,.54,.76,.88],[-944,.71,.86,.93],[-907,.89,.91,.90],[-845,.96,.95,.92],[-760,.99,.98,.96]];
+   alpha=[[-1200,0],[-1024,0],[-997,.015],[-965,.085],[-939,.22],[-906,.36],[-868,.20],[-817,.055],[-755,.008],[-690,0],[3071,0]];
+ }
  if(s.preset==='mr'){
    colors=[[range[0],.05,.07,.09],[(range[0]+range[1])/2,.57,.62,.66],[range[1],.98,.98,1]];
    alpha=[[range[0],0],[(range[0]+range[1])/2,.025],[range[1],.8]];
  }
  if(s.relative&&p.blend!=='composite'){colors=[[range[0],0,0,0],[range[1],1,1,1]];alpha=[[range[0],1],[range[1],1]];}
- const baseline=(s.relative||s.preset==='mr')?(range[0]+range[1])/2:287;
- const width=(s.relative||s.preset==='mr')?Math.max(1,range[1]-range[0]):332;
- const pos=(n:number)=>s.wl+(n-baseline)*s.ww/width;
+ const reference=presetWindow(s.preset,!!s.relative||s.preset==='mr',range);
+ const pos=(n:number)=>s.wl+(n-reference.wl)*s.ww/reference.ww;
  const gray=s.preset==='bone-gray'||s.preset==='skin-gray';
  const rgb=colors.map(([x,r,g,b])=>{const l=.299*r+.587*g+.114*b;return [pos(x),...(gray?[l,l,l]:s.preset==='mip-inverse'?[1-r,1-g,1-b]:[r,g,b])];});
  return {rgb,alpha:alpha.map(([x,a])=>[pos(x),clamp(a*s.opacity,0,1)]),blend:p.blend};

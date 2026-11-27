@@ -1,5 +1,7 @@
-import {add,clamp,cross,dot,material,pointAt,unit,vrLighting,type Frame,type Style,type Volume,type V} from './scene';
+import {add,clamp,cross,dot,hideAirwayExterior,material,pointAt,unit,vrLighting,type Frame,type Style,type Volume,type V} from './scene';
+import {airwayBodyRows} from './airway-envelope';
 import {excludedVoxels} from './scalpel';
+let airwayBounds:Int32Array|undefined;
 let volume:Volume,mask:Uint8Array<ArrayBufferLike>=new Uint8Array(0);
 function ramp(knots:number[][],n:number,k:number){
  let i=0;while(i+1<knots.length&&n>knots[i+1][0])i++;
@@ -8,6 +10,7 @@ function ramp(knots:number[][],n:number,k:number){
 }
 function trace(camera:Frame,s:Style,W:number,H:number,aspect:number,moving:boolean){
  const g=volume,{dimensions:d,spacing,values,range}=g,[nx,ny,nz]=d,slice=nx*ny,rgba=new Uint8ClampedArray(W*H*4);
+ const body=hideAirwayExterior(s,g.modality)?(airwayBounds??=airwayBodyRows(values,d)):undefined;
  const map=material(s,range),lut=new Float32Array(4096*4),slope=4095/(range[1]-range[0]||1);
  for(let i=0;i<4096;i++){const n=range[0]+i/slope;for(let c=0;c<3;c++)lut[4*i+c]=ramp(map.rgb,n,c+1);lut[4*i+3]=ramp(map.alpha,n,1);}
  const dir=(v:V)=>[0,1,2].map(i=>(v[0]*g.direction[3*i]+v[1]*g.direction[3*i+1]+v[2]*g.direction[3*i+2])/spacing[i]) as V;
@@ -32,6 +35,7 @@ function trace(camera:Frame,s:Style,W:number,H:number,aspect:number,moving:boole
    for(let t=near+step*.25;t<=far;t+=step){
      const ix=clamp(o[0]+t*ray[0],0,nx-1),iy=clamp(o[1]+t*ray[1],0,ny-1),iz=clamp(o[2]+t*ray[2],0,nz-1);
      const X=Math.round(ix),Y=Math.round(iy),Z=Math.round(iz),i=Z*slice+Y*nx+X;
+     if(body){const row=2*(Z*ny+Y);if(X<body[row]||X>=body[row+1])continue;}
      if(mask[i])continue;const label=s.segments?g.mask[i]:0;if(!s.context&&!label)continue;
      let n=values[i];
      if(!moving){const x0=Math.floor(ix),y0=Math.floor(iy),z0=Math.floor(iz),a=ix-x0,b=iy-y0,c=iz-z0,at=z0*slice+y0*nx+x0;
@@ -58,7 +62,7 @@ function trace(camera:Frame,s:Style,W:number,H:number,aspect:number,moving:boole
  return rgba;
 }
 self.onmessage=({data})=>{try{
- if(data.type==='volume'){volume=data.volume;return;}
+ if(data.type==='volume'){volume=data.volume;airwayBounds=undefined;return;}
  if(data.type==='cut'){mask=excludedVoxels(data.dimensions,data.cuts);const result=mask.slice();self.postMessage({type:'mask',id:data.id,mask:result}, {transfer:[result.buffer]});return;}
  if(data.type==='draw'){const pixels=trace(data.cam,data.style,data.width,data.height,data.aspect,data.moving);self.postMessage({type:'frame',id:data.id,width:data.width,height:data.height,pixels},{transfer:[pixels.buffer]});}
  }catch(e){self.postMessage({type:'error',id:data.id,message:String(e)});}

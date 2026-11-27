@@ -1,0 +1,39 @@
+import assert from 'node:assert/strict';
+import {airwayBodyRows, maskAirwayExterior} from '../lib/vr/airway-envelope';
+import {hideAirwayExterior, initialStyle, material} from '../lib/vr/scene';
+import type {AnatomyVolumeGeometry} from '../lib/anatomy-volume';
+
+const geometry:AnatomyVolumeGeometry={modality:'CT',dimensions:[112,96,16],spacing:[1,1,1],origin:[0,0,0],direction:[1,0,0,0,1,0,0,0,1]};
+const [w,h,d]=geometry.dimensions, source=new Float32Array(w*h*d);
+for(let z=0;z<d;z++)for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+  let hu=-992;
+  if(((x-56)/42)**2+((y-46)/33)**2<1)hu=35;
+  if(((x-39)/14)**2+((y-48)/19)**2<1 || ((x-73)/14)**2+((y-48)/19)**2<1)hu=-906;
+  if((x-56)**2+(y-41)**2<16)hu=-969;
+  if(y>=88 && y<92)hu=450;
+  if(x>=7&&x<=15&&y>9&&y<15)hu=-930;
+  source[(z*h+y)*w+x]=hu;
+}
+const style=initialStyle(geometry,[-1024,1200],'airway');
+assert.deepEqual([style.wl,style.ww],[129,279]);
+assert.equal(hideAirwayExterior(style,'CT'),true);
+assert.equal(hideAirwayExterior({...style,hideExterior:false},'CT'),false);
+assert.equal(hideAirwayExterior(style,'MR'),false);
+assert.equal(hideAirwayExterior({...style,preset:'bone-warm'},'CT'),false);
+const {rgb,alpha}=material(style,[-1024,1200]);
+const bronchus=rgb.find(k=>k[0]===-970)!,lung=rgb.find(k=>k[0]===-907)!;
+assert.ok(bronchus[3]>bronchus[1]+.25 && Math.min(...lung.slice(1))>=.88);
+assert.ok(alpha.find(k=>k[0]===-906)![1]>.25);
+const original=source.slice(), bounds=airwayBodyRows(source,geometry.dimensions), display=source.slice(),clear=4096;
+maskAirwayExterior(display,w,bounds,clear);
+for(let z=0;z<d;z++){
+  for(const [x,y,expected] of [[56,90,clear],[10,12,clear],[0,0,clear],[56,41,-969],[39,48,-906],[73,48,-906],[56,53,35]]){
+    assert.equal(display[(z*h+y)*w+x],expected);
+  }
+}
+assert.deepEqual(source,original);
+const empty=source.slice().fill(-1024);
+const unknown=airwayBodyRows(empty,geometry.dimensions);
+maskAirwayExterior(empty,w,unknown,clear);
+assert.ok(empty.every(x=>x===-1024));
+console.log('Airway CT phantom: 16 slices, 2 simulated lungs and central airway retained; exterior, clothing and table hidden; original and low-confidence slices preserved.');

@@ -11,7 +11,8 @@ import vtkMapper from '@kitware/vtk.js/Rendering/Core/Mapper';
 import vtkPolyData from '@kitware/vtk.js/Common/DataModel/PolyData';
 import vtkDataArray from '@kitware/vtk.js/Common/Core/DataArray';
 import {createVolumeRenderSource} from '../volume-render-source';
-import {add,cross,material,vrLighting,type Cut,type Frame,type Style,type Volume} from './scene';
+import {add,cross,hideAirwayExterior,material,vrLighting,type Cut,type Frame,type Style,type Volume} from './scene';
+import {airwayBodyRows,maskAirwayExterior} from './airway-envelope';
 import workerUrl from './worker.ts?worker&url';
 import meshUrl from '../anatomy-surface.worker.ts?worker&url';
 
@@ -45,6 +46,7 @@ function gpuView(host:HTMLElement,v:Volume,tablet:boolean,onFallback:()=>void){
  keyLight.setColor(1,.987,.967);keyLight.setIntensity(vrLighting.keyIntensity);
  fillLight.setColor(.95,.975,1);fillLight.setIntensity(vrLighting.fillIntensity);
  let distance=Math.hypot(...v.dimensions.map((n,i)=>n*v.spacing[i]))*2+1;
+ let airwayBounds:Int32Array|undefined,wasAirway=false;
  let applied:Style|undefined,excluded:Uint8Array<ArrayBufferLike>=new Uint8Array(0),oldMask:Uint8Array<ArrayBufferLike>=excluded,oldMinimum=false,meshWorker:Worker|null=null;
  const meshes:{actor:ReturnType<typeof vtkActor.newInstance>;mapper:ReturnType<typeof vtkMapper.newInstance>;mesh:ReturnType<typeof vtkPolyData.newInstance>}[]=[];
  let last:Render|undefined,disposed=false;
@@ -64,16 +66,25 @@ function gpuView(host:HTMLElement,v:Volume,tablet:boolean,onFallback:()=>void){
  mesh();const {mapper}=source;let lastW=0,lastH=0,baseStep=Math.min(...v.spacing);
  function draw(r:Render){
    last=r;const {cam,style:s,quality:q,moving}=r,min=s.preset==='minip';
-   if(oldMask!==excluded||(excluded.length&&oldMinimum!==min)){
+   const airway=hideAirwayExterior(s,v.modality),masked=airway||!!excluded.length;
+   if(oldMask!==excluded||wasAirway!==airway||(excluded.length&&oldMinimum!==min)){
      const floor=min?v.range[1]+Math.max(1,v.range[1]-v.range[0]):v.range[0]-Math.max(1,v.range[1]-v.range[0]);
-     let values=v.values;if(excluded.length){values=v.values.slice();for(let i=0;i<excluded.length;i++)if(excluded[i])values[i]=floor;}
-     source.scalars.setData(values,1);source.scalars.setRange({min:excluded.length?Math.min(floor,v.range[0]):v.range[0],max:excluded.length?Math.max(floor,v.range[1]):v.range[1]},0);source.image.modified();oldMinimum=min;oldMask=excluded;applied=undefined;
+     let values=v.values;
+     if(masked){
+       values=v.values.slice();
+       if(airway){
+         airwayBounds??=airwayBodyRows(v.values,v.dimensions);
+         maskAirwayExterior(values,v.dimensions[0],airwayBounds,v.range[1]+Math.max(1,v.range[1]-v.range[0]));
+       }
+       for(let i=0;i<excluded.length;i++)if(excluded[i])values[i]=floor;}
+     source.scalars.setData(values,1);source.scalars.setRange({min:excluded.length?Math.min(floor,v.range[0]):v.range[0],max:airway?v.range[1]+Math.max(1,v.range[1]-v.range[0]):excluded.length?Math.max(floor,v.range[1]):v.range[1]},0);source.image.modified();oldMinimum=min;oldMask=excluded;wasAirway=airway;applied=undefined;
    }
    if(applied!==s){
      const m=material(s,v.range);rgb.removeAllPoints();opacity.removeAllPoints();
      for(const [x,red,green,blue]of m.rgb)rgb.addRGBPoint(x,red,green,blue);
      for(const [x,a]of m.alpha)opacity.addPoint(x,a);
      const span=Math.max(1,v.range[1]-v.range[0]);
+     if(airway){const bound=v.range[1]+span;opacity.addPoint(bound,0);rgb.addRGBPoint(bound,0,0,0);}
      if(excluded.length){const bound=min?v.range[1]+span:v.range[0]-span;opacity.addPoint(bound,0);rgb.addRGBPoint(bound,0,0,0);}
      if(m.blend==='maximum')mapper.setBlendModeToMaximumIntensity();else if(min)mapper.setBlendModeToMinimumIntensity();else mapper.setBlendModeToComposite();
      p.setShade(m.blend==='composite'&&s.shading);p.setAmbient(s.brightness);actor.setVisibility(s.context);applied=s;
@@ -97,7 +108,7 @@ function gpuView(host:HTMLElement,v:Volume,tablet:boolean,onFallback:()=>void){
  }
  ready=true;
  return {canvas,draw,replaceVolume(next:Volume){
-   v=next;last=undefined;applied=undefined;excluded=new Uint8Array(0);oldMask=excluded;
+   v=next;wasAirway=false;airwayBounds=undefined;last=undefined;applied=undefined;excluded=new Uint8Array(0);oldMask=excluded;
    baseStep=Math.min(...next.spacing);distance=Math.hypot(...next.dimensions.map((n,i)=>n*next.spacing[i]))*2+1;
    source.image.setDimensions(...next.dimensions);source.image.setSpacing(next.spacing);source.image.setOrigin(next.origin);
    source.image.setDirection(new Float32Array(next.direction));
