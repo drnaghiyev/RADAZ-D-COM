@@ -14,7 +14,8 @@ export function bindToolbarDrag(root:HTMLElement, itemSelector:string, zoneSelec
   const down=(e:PointerEvent)=>{
     if(!e.isPrimary||e.button!==0){clear();return;}
     const el=e.target as Element;
-    if(el.closest('input,select,textarea,[role=dialog],[role=menu],.menu-popover'))return;
+    const control=el.closest('input,select,textarea,[role=dialog],[role=menu],.menu-popover');
+    if(control && root.contains(control))return;
     const item=el.closest<HTMLElement>(itemSelector);if(!item||!root.contains(item))return;
     clear();source=item;id=e.pointerId;x=e.clientX;y=e.clientY;
     if(e.pointerType!=='mouse')timer=win.setTimeout(arm,460);

@@ -8,7 +8,7 @@ withTablet(async({ctx,p,pane,errors})=>{
  const k=p.locator('.radaz-vr [data-direct-item]:visible:not(:disabled)'),first=k.nth(0),last=k.nth(3);
  await last.waitFor();const label=await first.getAttribute('data-direct-item'),a=await first.boundingBox(),b=await last.boundingBox();
  const touch=(type,touchPoints)=>cdp.send('Input.dispatchTouchEvent',{type,touchPoints});
- await touch('touchStart',[{x:a.x+a.width*.5,y:a.y+a.height*.5,id:1}]);await p.waitForTimeout(550);
+ await touch('touchStart',[{x:a.x+a.width*.5,y:a.y+a.height*.5,id:1}]);await p.waitForTimeout(620);assert.equal(await first.getAttribute('data-moving'),'true');
  await touch('touchMove',[{x:b.x+b.width*.8,y:b.y+b.height*.5,id:1}]);await touch('touchEnd',[]);
  await p.waitForFunction(id=>JSON.parse(localStorage.getItem('radaz:toolbar-dividers:vr:order')||'[]').indexOf(id)>0,label);
  console.log('PASS long press in the 3D toolbar');}

@@ -290,7 +290,7 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
     suite.volumeCanvas=true;
     await volume.evaluate(()=>dispatchEvent(new Event('radaz:close-volume')));await page.bringToFront();
     await panel.locator('.bottom-right').filter({hasText:'/ 12'}).waitFor();
-    assert.equal(await panel.getAttribute('data-has-image'),'true');
+    await page.locator('[data-panel=A][data-has-image=true] canvas').first().waitFor();
     await page.waitForFunction(()=>!document.querySelector('.tablet-volume-overlay,.sv-surface'));
     const smartOpen=context.waitForEvent('page');
     await command(page,'Smart Volume');
