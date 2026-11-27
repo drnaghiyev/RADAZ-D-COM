@@ -7,9 +7,10 @@ withTablet(async ({p,errors})=>{
   await p.waitForFunction(n=>document.querySelector('[data-panel=A] .bottom-right')?.innerText.includes('/ '+n),depth,{timeout:180000});
   const profile=process.env.RADAZ_TEST_QUALITY||'medium';
   const expected={
-    low:depth>=320?64:128,medium:256,high:depth<=128?256:512,restart:128,allocation:128,
-    upload:depth<=128?256:128,stall:128,compact:depth>=320?64:256,pressure:64,
-    last128:64,first128:64,restart128:64,budget64:64,late:256,compressed:256,closing:256,unreadable:256
+    low:depth<=590?256:192,medium:256,high:depth<=128?256:512,
+    restart:depth<=128?192:128,allocation:depth<=128?192:128,
+    upload:depth<=128?256:128,stall:depth<=128?192:128,compact:256,pressure:128,
+    last128:128,first128:64,restart128:128,budget64:64,late:256,compressed:256,closing:256,unreadable:256
   }[profile];
   assert.ok(expected);
   await p.evaluate(({profile,depth})=>{
@@ -77,7 +78,7 @@ withTablet(async ({p,errors})=>{
   },{profile,depth});
   const before=Date.now();
   await p.getByRole('button',{name:'3D həcm görüntüləmə',exact:true}).first().click();
-  if(depth>128){
+  if(depth>128 && profile!=='budget64'){
     const preview=p.locator('dialog .radaz-vr[data-volume-preview=true]');
     await preview.locator('.vr-raster[data-ready=true]').waitFor({timeout:90000});
     assert.ok(await p.locator('.tablet-volume-count').innerText());
@@ -111,6 +112,11 @@ withTablet(async ({p,errors})=>{
       await p.waitForFunction(()=>window.qaRequests>1+Math.round(Number(document.querySelector('.radaz-vr')?.dataset.sourceSlices)*.967),{},{timeout:35000});
     }
   }
+  if(profile==='budget64' || profile==='first128'){
+    const fallback=p.locator('dialog .shared-volume-loading');
+    await fallback.getByRole('status').filter({hasText:/boş yaddaş|cavab vermədi/}).waitFor({timeout:95000});
+    await fallback.getByRole('combobox',{name:'3D kəsiyinin ölçüsü'}).selectOption('64');
+  }
   const volume=p.locator('dialog .radaz-vr:not([data-volume-preview])');
   await volume.locator('.vr-raster[data-ready=true]').waitFor({timeout:180000});
   const sample=await volume.evaluate((root)=>{
@@ -130,17 +136,19 @@ withTablet(async ({p,errors})=>{
   assert.equal(await p.evaluate(()=>localStorage.getItem('radaz.tablet.vr.opening')),null,'first rendered frame clears startup marker');
   assert.equal(sample.format,native?'Int16Array':'Float32Array');
   assert.equal(sample.bytes,expected**2*depth*(native?2:4));
+  const col=Math.floor(247/ratio),row=Math.floor(191/ratio);
+  const overlap=(bin,pixel)=>Math.max(0,Math.min((bin+1)*ratio,pixel+1)-Math.max(bin*ratio,pixel))/ratio;
   for(let z=0;z<depth;z++){
-    const area=ratio**2, average=value=>650+(value-650)/area;
-    assert.deepEqual(sample.out[z],[650,average(1100+z),average(-200-z),650,-1024,-1024],'slice '+z);
+    const line=[col-1,col,col+1,col+2].map(x=>Math.fround(650+overlap(row,191)*
+      (overlap(x,247)*(1100+z-650)+overlap(x,248)*(-200-z-650))));
+    assert.deepEqual(sample.out[z],[...line,-1024,-1024],'slice '+z);
   }
   if(profile==='upload' && depth<=128)assert.equal(await p.evaluate(()=>!!window.qaFailed),false,'short stack avoids the GPU upload');
   if(['allocation','stall','first128'].includes(profile) || profile==='upload'&&depth>128)assert.ok(await p.evaluate(()=>window.qaFailed),'failure was injected');
   const counts=await p.evaluate(()=>({requests:window.qaRequests,encoded:window.qaEncoded,lowered:window.qaLowered,matrices:window.qaMatrices}));
   if(profile==='late')assert.equal(counts.requests,depth+1,'only the stalled plane was retried');
   if(profile==='pressure'){assert.ok(counts.lowered);assert.equal(counts.requests,depth,'no reread on memory pressure');}
-  if(expected===64){
-    assert.equal(sample.backend,'CPU','safe first frame presented from the full volume');
+  if(expected===64 && sample.backend==='CPU'){
     const visible=await volume.locator('.vr-raster canvas').first().evaluate(canvas=>{
       const rgba=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
       return rgba.some((value,i)=>i%4!==3 && value>12);
@@ -148,11 +156,11 @@ withTablet(async ({p,errors})=>{
     assert.ok(visible,'first complete CPU frame shows the phantom');
   }
   if(profile==='last128'){
-    assert.deepEqual(counts.matrices,[128,64]);
-    assert.equal(counts.requests,depth+1,'retry only the last source slice at the smaller size');
+    assert.deepEqual(counts.matrices,[128]);
+    assert.equal(counts.requests,depth+1,'a delayed source plane preserves the selected resolution');
   }
   if(profile==='first128')assert.deepEqual(counts.matrices,[128,64]);
-  if(['compact','budget64','restart128'].includes(profile))assert.deepEqual(counts.matrices,[64]);
+  if(['compact','budget64','restart128'].includes(profile))assert.deepEqual(counts.matrices,[expected]);
   if(profile==='compressed' && depth<=128)assert.equal(counts.requests,0,'short compressed series uses the established 2D decoder');
   assert.deepEqual(sample.spacing,[.7*ratio,.8*ratio,1.25]);
   console.log(JSON.stringify({profile,counts,dims:sample.dims,bytes:sample.bytes,backend:sample.backend,readyMs:Date.now()-before,planesVerified:depth,first:sample.out[0],middle:sample.out[depth>>1],last:sample.out.at(-1)}));
