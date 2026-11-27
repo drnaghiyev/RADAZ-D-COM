@@ -25,6 +25,12 @@ withTablet(async({ctx,p,pane,errors})=>{
     await close.waitFor();
     if(i!==2)await child.locator('.vr-raster[data-ready=true]').waitFor();
     assert.equal(await child.locator('[data-panel]').count(),0,'volume has no 2D stacks');
+    const residentPlanes=await p.evaluate(()=>{
+      const snapshot=[...window.radazDetachedSources.values()][0]();
+      const source=snapshot.series[0].images;
+      return {decoded:source.filter(i=>i.record.pixels.byteLength>0).length,total:source.length};
+    });
+    assert.ok(residentPlanes.decoded<residentPlanes.total,'3D retained every decoded source plane in main Viewer');
     const ready=Date.now(),closed=child.waitForEvent('close');
     if(i===4)await child.evaluate(()=>{window.dispatchEvent(new Event('radaz:request-child-close',{cancelable:true}));}).catch(e=>{if(!child.isClosed())throw e;});
     else await close.click().catch(e=>{if(!child.isClosed())throw e;});
@@ -36,7 +42,7 @@ withTablet(async({ctx,p,pane,errors})=>{
     const landmark=await anchor(p,'return '+(i+1));
     assert.deepEqual(landmark.expected,baseline.expected);
     const sample=await counts();samples.push(sample);
-    console.log(JSON.stringify({open:i+1,readyMs:ready-start,returnMs:Date.now()-ready,...sample}));
+    console.log(JSON.stringify({open:i+1,residentPlanes,readyMs:ready-start,returnMs:Date.now()-ready,...sample}));
   }
   const warm=samples[1],last=samples.at(-1);
   assert.ok(last.heap<warm.heap+12*1024*1024,'unexpected sustained main-heap growth');
