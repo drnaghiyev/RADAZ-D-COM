@@ -55,7 +55,10 @@ body .flat-toolbar-workspace .records-header .toolbar-overflow-trigger{order:2}
 body .flat-toolbar-workspace .flat-toolbar-tool button:has(>svg.lucide-chevron-down){position:relative;padding-inline:3px 9px!important}
 body .flat-toolbar-workspace .flat-toolbar-tool button>svg.lucide-chevron-down{position:absolute;right:1px;top:50%;transform:translateY(-50%);width:8px!important;height:8px!important}
 body .flat-toolbar-workspace .flat-toolbar-tool :is(.workspace-split,.tablet-folder-command){display:inline-flex;position:relative;border:1px solid #344e5c;border-radius:4px;gap:0!important;background:#1b2f3b}
-body .flat-toolbar-workspace .flat-toolbar-tool :is(.workspace-split,.tablet-folder-command)>button{border:0!important}
+body .flat-toolbar-workspace .flat-toolbar-strip .flat-toolbar-tool :is(.workspace-split,.tablet-folder-command){box-sizing:border-box;width:var(--command-size);height:var(--command-size)}
+body .flat-toolbar-workspace .flat-toolbar-strip .flat-toolbar-tool :is(.workspace-split,.tablet-folder-command)>button{box-sizing:border-box;border:0!important;border-radius:2px!important;height:100%!important;padding:0!important}
+body .flat-toolbar-workspace .flat-toolbar-strip .flat-toolbar-tool :is(.workspace-split,.tablet-folder-command)>button:first-child{flex:1 1 0!important;min-width:0!important;width:auto!important}
+.flat-toolbar-tool .workspace-split .mode-letter-icon{font-size:clamp(9px,calc(var(--command-size)*.27),12px)}
 body .flat-toolbar-workspace .flat-toolbar-tool :is(.workspace-options,.tablet-import-options){width:13px!important;min-width:13px!important;flex:0 0 13px!important;padding:0!important}
 .workstation .statusbar{display:flex;align-items:center;gap:8px}
 .workstation .statusbar .status-job-progress{display:flex;position:static;align-items:center;gap:5px;margin:0;padding:0;min-width:0;font-size:10px}
