@@ -3,11 +3,11 @@ import {Children,Fragment,createContext,isValidElement,useContext,useEffect,useR
 import {createPortal} from 'react-dom';
 import {ArrowDown,ArrowUp,Columns2,RotateCcw,Settings2,X} from 'lucide-react';
 import {ToolbarGrip} from './toolbar-grip';
-import {emptyLayout,placements,reorder,type Layout,type Legacy,type Dock,type Position,type Tool} from '@/lib/toolbar-layout';
+import {defaultLayout,emptyLayout,placements,reorder,type Layout,type Legacy,type Dock,type Position,type Tool} from '@/lib/toolbar-layout';
 
 export type ToolHosts={top:HTMLElement|null;bottom:HTMLElement|null;right:HTMLElement|null;overflow:HTMLElement|null};
 export const FlatToolbarContext=createContext<{
-  hosts:ToolHosts; overflow:Set<string>; tools:Record<string,Tool>; all:Record<string,Position>; dividers:string[];
+  scope:string;hosts:ToolHosts; overflow:Set<string>; tools:Record<string,Tool>; all:Record<string,Position>; dividers:string[];
   register:(id:string,tool:Tool)=>()=>void;layout:Layout;apply:(value:Layout)=>void;legacy:Legacy;defaults:Legacy;
 }|null>(null);
 const Home=createContext({home:'',groupOrder:0,className:''});
@@ -66,7 +66,7 @@ export function ToolbarCustomizeButton(){
   const dividers=draft.dividers;
   const move=(id:string,dock:Dock,before?:string)=>setDraft(reorder(draft,all,id,dock,before));
   const toggleDivider=(id:string)=>setDraft({...draft,dividers:dividers.includes(id)?dividers.filter(k=>k!==id):[...dividers,id]});
-  const reset=()=>setDraft({...emptyLayout(),ignoreLegacy:true});
+  const reset=()=>setDraft(defaultLayout(context.scope));
   const close=()=>{setOpen(false);trigger.current?.focus();};
   return <><button type="button" ref={trigger} className="toolbar-customize-trigger" aria-label="Alət panelini fərdiləşdir" title="Alət panelini fərdiləşdir" onClick={()=>{setDraft(context.layout);setOpen(true);}}><Settings2/></button>
     {open&&createPortal(<div className="toolbar-editor-backdrop" onClick={e=>{if(e.target===e.currentTarget)close();}}><section role="dialog" aria-modal="true" aria-label="Alət panelinin düzülüşü" className="toolbar-editor" onKeyDown={e=>{if(e.key==='Escape')close();}}>

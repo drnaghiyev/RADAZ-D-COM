@@ -9,6 +9,28 @@ type LegacyItems = {
 };
 export type Legacy = {groups:LegacyGroups;items:LegacyItems};
 export const emptyLayout=():Layout=>({positions:{},dividers:[]});
+// Native and tablet tool sources share these stable IDs. The tablet omits the optical-disc command.
+const viewerSections = [
+  ['cd/.0', 'import/.0', 'output/.0'],
+  ['workspace/.$mpr', 'workspace/.$3d', 'workspace/.$archive', 'workspace/.$pacs', 'smart-volume/.0', 'workspace/.4'],
+  ['layout/.0', 'window/.1', 'window/.0', 'contrast/.0', 'annotations/.0', 'layout/.1', 'window/.2', 'help/.0'],
+  ['measure/.0:$scroll', 'measure/.0:$wl', 'measure/.0:$pan', 'measure/.0:$zoom', 'measure/.1', 'workspace/.3', 'measure/.2'],
+  ['cine/.0', 'cine/.1', 'cine/.2', 'cine/.3', 'cine/.4', 'cine/.5'],
+  ['workspace/.0', 'output/.1', 'output/.2'],
+  ['help/.1', 'toolbar-settings/.0'],
+];
+
+export function defaultLayout(scope:string):Layout {
+  const layout = emptyLayout();
+  layout.ignoreLegacy = true;
+  if (scope !== 'viewer') return layout;
+  viewerSections.flat().forEach((id,order) => {layout.positions[id]={dock:'top',order};});
+  layout.dividers = viewerSections.slice(1).map(section => section[0]);
+  // Rotation commands remain available in the toolbar editor.
+  for (let i=0;i<6;i++) layout.positions['rotation/.'+i]={dock:'pool',order:i};
+  return layout;
+}
+
 function read<T>(storage:Storage,key:string,fallback:T):T{
   try { return JSON.parse(storage.getItem(key)||'null')??fallback; } catch { return fallback; }
 }
@@ -23,6 +45,13 @@ export function readLayouts(storage:Storage,scope:string,tablet:boolean){
   const defaults:LegacyGroups=tablet&&scope==='viewer'?Object.fromEntries(['help','window','output','rotation'].map((id,order)=>[id,{side:'right',order}])):{};
   const groups=read<LegacyGroups>(storage,'radaz-toolbar-v1:'+scope,{});
   const legacy:Legacy={groups:Object.keys(groups).length?groups:defaults,items:read<LegacyItems>(storage,'radaz-toolbar-items-v1:'+scope,{})};
+  const items=legacy.items;
+  const hasLegacyChanges=Object.keys(groups).length>0 || !!(items.groups?.length || items.removed?.length ||
+    Object.keys(items.items||{}).length || items.rows===2 || Object.keys(items.groupRows||{}).length);
+  const hasFlatChanges=Object.keys(layout.positions).length>0 || layout.dividers.length>0;
+  // Earlier versions automatically saved an empty preference on first launch.
+  if(scope==='viewer' && !hasFlatChanges && (layout.ignoreLegacy || !hasLegacyChanges))
+    return {layout:defaultLayout(scope),legacy,defaults};
   return {layout,legacy,defaults};
 }
 export function placements(tools:Record<string,Tool>,layout:Layout,legacy:Legacy):Record<string,Position>{

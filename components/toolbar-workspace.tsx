@@ -96,7 +96,7 @@ export function ToolbarWorkspace({scope,children}:{scope:string;children:ReactNo
     doc.addEventListener('pointerdown',close);doc.addEventListener('keydown',key);
     return ()=>{doc.removeEventListener('pointerdown',close);doc.removeEventListener('keydown',key);};
   },[open,header,popup]);
-  return <FlatToolbarContext.Provider value={{hosts:{top,bottom,right,overflow:autoRight?right:popup},overflow:new Set(overflow),tools,all,dividers:layout.dividers,register,layout,apply:setLayout,legacy,defaults}}>
+  return <FlatToolbarContext.Provider value={{scope,hosts:{top,bottom,right,overflow:autoRight?right:popup},overflow:new Set(overflow),tools,all,dividers:layout.dividers,register,layout,apply:setLayout,legacy,defaults}}>
     <div ref={root} className={'toolbar-workspace flat-toolbar-workspace'+(hasRight?' has-right-dock':'')} data-toolbar-scope={scope} data-toolbar-rows={twoRows?2:1}>
       {children}
       {header&&createPortal(<>
