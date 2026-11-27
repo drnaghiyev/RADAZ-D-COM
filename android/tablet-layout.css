@@ -4,6 +4,10 @@ html[data-tablet-columns="1"] .toolbar-workspace {--tablet-columns:1;--tablet-ce
 body .toolbar-workspace .flat-toolbar-right {grid-template-columns:repeat(var(--tablet-columns),minmax(0,1fr));gap:4px}
 body .toolbar-workspace .flat-toolbar-right .flat-toolbar-tool {min-width:0;max-width:100%}
 body .toolbar-workspace .flat-toolbar-right .flat-toolbar-tool:has(input[type=range],.mpr-thickness,.volume-simple-controls){grid-column:1/-1}
+/* Stack the playback value below its range when the responsive toolbar moves it into the dock. */
+body .flat-toolbar-workspace .flat-toolbar-right .cine-controls:has(input[type=range]) {justify-self:stretch}
+body .flat-toolbar-workspace .flat-toolbar-right .cine-controls label {display:flex;flex-direction:column;gap:1px;width:100%;min-width:0}
+body .flat-toolbar-workspace .flat-toolbar-right .cine-controls input[type=range] {box-sizing:border-box;width:100%;max-width:60px;margin-inline:0}
 body .toolbar-workspace .flat-toolbar-right .flat-toolbar-tool>button {min-height:42px!important;min-width:var(--tablet-cell)!important}
 body .toolbar-workspace .header-control.tablet-import-options {width:26px!important;min-width:26px!important;flex-basis:26px!important}
 body .toolbar-workspace .flat-toolbar-tool .tablet-folder-command {display:inline-flex;align-items:center}
