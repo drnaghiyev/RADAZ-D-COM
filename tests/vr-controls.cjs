@@ -42,36 +42,32 @@ async function verifyVrControls({home,view,vr,stage,tablet,context}){
     const hidden=await pixels();
     for(let i=0;i<regions.length;i++)assert.notDeepEqual(visible[i],hidden[i],'overlay is visible in the composed 3D window');
     await toggle.click();await hud.waitFor();
-    console.log('PASS composed cube and window labels, visibility toggle and mouse orbit');return;
+    console.log('PASS composed cube and window labels, visibility toggle and mouse orbit');return view;
   }
   const open=home.getByRole('button',{name:'3D həcm görüntüləmə',exact:true}).first();
   const timings=[];
   for(let cycle=0;cycle<4;cycle++){
     await vr.locator('.vr-raster[data-ready="true"]').waitFor();
-    await home.evaluate(()=>{window.vrOldGL=document.querySelector('.vr-raster canvas').getContext('webgl2');});
+
     const lost=process.env.VR_TABLET_RETURN_TEST && await require('./vr-tablet-return.cjs').discardCoveredCanvas(home,cycle===2);
     const denied=process.env.VR_TABLET_GPU_DENIAL && cycle===3;
     if(denied)await home.evaluate(()=>{window.testDeniedContexts=0;window.testDenyNewGL=true;});
     const start=Date.now();
-    if(cycle%2===0)await button('3D pəncərəni bağla').tap();
-    else await home.evaluate(()=>window.dispatchEvent(new Event('radaz:close-volume')));
-    await vr.waitFor({state:'detached',timeout:5000});
-    assert.equal(await home.locator('main.workstation').evaluate(e=>e.inert),false);
-    await home.waitForFunction(()=>!window.vrOldGL||window.vrOldGL.isContextLost());
+    await view.close();await home.bringToFront();
+    await home.waitForFunction(()=>!document.querySelector('main.workstation')?.inert);
     if(process.env.VR_TABLET_RETURN_TEST)await require('./vr-tablet-return.cjs').checkTabletReturn(home,lost||denied,denied);
     if(denied){
       await home.evaluate(()=>{window.testDenyNewGL=false;});
       console.log('PASS incoming 2D stack denial of all WebGL contexts: software rendering, windowing and slice navigation');
     }
     const closed=Date.now()-start,next=Date.now();
-    if(process.env.VR_TABLET_RETURN_TEST && cycle===1){
-      await home.getByRole('button',{name:'3D açılış seçimləri',exact:true}).first().tap();
-      await home.getByRole('menuitem',{name:'Əsas viewer-də aç',exact:true}).tap();
-    }else await open.tap();
+    const opening=home.waitForEvent('popup');
+    await open.tap();view=await opening;vr=view.locator('.radaz-vr');
     await vr.locator('.vr-raster[data-ready="true"]').waitFor();
     timings.push({closed,reopened:Date.now()-next});
   }
-  await cdp.detach();
-  console.log('PASS touch orbit, cube face text, native Back, close, GL disposal and repeated opening',JSON.stringify(timings));
+
+  console.log('PASS touch orbit, cube face text, child closure and repeated opening',JSON.stringify(timings));
+  return view;
 }
 module.exports={verifyVrControls};

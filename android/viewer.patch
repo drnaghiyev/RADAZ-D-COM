@@ -1,7 +1,6 @@
 --- a/app/page.tsx
 +++ b/app/page.tsx
-@@ -236,5 +236,8 @@
-           const center = vp.canvasToWorld([bounds.width / 2, bounds.height / 2]);
+@@ -249,4 +249,7 @@
            const direction = (x: number, y: number) => {
              const point = vp.canvasToWorld([x,y]);
 +            // The software stack announces its image before the transform exists.
@@ -9,21 +8,61 @@
 +            if (!center || !point) return '';
              const vector = point.map((value,i) => value - center[i]);
              const length = Math.hypot(...vector);
-@@ -539,5 +539,5 @@
+@@ -561,5 +564,5 @@
    const importPending=useRef(0);
    const [importQueue, setImportQueue] = useState<ImportSource[]>([]);
 -  const [status, setStatus] = useState('DICOM faylı, CD/DVD və ya arxiv müayinəsi açın');
 +  const [status, setStatus] = useState('DICOM faylı, qovluq və ya arxiv müayinəsi açın');
    const fileRef = useRef<HTMLInputElement>(null);
    const folderRef = useRef<HTMLInputElement>(null);
-@@ -557,5 +557,5 @@
+@@ -579,5 +582,5 @@
    const preferredMediaSeries = useRef<string | undefined>(undefined);
    // Disc watching belongs to this Viewer; archive/PACS tabs must start with it off.
 -  const [mediaEnabled, setMediaEnabled] = useState(false);
 +  const mediaEnabled = false;
    const [mediaFilter, setMediaFilter] = useState<string[] | undefined>();
    const [mediaProgress, setMediaProgress] = useState<MediaProgress | null>(null);
-@@ -1450,5 +1450,7 @@
+@@ -1070,8 +1073,14 @@
+     if(!tabletVolumeId)return;
+     tabletStacks.current?.suspend();
++    const volume=detachedWindows.current.get('3d:'+tabletVolumeId);
+     const close=closeTabletVolume;
++    const checkClosed=()=>{if(volume?.closed)close();};
++    const timer=window.setInterval(checkClosed,250);
++    window.addEventListener('focus',checkClosed);
+     window.addEventListener('radaz:close-volume',close);
+     window.dispatchEvent(new CustomEvent('radaz:volume-visible',{detail:true}));
+     return ()=>{
++      window.clearInterval(timer);
++      window.removeEventListener('focus',checkClosed);
+       window.removeEventListener('radaz:close-volume',close);
+       window.dispatchEvent(new CustomEvent('radaz:volume-visible',{detail:false}));
+@@ -1082,9 +1091,4 @@
+     const source=listRef.current.find(s=>s.id===selectedIdRef.current);
+     if(!source){setStatus('Əvvəlcə seriya seçin');return;}
+-    if(mode==='3d' && location.origin==='https://appassets.androidplatform.net'){
+-      tabletStacks.current?.dispose();tabletStacks.current=captureTabletStacks(recovery=>setTabletRecovery(old=>({...recovery,generation:(old?.generation||0)+1})));
+-      setTabletVolumeId(source.id);return;
+-    }
+-    if(mode==='3d'){if(desktopVolumeId===source.id&&desktopVrWindow.current&&!desktopVrWindow.current.closed)desktopVrWindow.current.focus();else setDesktopVolumeId(source.id);return;}
+     const key=`${mode}:${source.id}`;
+     const existing=detachedWindows.current.get(key);
+@@ -1094,5 +1098,13 @@
+       sessionStorage.setItem('radaz-detached-handoffs-v2',JSON.stringify([...entries,{mode,seriesId:source.id,token}])); } catch {}
+     const tab=window.open(`/${mode}?handoff=${encodeURIComponent(token)}`,`radaz-${mode}-${token}`,`popup=yes,width=${Math.min(1500,screen.availWidth)},height=${Math.min(980,screen.availHeight)},resizable=yes`);
+-    if(tab){detachedWindows.current.set(key,tab);tab.focus();}
++    if(tab){
++      detachedWindows.current.set(key,tab);
++      if(mode==='3d'){
++        tabletStacks.current?.dispose();
++        tabletStacks.current=captureTabletStacks(recovery=>setTabletRecovery(old=>({...recovery,generation:(old?.generation||0)+1})));
++        setTabletVolumeId(source.id);
++      }
++      tab.focus();
++    }
+     else setStatus('Yeni pəncərə bloklandı. RADAZ üçün pəncərə açılmasına icazə verin.');
+   };
+@@ -1500,5 +1512,7 @@
        {!detachedMode && <div className="brand"><RadazLogo size={34}/><span><strong>RADAZ</strong><RadazTagline/></span></div>}
        <div className="primary-command-row">
 -        {!detachedMode && <ToolbarGroup className="toolbar-group import-command" role="group" aria-label={tr('ui.dicom_import_48fa8')} groupId="import" order={10}><DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" className="header-control" title={tr('ui.dicom_import_e8ec8')} aria-label={tr('ui.dicom_import_e8ec8')} disabled={importBusy || limited}><FolderOpen size={17}/><span>{tr('ui.dicom_import_e8ec8')}</span><ChevronDown size={14}/></Button></DropdownMenuTrigger>
@@ -32,7 +71,7 @@
 +          <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" className="header-control tablet-import-options" title={tr('ui.dicom_import_e8ec8')} aria-label={tr('ui.dicom_import_e8ec8')} disabled={importBusy || limited}><ChevronDown size={14}/></Button></DropdownMenuTrigger>
            <DropdownMenuContent align="start" className="header-menu">
              <DropdownMenuItem onSelect={() => { setImportOpen(false); folderRef.current?.click(); }}><FolderOpen size={16}/> {tr('ui.open_folder_55722')}</DropdownMenuItem>
-@@ -1457,10 +1459,5 @@
+@@ -1507,10 +1521,5 @@
              <DropdownMenuItem onSelect={() => setImportOpen(true)}><Grid2X2 size={16}/> {tr('ui.select_multiple_sources_e4aae')}</DropdownMenuItem>
            </DropdownMenuContent>
 -        </DropdownMenu></ToolbarGroup>}
@@ -44,6 +83,28 @@
 +        </DropdownMenu></div></ToolbarGroup>}
        {!detachedMode && <ToolbarGroup className="workspace-launch toolbar-group" role="group" aria-label={tr('ui.view_mode_a87b2')} groupId="workspace" order={20}>
          <button type="button" aria-label={tr('ui.2d_viewer_b2533')} onClick={() => {setWorkspace('viewer');setInlinePlanes(null);setRecordsPage(null);}}><ScanLine size={18}/></button>
+@@ -1518,12 +1527,9 @@
+  <DropdownMenuItem toolbarId="mpr-window" onSelect={()=>openDetached('mpr')}>MPR</DropdownMenuItem>
+  {(['COR','SAG','AX'] as const).map(plane=><DropdownMenuItem toolbarId={`mpr-${plane}`} key={plane} onSelect={()=>void reformatPane(plane)}>{{AX:'Axial',COR:'Coronal',SAG:'Sagittal'}[plane]}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu></div>
+-        <div className="workspace-split" key="3d"><button type="button" disabled={limited} title={tr('ui.3d_volume_rendering_8b54e')} aria-label={tr('ui.3d_volume_rendering_8b54e')} onClick={()=>openDetached('3d')}><b className="mode-letter-icon">3D</b></button><DropdownMenu><DropdownMenuTrigger asChild><button className="workspace-options" aria-label="3D açılış seçimləri" disabled={limited}><ChevronDown/></button></DropdownMenuTrigger><DropdownMenuContent>
+- <DropdownMenuItem toolbarId="3d-main" onSelect={()=>{if(location.origin==='https://appassets.androidplatform.net'){openDetached('3d');return;}setRecordsPage(null);setInlinePlanes(null);setWorkspace('3d');}}>Əsas viewer-də aç</DropdownMenuItem>
+- <DropdownMenuItem toolbarId="3d-window" onSelect={()=>openDetached('3d')}>Ayrı pəncərədə aç</DropdownMenuItem>
+-</DropdownMenuContent></DropdownMenu></div>
++        <div className="workspace-split" key="3d"><button type="button" disabled={limited} title={tr('ui.3d_volume_rendering_8b54e')} aria-label={tr('ui.3d_volume_rendering_8b54e')} onClick={()=>openDetached('3d')}><b className="mode-letter-icon">3D</b></button></div>
+         <button type="button" disabled={limited} title={tr('ui.ai_assistant_eb79d')} aria-label={tr('ui.ai_assistant_eb79d')} onClick={openReport}><Sparkles size={18}/><span>{tr('ui.ai_assistant_eb79d')}</span></button>
+         <button type="button" title="RADAZ Voice" aria-label="RADAZ Voice" onClick={()=>{const win=window.open("https://radaz.space/voice/","radaz-cloud-voice","popup");if(win)win.focus();else setStatus("RADAZ Voice pəncərəsi açıla bilmədi");}}><Mic size={18}/><span>RADAZ Voice</span></button>
+-        <div className="workspace-split" key="archive"><button type="button" title={tr('ui.local_archive_c13fe')} aria-label={tr('ui.local_archive_c13fe')} onClick={async () => { if (!await openRecordsWindow('archive')) setStatus('Local arxiv vərəqəsi açıla bilmədi'); }}><Database size={18}/><span>{tr('ui.local_archive_c13fe')}</span></button><DropdownMenu><DropdownMenuTrigger asChild><button className="workspace-options" aria-label="archive açılış seçimləri"><ChevronDown/></button></DropdownMenuTrigger><DropdownMenuContent><DropdownMenuItem toolbarId="archive-main" onSelect={()=>setRecordsPage('archive')}>Əsas viewer-də aç</DropdownMenuItem><DropdownMenuItem toolbarId="archive-window" onSelect={()=>void openRecordsWindow('archive')}>Ayrı pəncərədə aç</DropdownMenuItem>{privateDesktop&&<DropdownMenuItem toolbarId="private-network-window" onSelect={()=>window.open('/private-network','radaz-private-network','popup')?.focus()}>DICOM Network</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu></div>
+-        <div className="workspace-split" key="pacs"><button type="button" title={tr('ui.pacs_studies_d77a3')} aria-label={tr('ui.pacs_studies_d77a3')} onClick={async () => { if (!await openRecordsWindow('pacs')) setStatus('PACS vərəqəsi açıla bilmədi'); }}><ServerCog size={18}/><span>PACS</span></button><DropdownMenu><DropdownMenuTrigger asChild><button className="workspace-options" aria-label="pacs açılış seçimləri"><ChevronDown/></button></DropdownMenuTrigger><DropdownMenuContent><DropdownMenuItem toolbarId="pacs-main" onSelect={()=>setRecordsPage('pacs')}>Əsas viewer-də aç</DropdownMenuItem><DropdownMenuItem toolbarId="pacs-window" onSelect={()=>void openRecordsWindow('pacs')}>Ayrı pəncərədə aç</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>
++        <div className="workspace-split" key="archive"><button type="button" title={tr('ui.local_archive_c13fe')} aria-label={tr('ui.local_archive_c13fe')} onClick={async () => { if (!await openRecordsWindow('archive')) setStatus('Local arxiv vərəqəsi açıla bilmədi'); }}><Database size={18}/><span>{tr('ui.local_archive_c13fe')}</span></button>{privateDesktop&&<DropdownMenu><DropdownMenuTrigger asChild><button className="workspace-options" aria-label="archive açılış seçimləri"><ChevronDown/></button></DropdownMenuTrigger><DropdownMenuContent>{privateDesktop&&<DropdownMenuItem toolbarId="private-network-window" onSelect={()=>window.open('/private-network','radaz-private-network','popup')?.focus()}>DICOM Network</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu>}</div>
++        <div className="workspace-split" key="pacs"><button type="button" title={tr('ui.pacs_studies_d77a3')} aria-label={tr('ui.pacs_studies_d77a3')} onClick={async () => { if (!await openRecordsWindow('pacs')) setStatus('PACS vərəqəsi açıla bilmədi'); }}><ServerCog size={18}/><span>PACS</span></button></div>
+       </ToolbarGroup>}
+         {!limited && detachedMode !== '3d' && <ViewerOutputControls panes={Object.entries(currentImages).map(([panel, imageId]) => ({ panel, imageId, series: [...seriesList, ...(mprData?.planes || [])].find(item => item.imageIds.includes(imageId)) }))} panel={workspace === 'mpr' ? mprActive : active} imageId={currentImages[workspace === 'mpr' ? mprActive : active]} series={workspace === 'mpr' ? mprData?.planes.find(item => item.imageIds.includes(currentImages[mprActive])) : currentSeries} allSeries={seriesList} datasetVersion={datasetVersion} onStatus={setStatus}/>}
+@@ -1637,4 +1643,4 @@
+       </section>
+     </div>
+-  </main></ToolbarWorkspace>{desktopVolumeId&&<SmartDetachedWindow key={desktopVolumeId} windowRef={desktopVrWindow} title="RADAZ · 3D həcm görüntüləmə" onClose={()=>setDesktopVolumeId(null)}><SharedVolumeView series={seriesList.find(s=>s.id===desktopVolumeId)} anatomy={volumeResultFor(seriesList.find(s=>s.id===desktopVolumeId))} onClose={()=>setDesktopVolumeId(null)}/></SmartDetachedWindow>}{tabletVolumeId&&<div className="tablet-volume-overlay" role="dialog" aria-modal="true" aria-label="3D həcm görüntüləmə"><SharedVolumeView series={seriesList.find(s=>s.id===tabletVolumeId)} anatomy={volumeResultFor(seriesList.find(s=>s.id===tabletVolumeId))} onClose={closeTabletVolume}/></div>}</>;
++  </main></ToolbarWorkspace>{desktopVolumeId&&<SmartDetachedWindow key={desktopVolumeId} windowRef={desktopVrWindow} title="RADAZ · 3D həcm görüntüləmə" onClose={()=>setDesktopVolumeId(null)}><SharedVolumeView series={seriesList.find(s=>s.id===desktopVolumeId)} anatomy={volumeResultFor(seriesList.find(s=>s.id===desktopVolumeId))} onClose={()=>setDesktopVolumeId(null)}/></SmartDetachedWindow>}</>;
+ }
 --- a/components/app-product.tsx
 +++ b/components/app-product.tsx
 @@ -19,5 +19,5 @@
@@ -212,8 +273,8 @@
 +++ b/lib/viewer-session.ts
 @@ -10,3 +10,6 @@
  export function openRecordsWindow(kind: RecordsKind): Promise<boolean> {
-+  if(kind==='archive' && location.origin==='https://appassets.androidplatform.net' && location.pathname==='/' &&
-+      window.prompt('radaz-tablet/open-archive','')==='ok')
++  if((kind==='archive'||kind==='pacs') && location.origin==='https://appassets.androidplatform.net' && location.pathname==='/' &&
++      window.prompt('radaz-tablet/open-'+kind,'')==='ok')
 +    return Promise.resolve(true);
    const pending = recordsOpening.get(kind);
    if (pending) return pending;

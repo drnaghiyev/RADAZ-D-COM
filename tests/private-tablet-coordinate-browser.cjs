@@ -23,8 +23,10 @@ withTablet(async({ctx,p,pane,errors})=>{
  const annotations=await geometry();console.log('Measured tool types',annotations.map(a=>a[0]));
  for(const tool of ['Length','Angle','CobbAngle','EllipticalROI','hu','deviation','arch','arrow','pencil'])assert.ok(annotations.some(a=>a[0]===tool),'missing '+tool);
  const count=()=>pane.locator('svg [data-id]').count();const initial=await count();assert.ok(initial>0,'created annotations');
+ const opening=p.waitForEvent('popup');
  await p.getByRole('button',{name:'3D həcm görüntüləmə',exact:true}).first().click();
- await p.locator('.vr-raster[data-ready=true]').waitFor();await p.evaluate(()=>{window.testDenyNewGL=true;dispatchEvent(new Event('radaz:close-volume'));});
+ const volume=await opening;await volume.locator('.vr-raster[data-ready=true]').waitFor();
+ await p.evaluate(()=>{window.testDenyNewGL=true;});await volume.close();await p.bringToFront();
  await p.locator('.radaz-vr').waitFor({state:'detached'});await pane.locator('.bottom-right').filter({hasText:'/ 24'}).waitFor();await frame(p);
  await anchor(p,'returned CPU');assert.ok(await count()>=initial,'annotations restored');
  async function pair(scale,dx,dy){const box=await canvas.boundingBox(),x=box.x+box.width/2,y=box.y+box.height/2;

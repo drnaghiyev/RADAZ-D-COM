@@ -25,6 +25,7 @@ public final class ViewerActivity extends Activity {
     private static final int PICK=41, SAVE=42;
     private final ExecutorService reader=Executors.newSingleThreadExecutor();
     private final List<WebView> windows=new ArrayList<>();
+    private final Map<WebView,WebView> openers=new IdentityHashMap<>();
     private ClinicBridge clinics;
     private InboxBridge receiver;
     private final Set<WebView> initialized=Collections.newSetFromMap(new IdentityHashMap<>());
@@ -32,7 +33,7 @@ public final class ViewerActivity extends Activity {
     private FrameLayout stage;
     private LinearLayout childBar;
     private TextView childTitle;
-    private WebView home, active, archiveWindow, chooserWindow, saveWindow;
+    private WebView home, active, archiveWindow, pacsWindow, chooserWindow, saveWindow;
     private ValueCallback<Uri[]> chooser;
     private boolean pickingTree;
     private boolean volumeVisible;
@@ -134,7 +135,7 @@ public final class ViewerActivity extends Activity {
     private final class Chrome extends WebChromeClient {
         @Override public boolean onCreateWindow(WebView opener,boolean isDialog,boolean gesture,Message result) {
             if(windows.size()>=10 || !windows.contains(opener))return false;
-            WebView child=createWindow();show(child);
+            WebView child=createWindow();openers.put(child,opener);show(child);
             ((WebView.WebViewTransport)result.obj).setWebView(child);result.sendToTarget();return true;
         }
         @Override public void onCloseWindow(WebView view){if(view!=home)close(view);}
@@ -158,10 +159,11 @@ public final class ViewerActivity extends Activity {
                     case "updates": if(web==active)web.post(()->updater.check(true));else answer="denied";break;
                     case "network": answer=clinics.request(web,url,value);break;
                     case "inbox": answer=web==home?receiver.request(web,url,value):"denied";break;
-                    case "open-archive":
+                    case "open-archive": case "open-pacs":
+                        boolean pacs=command.endsWith("/open-pacs");
                         if(web!=home || web!=active || !"/".equals(Uri.parse(url).getPath()))answer="denied";
-                        else if(archiveWindow==null && windows.size()>=10)answer="busy";
-                        else web.post(ViewerActivity.this::openArchive);
+                        else if((pacs?pacsWindow:archiveWindow)==null && windows.size()>=10)answer="busy";
+                        else web.post(()->openRecords(pacs));
                         break;
                     case "open-studies":
                         if (web!=active || !openStudies(value)) answer="denied";
@@ -185,12 +187,15 @@ public final class ViewerActivity extends Activity {
             result.confirm(answer);return true;
         }
     }
-    private void openArchive(){
-        if(archiveWindow==null){
-            archiveWindow=createWindow();
-            archiveWindow.loadUrl(TabletAssets.ORIGIN+"/archive");
+    private void openRecords(boolean pacs){
+        WebView records=pacs?pacsWindow:archiveWindow;
+        if(records==null){
+            records=createWindow();
+            if(pacs)pacsWindow=records;else archiveWindow=records;
+            openers.put(records,home);
+            records.loadUrl(TabletAssets.ORIGIN+(pacs?"/pacs":"/archive"));
         }
-        show(archiveWindow);
+        show(records);
     }
     private boolean openStudies(String value) throws org.json.JSONException {
         if(value==null || value.length()>14000)return false;
@@ -212,14 +217,22 @@ public final class ViewerActivity extends Activity {
     }
     private void show(WebView view){
         if(view==null || !windows.contains(view))return;
-        if(active!=null && active!=view)active.setVisibility(View.GONE);
+        if(active!=null && active!=view)active.setVisibility(View.INVISIBLE);
         active=view;view.setVisibility(View.VISIBLE);view.bringToFront();view.requestFocus();updateChildBar();updateVolumeBack();
+    }
+    private static boolean isViewerWorkspace(WebView web){
+        String url=web==null?null:web.getUrl();
+        if(url==null)return false;
+        Uri uri=Uri.parse(url);
+        if(!TabletAssets.isLocal(uri))return false;
+        String path=uri.getPath();
+        return path!=null && path.matches("/(archive|pacs|mpr|3d)/?");
     }
     private void updateChildBar(){
         boolean child=active!=null&&active!=home;
         String childUrl=child?active.getUrl():null;
-        boolean records=childUrl!=null && (childUrl.startsWith(TabletAssets.ORIGIN+"/archive")||childUrl.startsWith(TabletAssets.ORIGIN+"/pacs"));
-        childBar.setVisibility(child && !records?View.VISIBLE:View.GONE);
+        boolean known=childUrl!=null && !"about:blank".equals(childUrl);
+        childBar.setVisibility(child && known && !isViewerWorkspace(active)?View.VISIBLE:View.GONE);
         if(child){
             String title=active.getTitle();
             childTitle.setText(title==null||title.contains("RADAZ_VIEWER_")||title.contains("RADAZ_RECORDS_")?"":title);
@@ -227,10 +240,17 @@ public final class ViewerActivity extends Activity {
     }
     private void close(WebView web) {
         if(web==home || !windows.contains(web))return;
-        int previous=Math.max(0,windows.indexOf(web)-1);
+        WebView owner=openers.remove(web);
+        if(owner==null || !windows.contains(owner))owner=home;
+        for(Map.Entry<WebView,WebView> entry:openers.entrySet()){
+            if(entry.getValue()==web)entry.setValue(owner);
+        }
+        boolean volume=isViewerWorkspace(web) && Uri.parse(web.getUrl()).getPath().matches("/3d/?");
         if(web==archiveWindow)archiveWindow=null;
+        if(web==pacsWindow)pacsWindow=null;
         initialized.remove(web);windows.remove(web);clinics.navigate(web,null);stage.removeView(web);web.destroy();
-        if(active==web){active=null;show(windows.get(previous));}
+        if(active==web){active=null;show(owner);}
+        if(volume && owner==home)home.evaluateJavascript("window.dispatchEvent(new Event('radaz:close-volume'))",null);
     }
     private void refreshHomeAfterVolume(WebView web) {
         web.post(()->{
@@ -250,7 +270,7 @@ public final class ViewerActivity extends Activity {
         return true;
     }
     private void updateVolumeBack() {
-        boolean needed=volumeVisible && active==home && home!=null;
+        boolean needed=!isFinishing() && active!=null && (active!=home || volumeVisible);
         if(!needed && removeVolumeBack!=null){removeVolumeBack.run();removeVolumeBack=null;}
         if(needed && removeVolumeBack==null && Build.VERSION.SDK_INT>=33){
             removeVolumeBack=VolumeBack.register(this);
@@ -260,14 +280,15 @@ public final class ViewerActivity extends Activity {
     private static final class VolumeBack {
         static Runnable register(ViewerActivity activity) {
             android.window.OnBackInvokedDispatcher dispatcher=activity.getOnBackInvokedDispatcher();
-            android.window.OnBackInvokedCallback callback=()->activity.dismissVolume();
+            android.window.OnBackInvokedCallback callback=activity::onBackPressed;
             dispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,callback);
             return ()->dispatcher.unregisterOnBackInvokedCallback(callback);
         }
     }
     @Override public void onBackPressed(){
         if(dismissVolume())return;
-        if(active!=null&&active.canGoBack())active.goBack();
+        if(active!=home && isViewerWorkspace(active))close(active);
+        else if(active!=null&&active.canGoBack())active.goBack();
         else if(active!=null && active!=home)close(active);
         else super.onBackPressed();
     }
@@ -343,7 +364,7 @@ public final class ViewerActivity extends Activity {
         return ok;
     }
     @Override protected void onDestroy(){
-        volumeVisible=false;updateVolumeBack();
+        volumeVisible=false;active=null;updateVolumeBack();
         endSave();reader.shutdownNow();if(clinics!=null)clinics.destroy();
         if(receiver!=null)receiver.close();
         if(chooser!=null)chooser.onReceiveValue(null);

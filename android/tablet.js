@@ -5,6 +5,8 @@
   if (location.pathname === '/') {
     window.addEventListener('radaz:volume-visible', event => call('volume', event.detail === true ? 'open' : 'closed'));
   }
+  const workspace = location.pathname.replace(/^\/|\/$/g, '');
+  if (['archive','pacs','mpr','3d'].includes(workspace)) document.documentElement.dataset.tabletWorkspace = workspace;
   const dockPreference = 'radaz-tablet-dock-columns';
   const applyDock = () => {
     document.documentElement.dataset.tabletColumns = localStorage.getItem(dockPreference) === '1' ? '1' : '2';

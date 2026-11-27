@@ -283,12 +283,13 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
     await mpr.waitForFunction(()=>!!document.querySelector('[data-panel="MA"] line[data-id*="-endpoint-"],[data-panel="MA"] .dicom-canvas svg text,[data-panel="MA"] [data-kind="length"]'));
     suite.measurement=true;
     await mpr.close();await page.bringToFront();
+    const volumeOpening=page.waitForEvent('popup');
     await page.getByRole('button',{name:'3D həcm görüntüləmə',exact:true}).first().click();
-    const volume=page;
+    const volume=await volumeOpening;
     await volume.locator('.vr-raster[data-ready=true]').waitFor({timeout:60000});
-    assert.equal(await volume.locator('.tablet-volume-overlay .vr-close:visible').count(),0);
+    assert.equal(await volume.locator('.vr-close:visible').count(),0);
     suite.volumeCanvas=true;
-    await volume.evaluate(()=>dispatchEvent(new Event('radaz:close-volume')));await page.bringToFront();
+    await volume.close();await page.bringToFront();
     await panel.locator('.bottom-right').filter({hasText:'/ 12'}).waitFor();
     await page.locator('[data-panel=A][data-has-image=true] canvas').first().waitFor();
     await page.waitForFunction(()=>!document.querySelector('.tablet-volume-overlay,.sv-surface'));
@@ -356,7 +357,8 @@ const types = {html:'text/html',js:'application/javascript',css:'text/css',json:
       await page.locator('input[type=file][accept*="zip"]').first().setInputFiles(process.env.RADAZ_LARGE_TABLET_ZIP);
       await page.waitForFunction(()=>document.querySelector('.statusbar')?.textContent.includes('442 DICOM'),{},{timeout:120000});
       const start=Date.now();
-      await page.getByRole('button',{name:'3D həcm görüntüləmə',exact:true}).first().click();
+      const volumeOpening=page.waitForEvent('popup');
+    await page.getByRole('button',{name:'3D həcm görüntüləmə',exact:true}).first().click();
       const texture=page.locator('.sv-surface-canvas[data-context-dimensions]');await texture.waitFor({timeout:120000});
       const dims=(await texture.getAttribute('data-context-dimensions')).split('x').map(Number);
       assert.ok(dims.every(n=>n>=3)&&dims.reduce((a,b)=>a*b,4)<=24*1024*1024);

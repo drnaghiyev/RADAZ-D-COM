@@ -65,12 +65,13 @@ async function verifyTabletMultiPaneReturn(home, sources) {
   assert.equal(before.length, 2);
   assert.notEqual(before[0].slice, before[1].slice);
   assert.ok(before.every(p => p.lit > 100));
+  const opening=home.waitForEvent('popup');
   await home.getByRole('button', {name:'3D həcm görüntüləmə', exact:true}).first().tap();
-  const volume = home.locator('.radaz-vr');
+  const child=await opening;
+  const volume = child.locator('.radaz-vr');
   await volume.locator('.vr-raster[data-ready=true]').waitFor();
   await home.evaluate(() => { window.testDenyNewGL = true; window.testDeniedContexts = 0; });
-  await home.evaluate(() => dispatchEvent(new Event('radaz:close-volume')));
-  await volume.waitFor({state:'detached'});
+  await child.close();await home.bringToFront();
   for (const pane of before) {
     await home.waitForFunction(expected=>{
       const returned=document.querySelector('[data-panel="'+expected.panel+'"]');
