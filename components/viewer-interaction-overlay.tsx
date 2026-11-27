@@ -67,9 +67,9 @@ export function ViewerInteractionOverlay({ viewport, element, imageId, tool, sli
     if (!element) return;
     const update = () => repaint(n => n + 1);
     const clear=()=>{gesture.current=null;setDraft([]);};
-    element.addEventListener('radaz-clear-measurements',clear);
+    element.addEventListener('radaz-clear-measurements',clear);element.addEventListener('radaz-cancel-drawing',clear);
     element.addEventListener('CORNERSTONE_IMAGE_RENDERED', update);
-    return () => {element.removeEventListener('radaz-clear-measurements',clear);element.removeEventListener('CORNERSTONE_IMAGE_RENDERED', update);};
+    return () => {element.removeEventListener('radaz-clear-measurements',clear);element.removeEventListener('radaz-cancel-drawing',clear);element.removeEventListener('CORNERSTONE_IMAGE_RENDERED', update);};
   }, [element]);
   const world = (event: PointerEvent<SVGElement>) => {
     const rect = element!.getBoundingClientRect();

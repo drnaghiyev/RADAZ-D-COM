@@ -217,7 +217,9 @@ public final class ViewerActivity extends Activity {
     }
     private void updateChildBar(){
         boolean child=active!=null&&active!=home;
-        childBar.setVisibility(child?View.VISIBLE:View.GONE);
+        String childUrl=child?active.getUrl():null;
+        boolean records=childUrl!=null && (childUrl.startsWith(TabletAssets.ORIGIN+"/archive")||childUrl.startsWith(TabletAssets.ORIGIN+"/pacs"));
+        childBar.setVisibility(child && !records?View.VISIBLE:View.GONE);
         if(child){
             String title=active.getTitle();
             childTitle.setText(title==null||title.contains("RADAZ_VIEWER_")||title.contains("RADAZ_RECORDS_")?"":title);

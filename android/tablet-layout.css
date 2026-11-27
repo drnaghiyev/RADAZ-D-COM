@@ -12,3 +12,6 @@ body .flat-toolbar-workspace .flat-toolbar-right .flat-toolbar-tool > button {
   box-sizing:border-box;width:var(--tablet-cell)!important;max-width:100%!important;
   flex:0 0 auto!important;position:relative;padding-inline:3px!important;
 }
+
+.tablet-volume-overlay .vr-close{display:none!important}
+body .flat-toolbar-workspace .flat-toolbar-tool .tablet-folder-command .tablet-import-options{width:13px!important;min-width:13px!important;flex-basis:13px!important}

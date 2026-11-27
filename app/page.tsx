@@ -1,6 +1,8 @@
 'use client';
 import {SmartDetachedWindow} from '@/components/smart-detached-window';
 import {SharedVolumeView} from '@/components/shared-volume-view';
+import {calibrateSoftwareStack} from '@/lib/tablet-stack-coordinates';
+import {watchPaneDoubleTap} from '@/lib/tablet-double-tap';
 import {captureTabletStacks,restoreStackProperties,type TabletStackRecovery} from '@/lib/tablet-stack-return';
 import {MeasurementCopies} from '@/components/measurement-copies';
 import {CineControls} from '@/components/cine-controls';
@@ -171,6 +173,14 @@ export function ViewportPane({ tabletRecovery,onHover, projectionViews, anatomyC
   const [orientation, setOrientation] = useState({left:'',right:'',top:'',bottom:''});
   const [error, setError] = useState('');
   const viewportId = `panel-${id}`;
+  const tapMode=useRef({tool,limited,onToggleMaximize});
+  tapMode.current={tool,limited,onToggleMaximize};
+  useEffect(()=>{
+    const el=containerRef.current;
+    if(!el||location.origin!=='https://appassets.androidplatform.net')return;
+    return watchPaneDoubleTap(el,()=>tapMode.current.onToggleMaximize?.(),
+      ()=>!tapMode.current.limited && ['pan','zoom','scroll','wl'].includes(tapMode.current.tool));
+  },[]);
   const navigate = useStackNavigation(viewport, imageId, setError);
   const projectionPanel = id;
   const paneMarks = marks.filter(mark => !mark.panelId || mark.panelId === projectionPanel);
@@ -203,6 +213,8 @@ export function ViewportPane({ tabletRecovery,onHover, projectionViews, anatomyC
       const input={viewportId,element,type:viewer.core.Enums.ViewportType.STACK};
       if(tabletRecovery)viewer.engine=tabletRecovery.enable(input);
       else viewer.engine.enableElement(input);
+      if(location.origin==='https://appassets.androidplatform.net' && viewer.core.getShouldUseCPURendering())
+        calibrateSoftwareStack(viewer.engine.getViewport(viewportId) as Core.Types.IStackViewport);
       group = viewer.tools.ToolGroupManager.createToolGroup(`group-${id}`);
       groupRef.current = group;
       [viewer.tools.WindowLevelTool, viewer.tools.PanTool, viewer.tools.ZoomTool, viewer.tools.LengthTool,
@@ -216,7 +228,7 @@ export function ViewportPane({ tabletRecovery,onHover, projectionViews, anatomyC
       });
       group.addViewport(viewportId, viewer.engine.id);
       const resizeObserver = new ResizeObserver(() => {
-        if (viewer.engine.getViewport(viewportId)) viewer.engine.resize(true, true);
+        if (element.clientWidth && element.clientHeight && viewer.engine.getViewport(viewportId)) viewer.engine.resize(true, true);
       });
       resizeObserver.observe(element);
       const stopWindowing = bindWindowing(viewer.engine.getViewport(viewportId) as Core.Types.IStackViewport,
@@ -457,7 +469,7 @@ export function ViewportPane({ tabletRecovery,onHover, projectionViews, anatomyC
     <ViewerInteractionOverlay anatomyLabel={anatomyLabel} viewport={viewport} element={elementRef.current} imageId={imageId} tool={tool} slice={slice} count={series?.imageIds.length || 0}
       marks={paneMarks} selectedMarkId={selectedMarkId} onSelectMark={onSelectMark} cursor={cursor} onCursor={onCursor} onEditArrow={setEditingArrow} onUpdate={onUpdateMark} onAdd={mark=>{addPaneMark(mark);if(mark.kind==='arrow'&&!mark.anatomyId)setEditingArrow(mark.id);}} onRemove={onRemoveMark} onSelect={onSelect} navigate={navigate}/>
     <MeasurementCopies pane={containerRef.current} imageId={imageId} modality={series?.modality} seriesName={series?.name} studyId={series?.studyId} markCount={paneMarks.filter(mark=>mark.imageId===imageId).length}/>
-    <ViewportMouseControls tool={tool} container={containerRef} element={elementRef.current} viewport={viewport} imageId={imageId} disabled={limited} marks={paneMarks}
+    <ViewportMouseControls onUpdateMark={onUpdateMark} tool={tool} container={containerRef} element={elementRef.current} viewport={viewport} imageId={imageId} disabled={limited} marks={paneMarks}
       onSelect={onSelect} onRemove={onRemoveMark} onClear={clearPaneImage} onEditArrow={setEditingArrow} navigate={navigate}/>
     {editingArrow&&paneMarks.filter(mark=>mark.id===editingArrow&&mark.imageId===imageId&&mark.kind==='arrow').map(mark=><ArrowCommentEditor key={mark.id} mark={mark} onSave={comment=>onUpdateMark(mark.id,{comment})} onClose={()=>setEditingArrow(null)}/>)}
     {loadingProgress && <WorkProgress className="viewport-work-progress" progress={loadingProgress}/>}
@@ -1472,7 +1484,7 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
   const mprPreview = currentSeries?.imageIds.length && ['CT','MR'].includes(currentSeries.modality) ? currentSeries : seriesList.find(item=>item.imageIds.length && ['CT','MR'].includes(item.modality));
   const mediaLoading: LoadingProgress | null = mediaProgress?.sessions && (mediaProgress.scanning || mediaProgress.loaded + mediaProgress.skipped < mediaProgress.discovered) ? {label:'CD/DVD yüklənir',done:mediaProgress.loaded,total:mediaProgress.discovered,indeterminate:mediaProgress.scanning,phase:mediaProgress.error || (mediaProgress.scanning?'Fayllar indekslənir':undefined)} : null;
   const jobProgress = importProgress || transferProgress || loadProgress || mediaLoading;
-  const floatingProgress = !detachedMode && (railHidden || importOpen);
+
   const sourceLoading: LoadingProgress | null = volumeSeries?.loading ? {label:'Seriya yüklənir',done:volumeSeries.imageIds.length,total:volumeSeries.discovered||0,indeterminate:!volumeSeries.discovered} : null;
   if(['3d'].includes(workspace))return <SharedVolumeView series={volumeSeries} anatomy={volumeResultFor(volumeSeries)} onClose={()=>{if(detachedMode)window.close();else setWorkspace('viewer');}}/>;
   return <><ToolbarWorkspace scope={workspace}><main inert={tabletVolumeId?true:undefined} className={`workstation grouped-workstation ${railHidden ? 'rail-hidden' : ''} ${detachedMode ? 'detached' : ''}`} data-mode={detachedMode || 'viewer'} style={measurementVariables as React.CSSProperties}
@@ -1483,7 +1495,7 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
       if (!limited) void dropSources(event.dataTransfer.items, event.dataTransfer.files);
     }}>
     {privateDesktop&&!detachedMode&&<PrivateNetworkNotice/>}
-    <WorkProgress className="import-job-progress floating-job-progress" progress={floatingProgress?jobProgress:null}/><header className={`topbar ${toolbarMore?'toolbar-more-open':''}`}>
+    <header className={`topbar ${toolbarMore?'toolbar-more-open':''}`}>
       <ToolbarOverflow/>
       {!detachedMode && <div className="brand"><RadazLogo size={34}/><span><strong>RADAZ</strong><RadazTagline/></span></div>}
       <div className="primary-command-row">
@@ -1579,12 +1591,12 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
       {!detachedMode && <aside id="series-sidebar" className="series-rail" onDragOver={e => { if (!e.dataTransfer.types.includes('application/x-series-id')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } }} onDrop={e => { if (!e.dataTransfer.types.includes('application/x-series-id')) { e.preventDefault(); void dropSources(e.dataTransfer.items, e.dataTransfer.files); } }}>
         <div className="rail-heading"><div><span className="eyebrow">{tr('ui.patient_and_series_list_cba5e')}</span><h2>{tr('ui.studies_b5e01')}<em>{grouped.reduce((count, p) => count + p.studies.length, 0)}</em></h2></div></div>
         <div className="series-list" role="region" aria-label={tr('ui.series_by_patient_and_study_aa453')} tabIndex={0}>
-          {grouped.map(patient => <section className="patient-group" key={patient.id}>
+          {grouped.flatMap(patient => patient.studies.map(study => <section className="patient-group" key={patient.id+study.id}>
             <div className="patient-group-heading"><button className="patient-close" disabled={!!loadProgress} aria-label={`${patient.name} — viewer-dən çıxar`} title="Yalnız viewer siyahısından çıxar" onClick={()=>removeSeries(patient.studies.flatMap(study=>study.modalities.flatMap(m=>m.series.map(s=>s.item))))}>×</button><span className="group-heading-label">{tr('ui.patient_name_d4d6d')}</span><h3>{patient.name}</h3>
-              {patient.studies.map(study => <div className="patient-study-summary" key={study.id}><span><span className="group-heading-label">{tr('ui.study_date_dda53')}</span><strong>{formatDate(study.date)}</strong></span><div className="study-modality-summary">{study.modalities.map(modality => <span key={modality.code}><b>{modalityLabel(modality.code)}</b><small>{modality.series.length} {tr('ui.series_1ebd2')}</small></span>)}</div></div>)}
+              {<div className="patient-study-summary" key={study.id}><span><span className="group-heading-label">{tr('ui.study_date_dda53')}</span><strong>{formatDate(study.date)}</strong></span><div className="study-modality-summary">{study.modalities.map(modality => <span key={modality.code}><b>{modalityLabel(modality.code)}</b><small>{modality.series.length} {tr('ui.series_1ebd2')}</small></span>)}</div></div>}
             </div>
-            {patient.studies.map(study => <div className="study-group" key={study.id}>
-              {patient.studies.length > 1 && <div className="study-group-heading"><strong>{formatDate(study.date)}</strong></div>}
+            {<div className="study-group" key={study.id}>
+              
               {study.modalities.map(modality => <div className="modality-group" key={modality.code}>
                 {modality.series.map(({ item: s, index }) => <button key={s.id} draggable onDragStart={e => { e.dataTransfer.clearData(); e.dataTransfer.setData('application/x-series-id', s.id); e.dataTransfer.effectAllowed = 'copy'; }}
                   className={`series-card ${assigned[active] === s.id ? 'chosen' : ''}`} onClick={() => place(s.id, active)} title={`${s.name} — panel ${active}`}>
@@ -1592,11 +1604,11 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
                   <div className="series-info"><strong>{s.name}</strong><span>{s.imageIds.length} görüntü</span></div><span className="drag-handle" aria-hidden="true">⋮⋮</span>
                 </button>)}
               </div>)}
-            </div>)}
-          </section>)}
+            </div>}
+          </section>))}
           {!seriesList.length && <div className="rail-empty">{status}</div>}
         </div>
-        <WorkProgress className="series-work-progress import-job-progress" progress={!floatingProgress?jobProgress:null}/>
+        
         {mediaEnabled && <div className="media-import-progress">
           {mediaProgress?.error ? <small role="alert">{mediaProgress.error} <a href="/RADAZ-Qurasdirma.html" target="_blank" rel="noreferrer">{tr('ui.installation_instructions_11dc8')}</a></small> : !mediaProgress?.sessions ? <small>{tr('ui.waiting_for_cd_dvd_ac285')}</small> : null}
 
@@ -1621,7 +1633,7 @@ export default function Home({ detachedMode, initialFiles }: { detachedMode?: De
             })}
           </div>
         </>}
-        <footer className="statusbar"><div><span className="viewer-version">v{releaseVersion}</span><span className="status-led"/> {ready ? 'Cornerstone3D hazırdır' : 'Görüntüləmə hazırlanır'} <span className="status-sep">/</span> <span>{workspace === 'mpr' ? `MPR · ${mprSettings[panePlane[mprActive as keyof typeof panePlane] || 'AX'].mode}` : workspace === '3d' ? '3D görünüş' : `Aktiv panel ${active}`}</span><span className="status-sep">/</span>{status}<span className="status-sep">/</span><span aria-label={tr('ui.licence_status_2eb16')}>{licenseStatus}</span></div></footer>
+        <footer className="statusbar"><div><span className="viewer-version">v{releaseVersion}</span><span className="status-led"/> {ready ? 'Cornerstone3D hazırdır' : 'Görüntüləmə hazırlanır'} <span className="status-sep">/</span> <span>{workspace === 'mpr' ? `MPR · ${mprSettings[panePlane[mprActive as keyof typeof panePlane] || 'AX'].mode}` : workspace === '3d' ? '3D görünüş' : `Aktiv panel ${active}`}</span><span className="status-sep">/</span>{status}<span className="status-sep">/</span><span aria-label={tr('ui.licence_status_2eb16')}>{licenseStatus}</span></div><WorkProgress className="status-job-progress" progress={jobProgress}/></footer>
       </section>
     </div>
   </main></ToolbarWorkspace>{desktopVolumeId&&<SmartDetachedWindow key={desktopVolumeId} windowRef={desktopVrWindow} title="RADAZ · 3D həcm görüntüləmə" onClose={()=>setDesktopVolumeId(null)}><SharedVolumeView series={seriesList.find(s=>s.id===desktopVolumeId)} anatomy={volumeResultFor(seriesList.find(s=>s.id===desktopVolumeId))} onClose={()=>setDesktopVolumeId(null)}/></SmartDetachedWindow>}{tabletVolumeId&&<div className="tablet-volume-overlay" role="dialog" aria-modal="true" aria-label="3D həcm görüntüləmə"><SharedVolumeView series={seriesList.find(s=>s.id===tabletVolumeId)} anatomy={volumeResultFor(seriesList.find(s=>s.id===tabletVolumeId))} onClose={closeTabletVolume}/></div>}</>;

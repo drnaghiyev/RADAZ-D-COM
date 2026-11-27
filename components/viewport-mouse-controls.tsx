@@ -4,12 +4,13 @@ import {useTranslation as useUiTranslation,translate as tr} from '@/lib/i18n';
 import {useEffect,useRef,useState,type RefObject} from 'react';
 import type * as Core from '@cornerstonejs/core';
 import {beginNavigationEdit,cancelMeasurementInteraction,annotationBelongsToPane} from '@/lib/measurement-tools';
+import {attachTabletStackGestures} from '@/lib/tablet-stack-gestures';
 import {getViewer} from '@/lib/cornerstone';
 import type {LocalMark,Point3} from './measurement-overlay';
 
 type Target={kind:'local'|'native';id:string};
 type Props={tool:string;container:RefObject<HTMLElement|null>;element:HTMLDivElement|null;viewport:Core.Types.IStackViewport|null;
- imageId:string;disabled:boolean;marks:LocalMark[];onSelect:()=>void;onRemove:(id:string)=>void;
+ imageId:string;onUpdateMark?:(id:string,patch:Partial<LocalMark>)=>void;disabled:boolean;marks:LocalMark[];onSelect:()=>void;onRemove:(id:string)=>void;
  onClear:(imageId:string)=>void;onEditArrow:(id:string)=>void;navigate:(steps:number,relative:boolean)=>void};
 
 /** Secondary gestures also work over SVG drawings, which sit above Cornerstone's canvas. */
@@ -19,6 +20,7 @@ export function ViewportMouseControls(props:Props){
  const [menu,setMenu]=useState<{x:number;y:number;target:Target|null}|null>(null);
  const viewer=useRef<Awaited<ReturnType<typeof getViewer>>|null>(null);
  const hasImage=!!props.imageId;
+ const singleFinger=useRef<'wl'|'scroll'>('wl');if(props.tool==='wl'||props.tool==='scroll')singleFinger.current=props.tool;
  useEffect(()=>{let alive=true;void getViewer().then(v=>{if(alive)viewer.current=v;});return()=>{alive=false;};},[]);
  useEffect(()=>{
   const root=props.container.current,element=props.element,viewport=props.viewport;
@@ -86,7 +88,7 @@ export function ViewportMouseControls(props:Props){
     return;
    }
    // Existing marks keep Cornerstone's handle/body drag or the SVG mark's own pointer capture.
-   if(passPrimary&&['scroll','pan','zoom'].includes(current.current.tool)){
+   if(passPrimary&&(['scroll','pan','zoom'].includes(current.current.tool)||(location.origin==='https://appassets.androidplatform.net'&&event.pointerType==='touch'&&current.current.tool==='wl'))){
     if(target?.kind==='native'){
      const action=beginNavigationEdit(element,target.id,event);
      if(action){
@@ -157,13 +159,45 @@ export function ViewportMouseControls(props:Props){
   const mouseDown=(e:MouseEvent)=>{if(editing||(!isControl(e)&&(gesture||(!current.current.disabled&&current.current.tool==='erase'))&&!(e.button===0&&passPrimary&&current.current.tool!=='erase'))){e.preventDefault();e.stopPropagation();}};
   const suppressEraseTouch=(e:TouchEvent)=>{if((editing||gesture||(!current.current.disabled&&(current.current.tool==='erase'||heldPointer!==null)))&&!isControl(e)){e.preventDefault();e.stopPropagation();}};
   const preventContext=(e:Event)=>e.preventDefault();
+  let priorLocal:LocalMark[]=[];
+  let priorNative=new Map<string,Point3[]>();
+  const samePane=(annotation:any)=>annotation.metadata?.referencedImageId===current.current.imageId && annotationBelongsToPane(annotation,element);
+  const detachTablet=location.origin==='https://appassets.androidplatform.net'?attachTabletStackGestures({
+    root,element,viewport,checkpoint:()=>{
+      priorLocal=current.current.marks.filter(m=>m.imageId===current.current.imageId);
+      priorNative.clear();
+      for(const a of viewer.current?.tools.annotation.state.getAllAnnotations()||[])if(a.annotationUID&&samePane(a))
+        priorNative.set(a.annotationUID,structuredClone(a.data.handles?.points||[]));
+    },cancelTool:()=>{
+      cancelHold();gesture=null;passPrimary=false;setMenu(null);
+      if(editing){editing.action.end(editing.last);editing=null;}
+      const tools=viewer.current?.tools;
+      if(tools){
+        cancelMeasurementInteraction(tools.ToolGroupManager.getToolGroupForViewport(viewport.id),element);
+        for(const a of tools.annotation.state.getAllAnnotations())if(a.annotationUID && samePane(a)){
+          const points=priorNative.get(a.annotationUID);
+          if(!points)tools.annotation.state.removeAnnotation(a.annotationUID);
+          else if(a.data.handles?.points){a.data.handles.points=structuredClone(points);a.invalidated=true;}
+        }
+        tools.utilities.triggerAnnotationRender(element);
+      }
+      for(const m of current.current.marks)if(m.imageId===current.current.imageId&&!priorLocal.some(old=>old.id===m.id))current.current.onRemove(m.id);
+      for(const m of priorLocal){
+        const now=current.current.marks.find(v=>v.id===m.id);
+        if(now && now!==m)current.current.onUpdateMark?.(m.id,{points:m.points,labelOffset:m.labelOffset,heightLabelOffset:m.heightLabelOffset});
+      }
+      element.dispatchEvent(new Event('radaz-cancel-drawing'));
+    },mode:()=>current.current.tool,single:()=>singleFinger.current,
+    protectedTarget:e=>!!editing||!!holdStart||isControl(e)||!!hit(e)||!!(e.target instanceof Element&&e.target.closest('.localizer-line,.localizer-center,.vertical-stack-scroll')),
+    select:()=>current.current.onSelect(),navigate:n=>current.current.navigate(n,true),allowed:()=>!current.current.disabled||current.current.tool==='scroll',
+  }):undefined;
   root.addEventListener('contextmenu',preventContext);
   root.addEventListener('touchmove',suppressEraseTouch,{capture:true,passive:false});
   root.addEventListener('touchstart',suppressEraseTouch,{capture:true,passive:false});
   root.addEventListener('pointerdown',down,true);root.addEventListener('pointermove',move,true);
   root.addEventListener('pointerup',end,true);root.addEventListener('pointercancel',end,true);root.addEventListener('pointerleave',leave);
   root.addEventListener('mousedown',mouseDown,true);window.addEventListener('blur',blur);
-  return()=>{root.removeEventListener('contextmenu',preventContext);root.removeEventListener('touchmove',suppressEraseTouch,true);root.removeEventListener('touchstart',suppressEraseTouch,true);root.removeEventListener('pointerdown',down,true);root.removeEventListener('pointermove',move,true);root.removeEventListener('pointerup',end,true);
+  return()=>{detachTablet?.();root.removeEventListener('contextmenu',preventContext);root.removeEventListener('touchmove',suppressEraseTouch,true);root.removeEventListener('touchstart',suppressEraseTouch,true);root.removeEventListener('pointerdown',down,true);root.removeEventListener('pointermove',move,true);root.removeEventListener('pointerup',end,true);
    root.removeEventListener('pointercancel',end,true);root.removeEventListener('pointerleave',leave);root.removeEventListener('mousedown',mouseDown,true);window.removeEventListener('blur',blur);blur();};
  },[props.container,props.element,props.viewport,hasImage,props.tool,props.disabled]);
  useEffect(()=>{

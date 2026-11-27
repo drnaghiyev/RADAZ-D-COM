@@ -71,14 +71,14 @@ export function MeasurementOverlay({ element, viewport, imageId, modality, tool,
     if (!element || !viewport) return;
     const repaint = () => setRevision(n => n + 1);
     const clear=()=>{setDraft([]);setCursor(null);setEditing(null);drag.current=null;};
-    element.addEventListener('radaz-clear-measurements',clear);
+    element.addEventListener('radaz-clear-measurements',clear);element.addEventListener('radaz-cancel-drawing',clear);
     const observer = new ResizeObserver(repaint);
     observer.observe(element);
     element.addEventListener('CORNERSTONE_CAMERA_MODIFIED', repaint);
     element.addEventListener('CORNERSTONE_STACK_NEW_IMAGE', repaint);
     element.addEventListener('CORNERSTONE_IMAGE_RENDERED', repaint);
     return () => {
-      observer.disconnect();element.removeEventListener('radaz-clear-measurements',clear);
+      observer.disconnect();element.removeEventListener('radaz-clear-measurements',clear);element.removeEventListener('radaz-cancel-drawing',clear);
       element.removeEventListener('CORNERSTONE_CAMERA_MODIFIED', repaint);
       element.removeEventListener('CORNERSTONE_STACK_NEW_IMAGE', repaint);
       element.removeEventListener('CORNERSTONE_IMAGE_RENDERED', repaint);

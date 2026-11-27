@@ -38,3 +38,32 @@ body .flat-toolbar-workspace .flat-toolbar-strip .flat-toolbar-tool :is(button,a
 body .flat-toolbar-workspace .flat-toolbar-strip .flat-toolbar-tool :is(button,a):is([aria-pressed=true],.active,.selected){background:#19596e!important;border-color:#49b8d3!important}
 body .flat-toolbar-workspace .flat-toolbar-strip .flat-toolbar-tool :is(button,a):hover{border-color:#6198ac!important}
 [data-radix-popper-content-wrapper]:has([data-toolbar-menu][data-state="open"]) {z-index:160!important}
+
+.flat-toolbar-workspace [data-toolbar-item], [data-direct-item] {touch-action:manipulation}
+.flat-toolbar-workspace[data-dragging-tools] .right-tool-dock {display:block!important;min-height:70px;border:1px dashed #47c9dd}
+.flat-toolbar-workspace[data-dragging-tools] .flat-toolbar-right {min-height:100%}
+[data-moving=true]{outline:2px solid #47c9dd!important;opacity:.72}
+.flat-toolbar-workspace [data-drop-edge], [data-direct-strip] [data-drop-edge]{outline:2px solid #47c9dd!important}
+body .flat-toolbar-workspace.has-right-dock main.workstation.grouped-workstation .topbar{box-sizing:border-box;width:100vw!important;max-width:100vw!important;padding-inline-end:4px!important}
+body .flat-toolbar-workspace main.workstation.grouped-workstation .topbar .flat-toolbar-top{overflow:visible;min-width:0;flex:1 1 0}
+body .flat-toolbar-workspace .records-header.records-unified-header{display:flex!important;flex-flow:row nowrap!important;align-items:center!important;min-width:0;gap:6px!important}
+body .flat-toolbar-workspace .records-header .records-header-filters{order:0;display:flex!important;flex:0 1 auto!important;max-width:72%;overflow-x:auto;flex-wrap:nowrap!important;scrollbar-width:thin}
+body .flat-toolbar-workspace .records-header .flat-toolbar-top{order:1;flex:1 1 0;justify-content:flex-end}
+body .flat-toolbar-workspace .records-header .flat-toolbar-tool button{height:var(--command-size,36px)!important;min-width:var(--command-size,36px)!important}
+body .flat-toolbar-workspace .records-header .flat-toolbar-tool svg{width:18px!important;height:18px!important}
+body .flat-toolbar-workspace .records-header .toolbar-overflow-trigger{order:2}
+body .flat-toolbar-workspace .flat-toolbar-tool button:has(>svg.lucide-chevron-down){position:relative;padding-inline:3px 9px!important}
+body .flat-toolbar-workspace .flat-toolbar-tool button>svg.lucide-chevron-down{position:absolute;right:1px;top:50%;transform:translateY(-50%);width:8px!important;height:8px!important}
+body .flat-toolbar-workspace .flat-toolbar-tool :is(.workspace-split,.tablet-folder-command){display:inline-flex;position:relative;border:1px solid #344e5c;border-radius:4px;gap:0!important;background:#1b2f3b}
+body .flat-toolbar-workspace .flat-toolbar-tool :is(.workspace-split,.tablet-folder-command)>button{border:0!important}
+body .flat-toolbar-workspace .flat-toolbar-tool :is(.workspace-options,.tablet-import-options){width:13px!important;min-width:13px!important;flex:0 0 13px!important;padding:0!important}
+.workstation .statusbar{display:flex;align-items:center;gap:8px}
+.workstation .statusbar .status-job-progress{display:flex;position:static;align-items:center;gap:5px;margin:0;padding:0;min-width:0;font-size:10px}
+.status-job-progress progress{width:clamp(32px,7vw,100px)}
+.status-job-progress small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.workstation .series-rail .series-list{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#416473 #10202b}
+.workstation .series-rail .series-list::-webkit-scrollbar{display:block;width:6px}
+.workstation .series-rail .series-list::-webkit-scrollbar-thumb{background:#416473;border-radius:4px}
+.workstation .series-list .patient-group-heading{position:sticky;top:0;z-index:2;background:#142532}
+html:not([data-tablet-columns]) .workstation .series-rail .rail-heading{display:none}
+@media(max-width:800px){.workstation .statusbar:has(.status-job-progress){flex-wrap:wrap;height:auto}.status-job-progress small{display:none}}

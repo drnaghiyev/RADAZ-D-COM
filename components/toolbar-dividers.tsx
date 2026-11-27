@@ -3,6 +3,7 @@
 import {useEffect, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
 import {Columns2,ArrowUp,ArrowDown} from 'lucide-react';
+import {bindToolbarDrag} from '@/lib/toolbar-direct-drag';
 import {ToolbarGrip} from './toolbar-grip';
 import './toolbar-dividers.css';
 
@@ -84,6 +85,19 @@ export function ToolbarDividers({scope, container, selector = 'button, a[href], 
     return () => { doc.removeEventListener('pointerdown', dismiss, true); doc.removeEventListener('keydown', key, true); };
   }, [position]);
 
+  useEffect(()=>{
+    const button=trigger.current,root=(container?button?.closest<HTMLElement>(container):button?.parentElement);
+    if(!root||!button)return;
+    root.setAttribute('data-direct-strip','');
+    for(const t of tools)t.node.dataset.directItem=t.key;
+    const unbind=bindToolbarDrag(root,'[data-direct-item]','[data-direct-strip]',(item,_zone,target,after)=>{
+      const id=item.dataset.directItem!,other=target?.dataset.directItem;
+      const ids=[...new Set([...order.filter(k=>tools.some(t=>t.key===k)),...tools.map(t=>t.key)])].filter(k=>k!==id);
+      const i=other?ids.indexOf(other):-1;ids.splice(i<0?ids.length:i+Number(after),0,id);
+      setOrder(ids);try{button.ownerDocument.defaultView!.localStorage.setItem(storageKey+':order',JSON.stringify(ids));}catch{}
+    });
+    return ()=>{unbind();root.removeAttribute('data-direct-strip');for(const t of tools)delete t.node.dataset.directItem;};
+  },[tools,order,storageKey,container]);
   const title = 'Alət panelini fərdiləşdir';
   const ids=[...new Set([...draftOrder.filter(k=>tools.some(t=>t.key===k)),...tools.map(t=>t.key)])];
   const place=(id:string,before?:string)=>{
@@ -99,7 +113,7 @@ export function ToolbarDividers({scope, container, selector = 'button, a[href], 
       setPosition({left: Math.max(4, Math.min(rect.right - Math.min(340,view.innerWidth*.93), view.innerWidth - Math.min(340,view.innerWidth*.93) - 4)), top: Math.max(4, Math.min(rect.bottom + 4, view.innerHeight - Math.min(330,view.innerHeight * .6)))});
     }}><Columns2 size={16}/></button>
     {position && trigger.current && createPortal(<div ref={menu} role="dialog" aria-label="Alət panelinin düzülüşü" data-layout-zone="strip" className="toolbar-dividers-menu" style={position}>
-      <header><strong>Alət panelinin düzülüşü</strong><button type="button" onClick={()=>{
+      <header><strong>Alət panelinin düzülüşü</strong><button type="button" title="Standart düzülüş" onClick={()=>{setDraftOrder([]);setDraft(new Set());}}>Sıfırla</button><button type="button" onClick={()=>{
         setSelection(draft);setOrder(draftOrder);
         try {const storage=trigger.current!.ownerDocument.defaultView!.localStorage;
           storage.setItem(storageKey,JSON.stringify([...draft]));storage.setItem(storageKey+':order',JSON.stringify(draftOrder));}catch{}
