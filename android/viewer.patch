@@ -584,7 +584,7 @@
 +      const memory=tablet?tabletVolumeMemory():null;
 +      opening.preferCpu=false;
 +      try{const gpu=gpuCapabilities();limit=tablet?gpu.max3DTextureSize:Math.min(gpu.max3DTextureSize,1536);
-+        software=/swiftshader|software|llvmpipe|basic render/i.test(gpu.renderer);opening.preferCpu=software;budget=gpu.tier==='low'?64:gpu.tier==='high'?320:160;}catch{opening.preferCpu=tablet;}
++        software=/swiftshader|software|llvmpipe|basic render/i.test(gpu.renderer);opening.preferCpu=software || (!!memory && weakTablet(memory));budget=gpu.tier==='low'?64:gpu.tier==='high'?320:160;}catch{opening.preferCpu=tablet;}
 +      if(opening.preferCpu)limit=Number.MAX_SAFE_INTEGER;
        const showPreview=(data:Display)=>{
          if(!signal.aborted)setLoaded({data,geometry:geometryFor(data,source,anatomy),preview:true});
