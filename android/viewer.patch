@@ -582,10 +582,10 @@
 +      const dimensions=tablet?seriesGeometry(source.imageIds).dimensions:undefined;
 +      const short=!!dimensions && dimensions[2]<=128;
 +      const memory=tablet?tabletVolumeMemory():null;
-+      opening.preferCpu=!!memory && (short || weakTablet(memory));
-+      if(opening.preferCpu){limit=Number.MAX_SAFE_INTEGER;}
-+      else try{const gpu=gpuCapabilities();limit=tablet?gpu.max3DTextureSize:Math.min(gpu.max3DTextureSize,1536);
-+        software=gpu.tier==='low';budget=gpu.tier==='low'?64:gpu.tier==='high'?320:160;}catch{/* A bounded CPU volume is available without WebGL. */}
++      opening.preferCpu=false;
++      try{const gpu=gpuCapabilities();limit=tablet?gpu.max3DTextureSize:Math.min(gpu.max3DTextureSize,1536);
++        software=/swiftshader|software|llvmpipe|basic render/i.test(gpu.renderer);opening.preferCpu=software;budget=gpu.tier==='low'?64:gpu.tier==='high'?320:160;}catch{opening.preferCpu=tablet;}
++      if(opening.preferCpu)limit=Number.MAX_SAFE_INTEGER;
        const showPreview=(data:Display)=>{
          if(!signal.aborted)setLoaded({data,geometry:geometryFor(data,source,anatomy),preview:true});
        };
@@ -1109,6 +1109,15 @@
     const o=[start[0]+x*dx[0]+y*dy[0],start[1]+x*dx[1]+y*dy[1],start[2]+x*dx[2]+y*dy[2]];
     let near=-Infinity,far=Infinity;
     for(let a=0;a<3;a++){if(Math.abs(ray[a])<1e-10){if(o[a]<-.5||o[a]>=d[a]-.5)far=-Infinity;}else{const t0=(-.5-o[a])/ray[a],t1=(d[a]-.5-o[a])/ray[a];near=Math.max(near,Math.min(t0,t1));far=Math.min(far,Math.max(t0,t1));}}
+@@ -38,7 +47,7 @@
+      if(body){const row=2*(Z*ny+Y);if(X<body[row]||X>=body[row+1])continue;}
+      if(mask[i])continue;const label=s.segments?g.mask[i]:0;if(!s.context&&!label)continue;
+      let n=values[i];
+-     if(!moving){const x0=Math.floor(ix),y0=Math.floor(iy),z0=Math.floor(iz),a=ix-x0,b=iy-y0,c=iz-z0,at=z0*slice+y0*nx+x0;
++     {const x0=Math.floor(ix),y0=Math.floor(iy),z0=Math.floor(iz),a=ix-x0,b=iy-y0,c=iz-z0,at=z0*slice+y0*nx+x0;
+        const u=x0+1<nx?1:0,v=y0+1<ny?nx:0,w=z0+1<nz?slice:0;
+        const lerp=(base:number)=>(values[base]*(1-a)+values[base+u]*a)*(1-b)+(values[base+v]*(1-a)+values[base+v+u]*a)*b;
+        n=lerp(at)*(1-c)+lerp(at+w)*c;
 @@ -59,11 +68,15 @@
     if(Number.isFinite(best)){const j=4*clamp(Math.round((best-range[0])*slope),0,4095);red+=(1-alpha)*lut[j];green+=(1-alpha)*lut[j+1];blue+=(1-alpha)*lut[j+2];}
     const k=(y*W+x)*4;rgba[k]=red*255;rgba[k+1]=green*255;rgba[k+2]=blue*255;rgba[k+3]=255;
